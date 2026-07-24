@@ -241,10 +241,27 @@ async function meetingDetail(id) {
     btns.push(`<button class="btn-ghost btn-sm" id="btnAgenda">تعديل البنود</button>`);
     btns.push(`<button class="btn-ghost btn-sm" id="btnAtt">تعديل الحضور</button>`);
   }
+  if (p.can_sign) btns.push(`<button class="btn btn-sm" id="btnSign">✍ توقيع المحضر</button>`);
   if (p.can_submit) btns.push(`<button class="btn btn-sm" id="btnSubmit">إرسال للتوقيعات</button>`);
   if (p.can_approve) btns.push(`<button class="btn btn-sm" id="btnApprove">اعتماد وإقفال</button>`);
   if (p.can_archive) btns.push(`<button class="btn-ghost btn-sm" id="btnArchive">أرشفة</button>`);
+  if (p.can_print) btns.push(`<button class="btn-ghost btn-sm" id="btnPrint">🖨 طباعة / تصدير PDF</button>`);
   if (p.can_cancel) btns.push(`<button class="btn-danger btn-sm" id="btnCancel">إلغاء المحضر</button>`);
+
+  // لوحة التوقيعات في مرحلة الانتظار
+  let signPanel = '';
+  if (m.status === 'awaiting_signatures') {
+    const present = d.attendees.filter((a) => !a.is_guest && a.attendance_status === 'present');
+    const pending = present.filter((a) => !a.signed_at && !a.signature_override);
+    signPanel = `<div class="card mt"><div class="card-head"><h3>حالة التوقيعات</h3></div><div class="card-body">
+      ${pending.length ? `<div class="tag tag-gold" style="display:block;padding:8px">بانتظار توقيع: ${pending.map((a) => esc(a.user_name)).join('، ')}</div>` : '<div class="tag tag-green" style="display:block;padding:8px">اكتملت التوقيعات ✔</div>'}
+      <table class="tbl mt"><thead><tr><th>العضو</th><th>التوقيع</th><th>الوقت</th><th>الرمز</th>${p.can_override ? '<th></th>' : ''}</tr></thead><tbody>
+      ${present.map((a) => `<tr><td>${esc(a.user_name)}</td>
+        <td>${a.signed_at ? '<span class="tag tag-green">وقّع</span>' : (a.signature_override ? '<span class="tag tag-gold">تجاوز</span>' : '<span class="tag tag-gray">لم يوقّع</span>')}</td>
+        <td>${a.signed_at ? fmtDateTime(a.signed_at) : '—'}</td><td dir="ltr" style="text-align:right" class="muted">${esc(a.signature_hash || '')}</td>
+        ${p.can_override ? `<td>${!a.signed_at && !a.signature_override ? `<button class="btn-ghost btn-sm" data-override="${a.user_id}">تجاوز</button>` : ''}</td>` : ''}</tr>`).join('')}
+      </tbody></table></div></div>`;
+  }
 
   content().innerHTML = `
     <div class="card">
@@ -269,6 +286,8 @@ async function meetingDetail(id) {
       </div>
     </div>
 
+    ${signPanel}
+
     <div class="card mt"><div class="card-head"><h3>الحضور</h3></div>
       <table class="tbl"><thead><tr><th>الاسم</th><th>الصفة</th><th>الحالة</th><th>التوقيع</th></tr></thead><tbody>${attRows}</tbody></table></div>
 
@@ -281,8 +300,24 @@ async function meetingDetail(id) {
   const doStatus = async (action) => { try { await API.post(`/meetings/${id}/status`, { action }); toast('تم', 'ok'); reload(); } catch (err) { toast(err.message, 'err'); } };
   bind('btnStart', () => doStatus('start_draft'));
   bind('btnSubmit', () => confirmModal('إرسال للتوقيعات', 'سينتقل المحضر إلى حالة «بانتظار التوقيعات». متابعة؟', () => doStatus('submit')));
-  bind('btnApprove', () => confirmModal('اعتماد وإقفال', 'بعد الاعتماد يُقفل المحضر نهائياً ولا يقبل التعديل. متابعة؟', () => doStatus('approve')));
+  bind('btnApprove', () => confirmModal('اعتماد وإقفال', 'بعد الاعتماد يُقفل المحضر نهائياً ولا يقبل التعديل. متابعة؟', async () => {
+    try { await API.post(`/meetings/${id}/status`, { action: 'approve' }); toast('تم الاعتماد', 'ok'); reload(); }
+    catch (err) { if (err.data && err.data.pending) toast('بانتظار توقيع: ' + err.data.pending.join('، '), 'err'); else toast(err.message, 'err'); }
+  }));
   bind('btnArchive', () => doStatus('archive'));
+  bind('btnSign', () => confirmModal('توقيع المحضر', 'بالتوقيع تقرّ بمحتوى المحضر. سيُسجَّل وقت التوقيع ورمز تحقق فريد. متابعة؟', async () => {
+    try { await API.post(`/meetings/${id}/sign`); toast('تم التوقيع', 'ok'); reload(); } catch (err) { toast(err.message, 'err'); }
+  }));
+  bind('btnPrint', () => window.open(`/print/meeting/${id}?print=1`, '_blank'));
+  content().querySelectorAll('[data-override]').forEach((b) => b.onclick = () => {
+    const uid = b.dataset.override;
+    openModal({ title: 'تجاوز التوقيع', body: `<p class="muted">يُستخدم عند تعذّر توقيع العضو. يُسجَّل السبب في التدقيق.</p><div class="field"><label>سبب التجاوز</label><textarea id="ovr" rows="2"></textarea></div>`,
+      buttons: [
+        { label: 'تأكيد التجاوز', onClick: async (cl, ov) => { const reason = ov.querySelector('#ovr').value.trim(); if (!reason) return toast('السبب مطلوب', 'err');
+          try { await API.post(`/meetings/${id}/override/${uid}`, { reason }); cl(); toast('تم التجاوز', 'ok'); reload(); } catch (err) { toast(err.message, 'err'); } }},
+        { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
+      ]});
+  });
   bind('btnHeader', () => editHeader(id, m, d));
   bind('btnAgenda', () => editAgenda(id, d));
   bind('btnAtt', () => editAttendees(id, d));

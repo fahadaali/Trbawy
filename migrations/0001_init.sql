@@ -101,6 +101,7 @@ CREATE TABLE meetings (
   writer_id      INTEGER REFERENCES users(id), -- كاتب هذا المحضر (يتجاوز الافتراضي)
   approved_at    TEXT,
   approved_by    INTEGER REFERENCES users(id),
+  verify_code    TEXT,                         -- رمز تحقق فريد للمحضر (QR)
   cancel_reason  TEXT,
   parent_meeting_id INTEGER REFERENCES meetings(id), -- لمحاضر التصويب/الملحق
   created_at     TEXT    NOT NULL DEFAULT (datetime('now')),

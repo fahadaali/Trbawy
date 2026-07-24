@@ -8,6 +8,7 @@ import {
 } from '../permissions';
 import { getCouncil, nextMeetingNumber, formatDisplayNumber } from '../lib/meetings';
 import { hijriYear } from '../lib/hijri';
+import { shortCode } from '../lib/crypto';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -127,12 +128,16 @@ app.get('/:id', async (c) => {
   const followups = EDITABLE.includes(m.status) ? await openFollowups(c.env, m.council_id, id) : [];
 
   const u = c.get('user');
+  const myAtt = attendees.results.find((a: any) => a.user_id === u.id && !a.is_guest);
   const perms = {
     can_edit: canEditDraft(u, council, m.writer_id) && EDITABLE.includes(m.status),
     can_approve: canApproveMeeting(u, council) && m.status === 'awaiting_signatures',
     can_submit: canEditDraft(u, council, m.writer_id) && m.status === 'draft',
     can_cancel: canCancelMeeting(u) && m.status !== 'cancelled',
     can_archive: canApproveMeeting(u, council) && m.status === 'approved',
+    can_sign: m.status === 'awaiting_signatures' && !!myAtt && (myAtt as any).attendance_status === 'present' && !(myAtt as any).signed_at,
+    can_override: isPresident(u) && m.status === 'awaiting_signatures',
+    can_print: ['approved', 'archived', 'awaiting_signatures'].includes(m.status),
   };
 
   return c.json({
@@ -318,7 +323,15 @@ app.post('/:id/status', async (c) => {
     newStatus = 'awaiting_signatures';
   } else if (action === 'approve' && m.status === 'awaiting_signatures') {
     if (!canApproveMeeting(u, council!)) return c.json({ error: 'لا تملك صلاحية الاعتماد' }, 403);
-    // التحقق من اكتمال التوقيعات يُضاف في المرحلة ٤ (مع تجاوز الرئيس).
+    // لا يُعتمد المحضر إلا بعد اكتمال توقيعات الحاضرين (أو تجاوزها بتسجيل السبب).
+    const pending = await c.env.DB.prepare(
+      `SELECT COALESCE(u2.name, '') AS name FROM meeting_attendees a LEFT JOIN users u2 ON u2.id = a.user_id
+        WHERE a.meeting_id = ? AND a.is_guest = 0 AND a.attendance_status = 'present'
+          AND a.signed_at IS NULL AND a.signature_override = 0`,
+    ).bind(id).all<{ name: string }>();
+    if (pending.results.length) {
+      return c.json({ error: 'لا يمكن الاعتماد قبل اكتمال التوقيعات', pending: pending.results.map((r) => r.name) }, 409);
+    }
     newStatus = 'approved';
   } else if (action === 'archive' && m.status === 'approved') {
     if (!canApproveMeeting(u, council!)) return c.json({ error: 'لا تملك صلاحية' }, 403);
@@ -328,9 +341,10 @@ app.post('/:id/status', async (c) => {
   }
 
   if (newStatus === 'approved') {
+    const verifyCode = m.verify_code || shortCode(10);
     await c.env.DB.prepare(
-      "UPDATE meetings SET status = ?, approved_at = datetime('now'), approved_by = ?, updated_at = datetime('now') WHERE id = ?",
-    ).bind(newStatus, u.id, id).run();
+      "UPDATE meetings SET status = ?, approved_at = datetime('now'), approved_by = ?, verify_code = ?, updated_at = datetime('now') WHERE id = ?",
+    ).bind(newStatus, u.id, verifyCode, id).run();
     // تأشير المهام المنجزة التي ظهرت في جدول متابعة هذا المحضر كـ«مُبلَّغ عنها»
     // حتى تختفي من متابعة المحاضر اللاحقة (تظهر مرة واحدة كمنجزة).
     await c.env.DB.prepare(
@@ -360,6 +374,48 @@ app.post('/:id/cancel', async (c) => {
     "UPDATE meetings SET status = 'cancelled', cancel_reason = ?, updated_at = datetime('now') WHERE id = ?",
   ).bind(reason, id).run();
   await audit(c.env, { userId: c.get('user').id, action: 'cancel_meeting', entityType: 'meeting', entityId: id, oldValue: { status: m.status }, newValue: { reason } });
+  return c.json({ ok: true });
+});
+
+// ---- التوقيع الإلكتروني (الحاضرون فقط) ----
+app.post('/:id/sign', async (c) => {
+  const id = Number(c.req.param('id'));
+  const u = c.get('user');
+  const m = await c.env.DB.prepare('SELECT * FROM meetings WHERE id = ?').bind(id).first<any>();
+  if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
+  if (m.status !== 'awaiting_signatures')
+    return c.json({ error: 'المحضر ليس في مرحلة التوقيع' }, 409);
+
+  const att = await c.env.DB.prepare(
+    'SELECT * FROM meeting_attendees WHERE meeting_id = ? AND user_id = ? AND is_guest = 0',
+  ).bind(id, u.id).first<any>();
+  if (!att) return c.json({ error: 'لست ضمن حضور هذا المحضر' }, 403);
+  if (att.attendance_status !== 'present') return c.json({ error: 'التوقيع مطلوب من الحاضرين فقط' }, 403);
+  if (att.signed_at) return c.json({ error: 'لقد وقّعت مسبقاً' }, 409);
+
+  const code = shortCode(10); // رمز تحقق فريد
+  await c.env.DB.prepare(
+    "UPDATE meeting_attendees SET signed_at = datetime('now'), signature_hash = ? WHERE id = ?",
+  ).bind(code, att.id).run();
+  await audit(c.env, { userId: u.id, action: 'sign_meeting', entityType: 'meeting', entityId: id, newValue: { code } });
+  return c.json({ ok: true, code });
+});
+
+// ---- تجاوز التوقيع (الرئيس فقط، مع تسجيل السبب) ----
+app.post('/:id/override/:userId', async (c) => {
+  const id = Number(c.req.param('id'));
+  const userId = Number(c.req.param('userId'));
+  if (!isPresident(c.get('user'))) return c.json({ error: 'تجاوز التوقيع متاح للرئيس فقط' }, 403);
+  const { reason } = await c.req.json().catch(() => ({}));
+  if (!reason) return c.json({ error: 'سبب التجاوز مطلوب' }, 400);
+  const att = await c.env.DB.prepare(
+    'SELECT * FROM meeting_attendees WHERE meeting_id = ? AND user_id = ? AND is_guest = 0',
+  ).bind(id, userId).first<any>();
+  if (!att) return c.json({ error: 'العضو غير موجود في الحضور' }, 404);
+  await c.env.DB.prepare(
+    'UPDATE meeting_attendees SET signature_override = 1, override_reason = ? WHERE id = ?',
+  ).bind(reason, att.id).run();
+  await audit(c.env, { userId: c.get('user').id, action: 'override_signature', entityType: 'meeting', entityId: id, newValue: { user: userId, reason } });
   return c.json({ ok: true });
 });
 

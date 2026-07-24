@@ -128,6 +128,7 @@ const NAV = [
   { group: 'الإدارة', items: [
     { key: 'users', label: 'المستخدمون', ico: '👥', roles: ['president','system_admin'] },
     { key: 'councils', label: 'المجالس', ico: '🏛️', roles: ['president','vice_president','first_supervisor','team_member'] },
+    { key: 'branding', label: 'الهوية البصرية', ico: '🎨', roles: ['president','system_admin'] },
     { key: 'audit', label: 'سجل التدقيق', ico: '🛡️', roles: ['president','system_admin'] },
   ]},
 ];
@@ -162,6 +163,7 @@ function renderShell(view, rest) {
           <button class="menu-toggle" id="menuToggle">☰</button>
           <h2 id="pageTitle"></h2>
           <div class="spacer"></div>
+          <button class="btn-ghost btn-sm" id="profileBtn">توقيعي</button>
           <button class="btn-ghost btn-sm" id="pwBtn">تغيير كلمة المرور</button>
         </div>
         <div class="content" id="content"><div class="spinner"></div></div>
@@ -173,6 +175,7 @@ function renderShell(view, rest) {
     State.user = null; location.hash = ''; route();
   };
   document.getElementById('pwBtn').onclick = () => renderChangePassword(false);
+  document.getElementById('profileBtn').onclick = () => profileSignature();
   document.getElementById('menuToggle').onclick = () => document.getElementById('sidebar').classList.toggle('open');
 
   const handler = VIEWS[view] || VIEWS.dashboard;
@@ -424,9 +427,71 @@ VIEWS.audit = async () => {
     </div>`;
 };
 
-function renderError(err) {
-  if (err.status === 401) { State.user = null; return route(); }
-  content().innerHTML = `<div class="card"><div class="empty"><div class="ico">⚠️</div><p>${esc(err.message)}</p></div></div>`;
+// ---- توقيعي الشخصي ----
+function profileSignature() {
+  openModal({
+    title: 'صورة التوقيع الشخصي',
+    body: `<p class="muted">تُستخدم صورة التوقيع في النسخة المصدَّرة من المحاضر. إن لم تُرفع صورة، يُولَّد ختم افتراضي من اسمك.</p>
+      <div class="field mt"><label>اختر صورة التوقيع (PNG بخلفية شفافة يُفضَّل)</label><input type="file" id="sigFile" accept="image/*" /></div>`,
+    buttons: [
+      { label: 'رفع', onClick: async (cl, ov) => {
+        const f = ov.querySelector('#sigFile').files[0];
+        if (!f) return toast('اختر صورة', 'err');
+        try {
+          const res = await fetch('/api/settings/my-signature', { method: 'PUT', body: f, credentials: 'same-origin', headers: { 'content-type': f.type || 'image/png' } });
+          if (!res.ok) throw new Error('فشل الرفع');
+          cl(); toast('تم حفظ التوقيع', 'ok');
+        } catch (err) { toast(err.message, 'err'); }
+      }},
+      { label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() },
+    ],
+  });
 }
+
+// ---- الهوية البصرية ----
+VIEWS.branding = async () => {
+  setTitle('الهوية البصرية');
+  content().innerHTML = '<div class="spinner"></div>';
+  let s;
+  try { s = (await API.get('/settings')).settings; } catch (err) { return renderError(err); }
+  content().innerHTML = `
+    <div class="card"><div class="card-head"><h3>إعدادات الهوية البصرية</h3></div><div class="card-body">
+      <div id="brErr"></div>
+      <div class="row-2">
+        <div class="field"><label>اسم الجهة</label><input id="br_org" value="${esc(s.org_name || '')}" /></div>
+        <div class="field"><label>الخط</label><select id="br_font"><option ${s.font_family === 'Tajawal' ? 'selected' : ''}>Tajawal</option><option ${s.font_family === 'Cairo' ? 'selected' : ''}>Cairo</option></select></div>
+      </div>
+      <div class="field"><label>نص الترويسة</label><input id="br_header" value="${esc(s.header_text || '')}" /></div>
+      <div class="field"><label>نص التذييل</label><input id="br_footer" value="${esc(s.footer_text || '')}" /></div>
+      <div class="field"><label>اللون الأساسي</label><input type="color" id="br_color" value="${esc(s.primary_color || '#1f6f54')}" style="width:80px;height:40px;padding:2px" /></div>
+      <button class="btn" id="br_save">حفظ الإعدادات</button>
+
+      <h4 class="mt">الشعار والعلامة المائية</h4>
+      <div class="row-2">
+        <div class="field"><label>الشعار</label>${s.logo_key ? `<img src="/file?key=${encodeURIComponent(s.logo_key)}" style="max-height:50px;display:block;margin-bottom:6px" />` : ''}<input type="file" id="br_logo" accept="image/*" /></div>
+        <div class="field"><label>العلامة المائية</label>${s.watermark_key ? `<img src="/file?key=${encodeURIComponent(s.watermark_key)}" style="max-height:50px;display:block;margin-bottom:6px" />` : ''}<input type="file" id="br_wm" accept="image/*" /></div>
+      </div>
+    </div></div>`;
+
+  document.getElementById('br_save').onclick = async () => {
+    try {
+      await API.patch('/settings', {
+        org_name: document.getElementById('br_org').value,
+        header_text: document.getElementById('br_header').value,
+        footer_text: document.getElementById('br_footer').value,
+        primary_color: document.getElementById('br_color').value,
+        font_family: document.getElementById('br_font').value,
+      });
+      toast('تم الحفظ', 'ok');
+    } catch (err) { document.getElementById('brErr').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
+  };
+  const upAsset = async (kind, file) => {
+    const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+    const res = await fetch(`/api/settings/asset/${kind}?ext=${ext}`, { method: 'PUT', body: file, credentials: 'same-origin', headers: { 'content-type': file.type || 'image/png' } });
+    if (!res.ok) throw new Error('فشل الرفع');
+  };
+  document.getElementById('br_logo').onchange = async (e) => { if (e.target.files[0]) { try { await upAsset('logo', e.target.files[0]); toast('تم رفع الشعار', 'ok'); VIEWS.branding(); } catch (err) { toast(err.message, 'err'); } } };
+  document.getElementById('br_wm').onchange = async (e) => { if (e.target.files[0]) { try { await upAsset('watermark', e.target.files[0]); toast('تم رفع العلامة', 'ok'); VIEWS.branding(); } catch (err) { toast(err.message, 'err'); } } };
+};
 
 boot();

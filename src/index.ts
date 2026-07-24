@@ -8,7 +8,9 @@ import userRoutes from './routes/users';
 import councilRoutes from './routes/councils';
 import meetingRoutes from './routes/meetings';
 import actionRoutes from './routes/actions';
+import settingsRoutes from './routes/settings';
 import auditRoutes from './routes/audit';
+import pageRoutes from './routes/pages';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -27,6 +29,7 @@ app.route('/api/users', userRoutes);
 app.route('/api/councils', councilRoutes);
 app.route('/api/meetings', meetingRoutes);
 app.route('/api/actions', actionRoutes);
+app.route('/api/settings', settingsRoutes);
 app.route('/api/audit', auditRoutes);
 
 // معالج أخطاء موحّد
@@ -35,7 +38,10 @@ app.onError((err, c) => {
   return c.json({ error: 'حدث خطأ داخلي في الخادم' }, 500);
 });
 
-// ما عدا /api/* تُقدَّم الواجهة الأمامية عبر الأصول الثابتة (SPA fallback في wrangler.toml)
+// صفحات مُخدَّمة من الخادم: /verify، /print، /file
+app.route('/', pageRoutes);
+
+// ما عدا ذلك تُقدَّم الواجهة الأمامية عبر الأصول الثابتة (SPA fallback في wrangler.toml)
 app.all('*', async (c) => {
   return c.env.ASSETS.fetch(c.req.raw);
 });
