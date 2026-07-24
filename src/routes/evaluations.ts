@@ -186,17 +186,18 @@ app.post('/cycles/:id/status', async (c) => {
       "SELECT id FROM users WHERE is_active = 1 AND role IN ('president','vice_president','first_supervisor','team_member')",
     ).all<{ id: number }>();
     await notifyMany(c.env, evaluators.results.map((e) => e.id), {
-      type: 'cycle_open', title: 'فتح دورة تقييم', body: cycle.name, link: `#/evaluations/${id}`, email: true,
+      type: 'cycle_open', title: 'فتح دورة تقييم', body: cycle.name, link: `#/evaluations/${id}`,
     });
   }
-  // إشعار أصحاب الصلاحية عند نشر النتائج (داخل المنصة)
+  // إشعار أصحاب الصلاحية عند نشر النتائج
   if (ns === 'published') {
     const viewers = await c.env.DB.prepare(
       "SELECT id, role FROM users WHERE is_active = 1",
     ).all<{ id: number; role: string }>();
     const eligible = viewers.results.filter((v) => types.some((tt) => canViewResults({ role: v.role } as any, tt)));
-    await c.env.DB.batch(eligible.map((v) =>
-      c.env.DB.prepare(`INSERT INTO notifications (user_id, type, title, body, link) VALUES (?, 'results_published', 'نشر نتائج دورة تقييم', ?, ?)`).bind(v.id, cycle.name, `#/evaluations/${id}`)));
+    await notifyMany(c.env, eligible.map((v) => v.id), {
+      type: 'results_published', title: 'نشر نتائج دورة تقييم', body: cycle.name, link: `#/evaluations/${id}`,
+    });
   }
   await audit(c.env, { userId: c.get('user').id, action: 'cycle_' + action, entityType: 'eval_cycle', entityId: id, newValue: { status: ns } });
   return c.json({ ok: true, status: ns });

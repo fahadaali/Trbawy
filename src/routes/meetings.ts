@@ -243,7 +243,7 @@ app.post('/', async (c) => {
   const memberIds = members.results.map((mm) => mm.user_id).filter((uid) => uid !== u.id);
   await notifyMany(c.env, memberIds, {
     type: 'meeting_invitation', title: 'دعوة اجتماع', body: `${display}${b.title ? ' — ' + b.title : ''}`,
-    link: `#/meetings/${meetingId}`, email: true,
+    link: `#/meetings/${meetingId}`,
   });
 
   await audit(c.env, { userId: u.id, action: 'create_meeting', entityType: 'meeting', entityId: meetingId, newValue: { display, council: council.id } });
@@ -399,7 +399,7 @@ app.post('/:id/status', async (c) => {
     ).bind(id).all<{ user_id: number }>();
     await notifyMany(c.env, present.results.map((r) => r.user_id), {
       type: 'awaiting_signature', title: 'محضر بانتظار توقيعك', body: m.display_number,
-      link: `#/meetings/${id}`, email: true,
+      link: `#/meetings/${id}`,
     });
   } else if (newStatus === 'approved') {
     const memb = await c.env.DB.prepare('SELECT user_id FROM council_members WHERE council_id = ?').bind(m.council_id).all<{ user_id: number }>();

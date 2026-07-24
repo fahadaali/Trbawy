@@ -42,7 +42,7 @@ async function taskReminders(env: Env): Promise<void> {
     const assignees = await assigneesOf(env, t.id);
     for (const uid of assignees) {
       if (await alreadySentToday(env, uid, type, link)) continue;
-      await notify(env, { userId: uid, type, title, body: `${t.display_number} — ${t.text}`, link, email: true });
+      await notify(env, { userId: uid, type, title, body: `${t.display_number} — ${t.text}`, link });
     }
     // عند التأخر: إشعار رئيس المجلس أيضاً
     if (type === 'task_overdue') {
@@ -50,7 +50,7 @@ async function taskReminders(env: Env): Promise<void> {
         "SELECT user_id FROM council_members WHERE council_id = ? AND position = 'chair'",
       ).bind(t.council_id).first<{ user_id: number }>();
       if (chair && !(await alreadySentToday(env, chair.user_id, 'task_overdue_chair', link))) {
-        await notify(env, { userId: chair.user_id, type: 'task_overdue_chair', title: 'تنبيه: مهمة متأخرة في مجلسك', body: `${t.display_number} — ${t.text}`, link, email: true });
+        await notify(env, { userId: chair.user_id, type: 'task_overdue_chair', title: 'تنبيه: مهمة متأخرة في مجلسك', body: `${t.display_number} — ${t.text}`, link });
       }
     }
   }
@@ -73,7 +73,7 @@ async function cycleClosingReminders(env: Env): Promise<void> {
       if (await alreadySentToday(env, p.id, 'cycle_closing', link)) continue;
       await notify(env, {
         userId: p.id, type: 'cycle_closing', title: 'تذكير: إغلاق دورة التقييم بعد ٣ أيام',
-        body: `${cy.name} — أكملتَ ${p.submitted} من ${p.expected}`, link, email: true,
+        body: `${cy.name} — أكملتَ ${p.submitted} من ${p.expected}`, link,
       });
     }
   }

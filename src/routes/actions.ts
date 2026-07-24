@@ -64,7 +64,7 @@ app.post('/meeting/:meetingId', async (c) => {
     await notifyMany(c.env, assignees, {
       type: 'action_assigned',
       title: 'إسناد ' + (type === 'task' ? 'مهمة' : type === 'decision' ? 'قرار' : 'توصية'),
-      body: text, link: '#/tasks', email: true,
+      body: text, link: '#/tasks',
     });
   }
 
