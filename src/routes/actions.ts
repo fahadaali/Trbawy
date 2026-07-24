@@ -1,6 +1,6 @@
 // القرارات والتوصيات والمهام — كيان مستقل، لوحة مهامي، الإنجاز، المرفقات.
 import { Hono } from 'hono';
-import type { Env, Variables, User } from '../types';
+import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import { canViewCouncil, canEditDraft, isPresident } from '../permissions';

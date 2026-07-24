@@ -46,6 +46,67 @@ function openModal({ title, body, buttons }) {
   return { overlay, close };
 }
 
+// محرر نصوص غني عربي RTL (عناوين، قوائم، جداول، تظليل، صور).
+// يُرجع { el, getHtml } — يعتمد contenteditable وأوامر التحرير القياسية.
+function richEditor(initialHtml) {
+  const wrap = document.createElement('div');
+  wrap.className = 'rich';
+  wrap.innerHTML = `
+    <div class="rich-tb">
+      <button type="button" data-cmd="bold" title="عريض"><b>B</b></button>
+      <button type="button" data-cmd="italic" title="مائل"><i>I</i></button>
+      <button type="button" data-cmd="underline" title="تسطير"><u>U</u></button>
+      <span class="sep"></span>
+      <button type="button" data-block="h2" title="عنوان">ع١</button>
+      <button type="button" data-block="h3" title="عنوان فرعي">ع٢</button>
+      <button type="button" data-block="p" title="فقرة">¶</button>
+      <span class="sep"></span>
+      <button type="button" data-cmd="insertUnorderedList" title="قائمة نقطية">•</button>
+      <button type="button" data-cmd="insertOrderedList" title="قائمة رقمية">١.</button>
+      <span class="sep"></span>
+      <button type="button" data-hl title="تظليل">🖍</button>
+      <button type="button" data-table title="جدول">▦</button>
+      <button type="button" data-img title="صورة">🖼</button>
+      <button type="button" data-clear title="إزالة التنسيق">⨯</button>
+    </div>
+    <div class="rich-area body-rich" contenteditable="true" dir="rtl"></div>`;
+  const area = wrap.querySelector('.rich-area');
+  area.innerHTML = initialHtml || '';
+  try { document.execCommand('styleWithCSS', false, false); } catch {}
+
+  const exec = (cmd, val) => { area.focus(); document.execCommand(cmd, false, val); };
+  wrap.querySelectorAll('[data-cmd]').forEach((b) => b.onclick = () => exec(b.dataset.cmd));
+  wrap.querySelectorAll('[data-block]').forEach((b) => b.onclick = () => exec('formatBlock', b.dataset.block));
+  wrap.querySelector('[data-clear]').onclick = () => exec('removeFormat');
+  wrap.querySelector('[data-hl]').onclick = () => {
+    const sel = window.getSelection();
+    if (sel && sel.toString()) exec('insertHTML', '<mark>' + esc(sel.toString()) + '</mark>');
+  };
+  wrap.querySelector('[data-table]').onclick = () => {
+    const r = parseInt(prompt('عدد الصفوف؟', '2') || '0', 10);
+    const cc = parseInt(prompt('عدد الأعمدة؟', '2') || '0', 10);
+    if (r > 0 && cc > 0 && r <= 20 && cc <= 10) {
+      let t = '<table><tbody>';
+      for (let i = 0; i < r; i++) { t += '<tr>'; for (let j = 0; j < cc; j++) t += '<td>&nbsp;</td>'; t += '</tr>'; }
+      t += '</tbody></table><p><br></p>';
+      exec('insertHTML', t);
+    }
+  };
+  wrap.querySelector('[data-img]').onclick = () => {
+    const inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = 'image/*';
+    inp.onchange = () => {
+      const f = inp.files[0]; if (!f) return;
+      if (f.size > 1500000) { toast('حجم الصورة كبير (الحد ~١٫٥ م.ب)', 'err'); return; }
+      const rd = new FileReader();
+      rd.onload = () => exec('insertHTML', `<img src="${rd.result}" alt="صورة" />`);
+      rd.readAsDataURL(f);
+    };
+    inp.click();
+  };
+  return { el: wrap, getHtml: () => area.innerHTML.trim() };
+}
+
 function confirmModal(title, message, onConfirm, opts = {}) {
   openModal({
     title,
@@ -85,16 +146,7 @@ function statusTag(status, map, colorMap) {
   return `<span class="tag ${cls}">${esc((map && map[status]) || status)}</span>`;
 }
 
-// تنسيق تاريخ ميلادي + هجري من نص ISO
-function fmtDate(iso) {
-  if (!iso) return '—';
-  try {
-    const d = new Date(iso);
-    const g = new Intl.DateTimeFormat('ar', { day: 'numeric', month: 'long', year: 'numeric' }).format(d);
-    const h = new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura', { day: 'numeric', month: 'long', year: 'numeric' }).format(d);
-    return `${h}هـ — ${g}م`;
-  } catch { return iso; }
-}
+// تنسيق تاريخ ووقت من نص ISO
 function fmtDateTime(iso) {
   if (!iso) return '—';
   try {

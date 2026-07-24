@@ -8,6 +8,7 @@ import {
 } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
 import { evaluationTargets } from '../lib/evaltargets';
+import { csvCell, parseCsv } from '../lib/csv';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -69,10 +70,48 @@ app.get('/criteria/export', async (c) => {
   });
 });
 
-function csvCell(v: any): string {
-  const s = String(v ?? '');
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
+// استيراد المعايير من CSV (يستبدل قوالب الفئات الواردة في الملف)
+app.post('/criteria/import', async (c) => {
+  if (!canManageCriteria(c.get('user'))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  const commit = c.req.query('commit') === '1';
+  const { csv } = await c.req.json().catch(() => ({}));
+  if (!csv) return c.json({ error: 'لا توجد بيانات' }, 400);
+  const rows = parseCsv(csv);
+  if (rows.length < 2) return c.json({ error: 'الملف فارغ' }, 400);
+  const header = rows[0].map((h) => h.trim());
+  const ci = { tt: header.indexOf('target_type'), name: header.indexOf('name'), desc: header.indexOf('description'), weight: header.indexOf('weight') };
+  if (ci.tt < 0 || ci.name < 0 || ci.weight < 0) return c.json({ error: 'الأعمدة الإلزامية: target_type, name, weight' }, 400);
+
+  const report: any[] = [];
+  const valid: any[] = [];
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+    const tt = (r[ci.tt] || '').trim();
+    const name = (r[ci.name] || '').trim();
+    const weight = Number((r[ci.weight] || '').trim());
+    const errors: string[] = [];
+    if (!TARGET_TYPES.includes(tt)) errors.push('الفئة غير صالحة');
+    if (!name) errors.push('الاسم ناقص');
+    if (isNaN(weight) || weight < 0 || weight > 100) errors.push('الوزن غير صالح');
+    const rec = { target_type: tt, name, description: ci.desc >= 0 ? (r[ci.desc] || '').trim() : '', weight };
+    report.push({ row: i + 1, ...rec, errors });
+    if (!errors.length) valid.push(rec);
+  }
+
+  if (!commit) return c.json({ preview: true, valid: valid.length, invalid: report.filter((r) => r.errors.length).length, report });
+
+  // استبدال قوالب الفئات الواردة
+  const affected = [...new Set(valid.map((v) => v.target_type))];
+  for (const tt of affected) await c.env.DB.prepare('DELETE FROM eval_criteria WHERE cycle_id IS NULL AND target_type = ?').bind(tt).run();
+  let order: Record<string, number> = {};
+  if (valid.length) await c.env.DB.batch(valid.map((v) => {
+    const o = (order[v.target_type] = (order[v.target_type] ?? -1) + 1);
+    return c.env.DB.prepare('INSERT INTO eval_criteria (cycle_id, target_type, name, description, weight, sort_order, is_active) VALUES (NULL, ?, ?, ?, ?, ?, 1)')
+      .bind(v.target_type, v.name, v.description || null, v.weight, o);
+  }));
+  await audit(c.env, { userId: c.get('user').id, action: 'import_criteria', entityType: 'eval_criteria', newValue: { inserted: valid.length } });
+  return c.json({ committed: true, inserted: valid.length });
+});
 
 // ============ الدورات ============
 app.post('/cycles', async (c) => {

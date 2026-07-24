@@ -39,6 +39,7 @@ async function meetingList() {
       <div class="card-head">
         <h3>المحاضر</h3>
         <div class="spacer"></div>
+        <button class="btn-ghost btn-sm" id="bundleBtn">📦 تصدير حزمة</button>
         ${canCreate ? '<button class="btn btn-sm" id="newMeeting">+ دعوة/محضر جديد</button>' : ''}
       </div>
       <div class="card-body">
@@ -53,6 +54,24 @@ async function meetingList() {
     </div>`;
 
   if (canCreate) document.getElementById('newMeeting').onclick = () => nav('meetings/new');
+  document.getElementById('bundleBtn').onclick = () => {
+    openModal({
+      title: 'تصدير حزمة محاضر',
+      body: `<p class="muted">تُصدَّر المحاضر المعتمدة لمجلس في فترة محددة في ملف واحد.</p>
+        <div class="field"><label>المجلس</label><select id="bn_council">${councilOpts}</select></div>
+        <div class="row-2"><div class="field"><label>من تاريخ</label><input type="date" id="bn_from" /></div>
+          <div class="field"><label>إلى تاريخ</label><input type="date" id="bn_to" /></div></div>`,
+      buttons: [
+        { label: 'تصدير', onClick: (cl, ov) => {
+          const cid = ov.querySelector('#bn_council').value;
+          const from = ov.querySelector('#bn_from').value, to = ov.querySelector('#bn_to').value;
+          if (!cid || !from || !to) return toast('حدد المجلس والفترة', 'err');
+          window.open(`/print/bundle?council_id=${cid}&from=${from}&to=${to}&print=1`, '_blank'); cl();
+        }},
+        { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
+      ],
+    });
+  };
   const load = async () => {
     const p = new URLSearchParams();
     if (document.getElementById('fCouncil').value) p.set('council_id', document.getElementById('fCouncil').value);
@@ -215,7 +234,12 @@ async function meetingDetail(id) {
     <td>${a.signed_at ? '<span class="tag tag-green">وقّع</span>' : (a.is_guest || a.attendance_status !== 'present' ? '—' : '<span class="tag tag-gold">بانتظار التوقيع</span>')}</td>
   </tr>`).join('');
 
-  const agendaHtml = d.agenda.map((it, i) => `<li><b>${esc(it.title)}</b>${it.item_type === 'fixed' ? ' <span class="tag tag-gray">ثابت</span>' : ''}${it.body ? `<div class="muted" style="font-size:13px">${esc(it.body)}</div>` : ''}</li>`).join('');
+  const agendaHtml = d.agenda.map((it) => `<li><b>${esc(it.title)}</b>${it.item_type === 'fixed' ? ' <span class="tag tag-gray">ثابت</span>' : ''}${it.body ? `<div class="body-rich" style="font-size:14px">${it.body}</div>` : ''}</li>`).join('');
+
+  const linksHtml = (d.parent || (d.amendments && d.amendments.length)) ? `<div class="card mt"><div class="card-body">
+    ${d.parent ? `<div>محضر تصويب/ملحق للمحضر: <a href="#/meetings/${d.parent.id}"><b dir="ltr">${esc(d.parent.display_number)}</b></a></div>` : ''}
+    ${(d.amendments && d.amendments.length) ? `<div>محاضر التصويب/الملحق: ${d.amendments.map((a) => `<a href="#/meetings/${a.id}" dir="ltr">${esc(a.display_number)}</a>`).join('، ')}</div>` : ''}
+  </div></div>` : '';
 
   const followupHtml = d.followups && d.followups.length ? `
     <div class="card mt"><div class="card-head"><h3>جدول المتابعة (بنود سابقة مفتوحة)</h3></div>
@@ -246,6 +270,7 @@ async function meetingDetail(id) {
   if (p.can_approve) btns.push(`<button class="btn btn-sm" id="btnApprove">اعتماد وإقفال</button>`);
   if (p.can_archive) btns.push(`<button class="btn-ghost btn-sm" id="btnArchive">أرشفة</button>`);
   if (p.can_print) btns.push(`<button class="btn-ghost btn-sm" id="btnPrint">🖨 طباعة / تصدير PDF</button>`);
+  if (p.can_amend) btns.push(`<button class="btn-ghost btn-sm" id="btnAmend">📝 محضر تصويب/ملحق</button>`);
   if (p.can_cancel) btns.push(`<button class="btn-danger btn-sm" id="btnCancel">إلغاء المحضر</button>`);
 
   // لوحة التوقيعات في مرحلة الانتظار
@@ -286,6 +311,7 @@ async function meetingDetail(id) {
       </div>
     </div>
 
+    ${linksHtml}
     ${signPanel}
 
     <div class="card mt"><div class="card-head"><h3>الحضور</h3></div>
@@ -309,6 +335,9 @@ async function meetingDetail(id) {
     try { await API.post(`/meetings/${id}/sign`); toast('تم التوقيع', 'ok'); reload(); } catch (err) { toast(err.message, 'err'); }
   }));
   bind('btnPrint', () => window.open(`/print/meeting/${id}?print=1`, '_blank'));
+  bind('btnAmend', () => confirmModal('محضر تصويب/ملحق', 'سيُنشأ محضر جديد (مسودة) مرتبط بهذا المحضر لإجراء التصحيح. متابعة؟', async () => {
+    try { const r = await API.post(`/meetings/${id}/amend`); toast('تم إنشاء محضر التصويب', 'ok'); nav('meetings/' + r.id); } catch (err) { toast(err.message, 'err'); }
+  }));
   content().querySelectorAll('[data-override]').forEach((b) => b.onclick = () => {
     const uid = b.dataset.override;
     openModal({ title: 'تجاوز التوقيع', body: `<p class="muted">يُستخدم عند تعذّر توقيع العضو. يُسجَّل السبب في التدقيق.</p><div class="field"><label>سبب التجاوز</label><textarea id="ovr" rows="2"></textarea></div>`,
@@ -456,10 +485,12 @@ function editAgenda(id, d) {
       <div class="row" style="margin-bottom:8px">
         <input data-t="${i}" value="${esc(it.title)}" style="flex:1;padding:8px 11px;border:1px solid var(--border);border-radius:8px" />
         ${it.item_type === 'fixed' ? '<span class="tag tag-gray">ثابت</span>' : ''}
+        <button class="btn-ghost btn-sm" data-body="${i}">محتوى${it.body ? ' ✓' : ''}</button>
         <button class="btn-ghost btn-sm" data-d="${i}">حذف</button>
       </div>`).join('');
     ov.querySelectorAll('[data-t]').forEach((el) => el.oninput = () => items[el.dataset.t].title = el.value);
     ov.querySelectorAll('[data-d]').forEach((el) => el.onclick = () => { items.splice(el.dataset.d, 1); render(ov); });
+    ov.querySelectorAll('[data-body]').forEach((el) => el.onclick = () => editItemBody(items, +el.dataset.body, () => render(ov)));
   };
   const { overlay } = openModal({
     title: 'تعديل بنود جدول الأعمال',
@@ -473,6 +504,20 @@ function editAgenda(id, d) {
   });
   render(overlay);
   overlay.querySelector('#ea_add').onclick = () => { items.push({ title: '', body: null, item_type: 'new' }); render(overlay); };
+}
+
+// تحرير محتوى بند بالمحرر الغني
+function editItemBody(items, i, onDone) {
+  const ed = richEditor(items[i].body || '');
+  const { overlay, close } = openModal({
+    title: 'محتوى البند (محرر غني)',
+    body: '<div id="rich_mount"></div>',
+    buttons: [
+      { label: 'حفظ المحتوى', onClick: () => { items[i].body = ed.getHtml(); close(); if (onDone) onDone(); } },
+      { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
+    ],
+  });
+  overlay.querySelector('#rich_mount').appendChild(ed.el);
 }
 
 function editAttendees(id, d) {

@@ -33,7 +33,7 @@ export async function isMember(env: Env, userId: number, councilId: number): Pro
 // ---- الاطلاع على المحاضر ----
 // الرئيس والنائب: كل المجالس. المشرف الأول: التربوي (عضو فيه) + مجلس مرحلته.
 // عضو الفريق: مجلس مرحلته فقط.
-export async function canViewCouncil(env: Env, u: User, council: CouncilRow): Promise<boolean> {
+export async function canViewCouncil(_env: Env, u: User, council: CouncilRow): Promise<boolean> {
   if (isPresident(u) || isVice(u)) return true;
   if (isAdmin(u)) return false; // مدير النظام بلا صلاحية على المحتوى
   const stage = councilStage(council.type);

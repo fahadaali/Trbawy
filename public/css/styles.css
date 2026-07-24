@@ -196,3 +196,18 @@ table.tbl tr:hover td { background: #fafbfb; }
 }
 .menu-toggle { display: none; background: none; border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px; }
 @media (max-width: 860px) { .menu-toggle { display: block; } }
+
+/* ---------- المحرر الغني ---------- */
+.rich { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.rich-tb { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px; background: #fafbfb; border-bottom: 1px solid var(--border); }
+.rich-tb button { background: #fff; border: 1px solid var(--border); border-radius: 6px; min-width: 30px; height: 30px; font-size: 14px; }
+.rich-tb button:hover { background: var(--primary-light); }
+.rich-tb .sep { width: 1px; background: var(--border); margin: 2px 4px; }
+.rich-area { min-height: 160px; max-height: 380px; overflow-y: auto; padding: 12px 14px; line-height: 1.9; outline: none; }
+.rich-area:focus { box-shadow: inset 0 0 0 2px var(--primary-light); }
+.body-rich table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+.body-rich td, .body-rich th { border: 1px solid var(--border); padding: 5px 8px; }
+.body-rich mark { background: #fff3b0; padding: 0 2px; }
+.body-rich img { max-width: 100%; border-radius: 6px; }
+.body-rich h2 { font-size: 17px; margin: 8px 0; } .body-rich h3 { font-size: 15px; margin: 6px 0; }
+.body-rich ul, .body-rich ol { padding-inline-start: 22px; }

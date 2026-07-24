@@ -86,14 +86,43 @@ async function criteriaManager() {
   }).join('');
 
   content().innerHTML = `<div class="row"><button class="btn-ghost btn-sm" onclick="nav('evaluations')">رجوع للدورات</button>
-    <a class="btn-ghost btn-sm" href="/api/eval/criteria/export">تصدير CSV</a></div>` + sections;
+    <a class="btn-ghost btn-sm" href="/api/eval/criteria/export">تصدير CSV</a>
+    <button class="btn-ghost btn-sm" id="critImport">استيراد CSV</button></div>` + sections;
 
   const reload = criteriaManager;
+  document.getElementById('critImport').onclick = () => importCriteria(reload);
   content().querySelectorAll('[data-add]').forEach((b) => b.onclick = () => criterionForm(b.dataset.add, null, reload));
   content().querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => criterionForm(null, all.find((x) => x.id == b.dataset.edit), reload));
   content().querySelectorAll('[data-del]').forEach((b) => b.onclick = () => confirmModal('حذف المعيار', 'متابعة الحذف؟', async () => {
     try { await API.del('/eval/criteria/' + b.dataset.del); toast('تم', 'ok'); reload(); } catch (err) { toast(err.message, 'err'); }
   }, { danger: true }));
+}
+
+function importCriteria(onDone) {
+  const { overlay } = openModal({
+    title: 'استيراد المعايير (CSV)',
+    body: `<p class="muted">الأعمدة: <code dir="ltr">target_type,name,description,weight</code>. يستبدل معايير الفئات الواردة. صدّر أولًا للاطلاع على الصيغة.</p>
+      <input type="file" id="ci_file" accept=".csv,text/csv" />
+      <div id="ci_preview" class="mt"></div>`,
+    buttons: [
+      { label: 'حفظ', onClick: async (cl, ov) => {
+        if (!ov._csv) return toast('اختر ملفًا وعايِنه أولًا', 'err');
+        try { const r = await API.post('/eval/criteria/import?commit=1', { csv: ov._csv }); cl(); toast(`تم استيراد ${r.inserted} معيارًا`, 'ok'); onDone(); }
+        catch (err) { toast(err.message, 'err'); }
+      }},
+      { label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() },
+    ],
+  });
+  overlay.querySelector('#ci_file').onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const text = await f.text(); overlay._csv = text;
+    try {
+      const p = await API.post('/eval/criteria/import', { csv: text });
+      overlay.querySelector('#ci_preview').innerHTML = `<div class="row"><span class="tag tag-green">صحيح: ${arNum(p.valid)}</span><span class="tag tag-red">خطأ: ${arNum(p.invalid)}</span></div>
+        <table class="tbl mt"><thead><tr><th>الصف</th><th>الفئة</th><th>المعيار</th><th>الوزن</th><th>الأخطاء</th></tr></thead>
+        <tbody>${p.report.map((r) => `<tr style="${r.errors.length ? 'background:#fdecea' : ''}"><td>${arNum(r.row)}</td><td>${esc(TARGET_TYPE_AR[r.target_type] || r.target_type)}</td><td>${esc(r.name)}</td><td>${arNum(r.weight)}</td><td class="tag-red">${r.errors.map(esc).join('، ') || '✓'}</td></tr>`).join('')}</tbody></table>`;
+    } catch (err) { overlay.querySelector('#ci_preview').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; overlay._csv = null; }
+  };
 }
 
 function criterionForm(targetType, existing, onDone) {

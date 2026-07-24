@@ -5,6 +5,7 @@ import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import { canManageStudents, isPresident, isVice } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
+import { csvCell, parseCsv } from '../lib/csv';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -99,7 +100,7 @@ app.post('/:id/transfer', async (c) => {
 });
 
 // ---- قالب الاستيراد ----
-app.get('/template', async (c) => {
+app.get('/template', async () => {
   const csv = '﻿national_id,name,stage,grade,class,status,notes\n1010101010,اسم الطالب,secondary,أول ثانوي,أ,active,\n';
   return new Response(csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="students_template.csv"' } });
 });
@@ -116,32 +117,6 @@ app.get('/export', async (c) => {
   const body = rows.results.map((r) => [r.national_id, r.name, r.stage, r.grade, r.class, r.status, r.notes].map(csvCell).join(',')).join('\n');
   return new Response('﻿' + header + '\n' + body, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="students.csv"' } });
 });
-
-function csvCell(v: any): string {
-  const s = String(v ?? '');
-  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
-
-function parseCsv(text: string): string[][] {
-  const rows: string[][] = [];
-  let row: string[] = [], cell = '', inQ = false;
-  text = text.replace(/^﻿/, '');
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i];
-    if (inQ) {
-      if (ch === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else inQ = false; }
-      else cell += ch;
-    } else {
-      if (ch === '"') inQ = true;
-      else if (ch === ',') { row.push(cell); cell = ''; }
-      else if (ch === '\n') { row.push(cell); rows.push(row); row = []; cell = ''; }
-      else if (ch === '\r') { /* skip */ }
-      else cell += ch;
-    }
-  }
-  if (cell.length || row.length) { row.push(cell); rows.push(row); }
-  return rows.filter((r) => r.some((x) => x.trim()));
-}
 
 // ---- الاستيراد (معاينة أو تنفيذ) — تقرير أخطاء صفاً بصف ----
 app.post('/import', async (c) => {

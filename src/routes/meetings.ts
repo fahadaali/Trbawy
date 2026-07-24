@@ -10,6 +10,7 @@ import { getCouncil, nextMeetingNumber, formatDisplayNumber } from '../lib/meeti
 import { hijriYear } from '../lib/hijri';
 import { shortCode } from '../lib/crypto';
 import { notifyMany } from '../lib/notify';
+import { sanitizeHtml } from '../lib/sanitize';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -79,7 +80,16 @@ app.get('/', async (c) => {
   if (councilId) { where.push('m.council_id = ?'); binds.push(Number(councilId)); }
   if (status) { where.push('m.status = ?'); binds.push(status); }
   if (year) { where.push('m.hijri_year = ?'); binds.push(Number(year)); }
-  if (q) { where.push('(m.title LIKE ? OR m.display_number LIKE ?)'); binds.push('%' + q + '%', '%' + q + '%'); }
+  if (q) {
+    // بحث الأرشيف: العنوان، الرقم، نص البنود، أسماء الحضور، ونص القرارات/المهام المرتبطة.
+    const like = '%' + q + '%';
+    where.push(`(m.title LIKE ? OR m.display_number LIKE ?
+      OR EXISTS (SELECT 1 FROM agenda_items ai WHERE ai.meeting_id = m.id AND (ai.title LIKE ? OR ai.body LIKE ?))
+      OR EXISTS (SELECT 1 FROM action_items act WHERE act.source_meeting_id = m.id AND act.text LIKE ?)
+      OR EXISTS (SELECT 1 FROM meeting_attendees ma LEFT JOIN users mu ON mu.id = ma.user_id
+                  WHERE ma.meeting_id = m.id AND (mu.name LIKE ? OR ma.guest_name LIKE ?)))`);
+    binds.push(like, like, like, like, like, like, like);
+  }
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
 
   const rows = await c.env.DB.prepare(
@@ -139,11 +149,20 @@ app.get('/:id', async (c) => {
     can_sign: m.status === 'awaiting_signatures' && !!myAtt && (myAtt as any).attendance_status === 'present' && !(myAtt as any).signed_at,
     can_override: isPresident(u) && m.status === 'awaiting_signatures',
     can_print: ['approved', 'archived', 'awaiting_signatures'].includes(m.status),
+    can_amend: canCreateMeeting(u, council) && ['approved', 'archived'].includes(m.status),
   };
+
+  // روابط محاضر التصويب/الملحق
+  const parent = m.parent_meeting_id
+    ? await c.env.DB.prepare('SELECT id, display_number FROM meetings WHERE id = ?').bind(m.parent_meeting_id).first()
+    : null;
+  const amendments = (await c.env.DB.prepare(
+    'SELECT id, display_number, status FROM meetings WHERE parent_meeting_id = ? ORDER BY id',
+  ).bind(id).all()).results;
 
   return c.json({
     meeting: m, council, attendees: attendees.results, agenda: agenda.results,
-    actions: actions.results, followups, perms,
+    actions: actions.results, followups, perms, parent, amendments,
   });
 });
 
@@ -277,7 +296,7 @@ app.put('/:id/agenda', async (c) => {
     await c.env.DB.batch(items.map((it: any, i: number) =>
       c.env.DB.prepare(
         'INSERT INTO agenda_items (meeting_id, sort_order, title, body, item_type) VALUES (?, ?, ?, ?, ?)',
-      ).bind(id, i, it.title || '(بند)', it.body || null, ['fixed', 'followup', 'new'].includes(it.item_type) ? it.item_type : 'new'),
+      ).bind(id, i, it.title || '(بند)', it.body ? sanitizeHtml(it.body) : null, ['fixed', 'followup', 'new'].includes(it.item_type) ? it.item_type : 'new'),
     ));
   }
   await audit(c.env, { userId: c.get('user').id, action: 'update_agenda', entityType: 'meeting', entityId: id });
@@ -399,6 +418,39 @@ app.post('/:id/cancel', async (c) => {
   ).bind(reason, id).run();
   await audit(c.env, { userId: c.get('user').id, action: 'cancel_meeting', entityType: 'meeting', entityId: id, oldValue: { status: m.status }, newValue: { reason } });
   return c.json({ ok: true });
+});
+
+// ---- إنشاء محضر تصويب/ملحق مرتبط بالمحضر الأصلي ----
+app.post('/:id/amend', async (c) => {
+  const id = Number(c.req.param('id'));
+  const orig = await c.env.DB.prepare('SELECT * FROM meetings WHERE id = ?').bind(id).first<any>();
+  if (!orig) return c.json({ error: 'المحضر الأصلي غير موجود' }, 404);
+  if (!['approved', 'archived'].includes(orig.status))
+    return c.json({ error: 'التصويب يكون على محضر معتمد فقط' }, 409);
+  const council = await getCouncil(c.env, orig.council_id);
+  const u = c.get('user');
+  if (!canCreateMeeting(u, council!)) return c.json({ error: 'لا تملك صلاحية إنشاء محضر تصويب لهذا المجلس' }, 403);
+
+  const now = new Date();
+  const greg = now.toISOString().slice(0, 10);
+  const hy = hijriYear(now);
+  const number = await nextMeetingNumber(c.env, council!.id, hy);
+  const display = formatDisplayNumber(council!.number_prefix, hy, number);
+
+  const res = await c.env.DB.prepare(
+    `INSERT INTO meetings (council_id, number, hijri_year, display_number, hijri_date, greg_date,
+        location_type, title, status, created_by, writer_id, parent_meeting_id)
+     VALUES (?, ?, ?, ?, '', ?, 'in_person', ?, 'invitation', ?, ?, ?)`,
+  ).bind(council!.id, number, hy, display, greg, `محضر تصويب/ملحق للمحضر ${orig.display_number}`, u.id, orig.writer_id || council!.default_writer_id, id).run();
+  const newId = res.meta.last_row_id as number;
+
+  // نسخ أعضاء المجلس كحضور مبدئي
+  const members = await c.env.DB.prepare('SELECT user_id FROM council_members WHERE council_id = ?').bind(council!.id).all<{ user_id: number }>();
+  if (members.results.length) await c.env.DB.batch(members.results.map((m) =>
+    c.env.DB.prepare('INSERT INTO meeting_attendees (meeting_id, user_id, attendance_status) VALUES (?, ?, ?)').bind(newId, m.user_id, 'present')));
+
+  await audit(c.env, { userId: u.id, action: 'create_amendment', entityType: 'meeting', entityId: newId, newValue: { parent: id, display } });
+  return c.json({ id: newId, display_number: display }, 201);
 });
 
 // ---- التوقيع الإلكتروني (الحاضرون فقط) ----

@@ -1,6 +1,6 @@
 // لوحات القيادة: ملخص الصفحة الرئيسية، ولوحة تحليلات الطلاب.
 import { Hono } from 'hono';
-import type { Env, Variables, User } from '../types';
+import type { Env, Variables } from '../types';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import { canViewResults, isPresident, isVice } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
@@ -101,7 +101,6 @@ async function stageBoard(env: Env, cycleId: number, stage: string | null) {
   const scoresByEval: Record<number, any[]> = {};
   allScores.forEach((s: any) => { (scoresByEval[s.evaluation_id] ||= []).push(s); });
 
-  const studentIds = new Set(students.map((s: any) => s.id));
   const results: { id: number; name: string; grade: string; score: number | null }[] = [];
   // متوسط كل معيار على مستوى المرحلة
   const critSum: Record<number, { sum: number; n: number; name: string }> = {};

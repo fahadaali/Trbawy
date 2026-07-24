@@ -259,21 +259,9 @@ VIEWS.dashboard = async () => {
         <td>${statusTag(m.status, MEETING_STATUS_AR, { invitation: 'tag-gray', draft: 'tag-gold', awaiting_signatures: 'tag-gold', approved: 'tag-green', archived: 'tag-gray', cancelled: 'tag-red' })}</td></tr>`).join('')}</tbody></table></div>` : '';
 };
 
-// ---- عروض مؤجلة للمراحل التالية ----
-function phasePlaceholder(title, phase) {
-  return () => {
-    setTitle(title);
-    content().innerHTML = `<div class="card"><div class="empty">
-      <div class="ico">🚧</div>
-      <h3>${esc(title)}</h3>
-      <p class="muted">هذه الوحدة تُبنى في المرحلة ${arNum(phase)}.</p>
-    </div></div>`;
-  };
-}
-// VIEWS.meetings يُعرَّف في meetings.js (المرحلة ٢)
-// VIEWS.tasks يُعرَّف في tasks.js (المرحلة ٣)
-// VIEWS.evaluations يُعرَّف في evaluations.js (المرحلة ٥)
-// VIEWS.students يُعرَّف في students.js (المرحلة ٦)
+// العروض المتخصّصة تُعرَّف في وحداتها:
+// VIEWS.meetings → meetings.js | VIEWS.tasks → tasks.js
+// VIEWS.evaluations → evaluations.js | VIEWS.students → students.js
 
 // ---- المستخدمون ----
 VIEWS.users = async () => {

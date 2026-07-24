@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { canManageUsers, canAssignWriter, canViewCouncil, isPresident } from '../permissions';
+import { canManageUsers, canAssignWriter, canViewCouncil } from '../permissions';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
