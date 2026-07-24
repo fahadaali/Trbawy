@@ -7,6 +7,7 @@ import {
   canCreateEvalCycle, canManageCriteria, canEvaluate, canViewResults, isPresident, isVice,
 } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
+import { evaluationTargets } from '../lib/evaltargets';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -144,7 +145,16 @@ app.post('/cycles/:id/status', async (c) => {
       "SELECT id FROM users WHERE is_active = 1 AND role IN ('president','vice_president','first_supervisor','team_member')",
     ).all<{ id: number }>();
     await c.env.DB.batch(evaluators.results.map((e) =>
-      c.env.DB.prepare(`INSERT INTO notifications (user_id, type, title, body, link) VALUES (?, 'cycle_open', 'فتح دورة تقييم', ?, '#/evaluations')`).bind(e.id, cycle.name)));
+      c.env.DB.prepare(`INSERT INTO notifications (user_id, type, title, body, link) VALUES (?, 'cycle_open', 'فتح دورة تقييم', ?, ?)`).bind(e.id, cycle.name, `#/evaluations/${id}`)));
+  }
+  // إشعار أصحاب الصلاحية عند نشر النتائج (داخل المنصة)
+  if (ns === 'published') {
+    const viewers = await c.env.DB.prepare(
+      "SELECT id, role FROM users WHERE is_active = 1",
+    ).all<{ id: number; role: string }>();
+    const eligible = viewers.results.filter((v) => types.some((tt) => canViewResults({ role: v.role } as any, tt)));
+    await c.env.DB.batch(eligible.map((v) =>
+      c.env.DB.prepare(`INSERT INTO notifications (user_id, type, title, body, link) VALUES (?, 'results_published', 'نشر نتائج دورة تقييم', ?, ?)`).bind(v.id, cycle.name, `#/evaluations/${id}`)));
   }
   await audit(c.env, { userId: c.get('user').id, action: 'cycle_' + action, entityType: 'eval_cycle', entityId: id, newValue: { status: ns } });
   return c.json({ ok: true, status: ns });
@@ -160,30 +170,6 @@ async function cycleCriteria(env: Env, cycleId: number, targetType: string, cycl
 }
 
 // ============ الأهداف التي يقيّمها المستخدم ============
-async function evaluationTargets(env: Env, u: User, targetType: string): Promise<{ id: number; name: string }[]> {
-  if (targetType === 'students') {
-    if (!u.stage) return [];
-    const r = await env.DB.prepare(
-      "SELECT id, name FROM students WHERE stage = ? AND status = 'active' ORDER BY name",
-    ).bind(u.stage).all<any>();
-    return r.results;
-  }
-  if (targetType === 'team_members') {
-    if (!u.stage) return [];
-    const r = await env.DB.prepare(
-      "SELECT id, name FROM users WHERE role = 'team_member' AND stage = ? AND is_active = 1 ORDER BY name",
-    ).bind(u.stage).all<any>();
-    return r.results;
-  }
-  if (targetType === 'first_supervisors') {
-    const r = await env.DB.prepare(
-      "SELECT id, name FROM users WHERE role = 'first_supervisor' AND is_active = 1 ORDER BY name",
-    ).all<any>();
-    return r.results;
-  }
-  return [];
-}
-
 app.get('/cycles/:id/targets', async (c) => {
   const id = Number(c.req.param('id'));
   const tt = c.req.query('target_type') || '';

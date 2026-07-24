@@ -9,6 +9,7 @@ import {
 import { getCouncil, nextMeetingNumber, formatDisplayNumber } from '../lib/meetings';
 import { hijriYear } from '../lib/hijri';
 import { shortCode } from '../lib/crypto';
+import { notifyMany } from '../lib/notify';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -213,6 +214,13 @@ app.post('/', async (c) => {
     ).bind(meetingId, order++, a.title, a.body || null, 'new'));
   if (agStmts.length) await c.env.DB.batch(agStmts);
 
+  // إشعار أعضاء المجلس بالدعوة (بريد + داخل المنصة)
+  const memberIds = members.results.map((mm) => mm.user_id).filter((uid) => uid !== u.id);
+  await notifyMany(c.env, memberIds, {
+    type: 'meeting_invitation', title: 'دعوة اجتماع', body: `${display}${b.title ? ' — ' + b.title : ''}`,
+    link: `#/meetings/${meetingId}`, email: true,
+  });
+
   await audit(c.env, { userId: u.id, action: 'create_meeting', entityType: 'meeting', entityId: meetingId, newValue: { display, council: council.id } });
   return c.json({ id: meetingId, display_number: display }, 201);
 });
@@ -356,6 +364,22 @@ app.post('/:id/status', async (c) => {
     await c.env.DB.prepare("UPDATE meetings SET status = ?, updated_at = datetime('now') WHERE id = ?")
       .bind(newStatus, id).run();
   }
+  // إشعارات تحوّل الحالة
+  if (newStatus === 'awaiting_signatures') {
+    const present = await c.env.DB.prepare(
+      "SELECT user_id FROM meeting_attendees WHERE meeting_id = ? AND is_guest = 0 AND attendance_status = 'present' AND user_id IS NOT NULL",
+    ).bind(id).all<{ user_id: number }>();
+    await notifyMany(c.env, present.results.map((r) => r.user_id), {
+      type: 'awaiting_signature', title: 'محضر بانتظار توقيعك', body: m.display_number,
+      link: `#/meetings/${id}`, email: true,
+    });
+  } else if (newStatus === 'approved') {
+    const memb = await c.env.DB.prepare('SELECT user_id FROM council_members WHERE council_id = ?').bind(m.council_id).all<{ user_id: number }>();
+    await notifyMany(c.env, memb.results.map((r) => r.user_id), {
+      type: 'meeting_approved', title: 'اعتماد محضر', body: m.display_number, link: `#/meetings/${id}`,
+    });
+  }
+
   await audit(c.env, { userId: u.id, action: 'meeting_' + action, entityType: 'meeting', entityId: id, oldValue: { status: m.status }, newValue: { status: newStatus } });
   return c.json({ ok: true, status: newStatus });
 });

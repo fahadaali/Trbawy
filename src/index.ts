@@ -11,8 +11,11 @@ import actionRoutes from './routes/actions';
 import evalRoutes from './routes/evaluations';
 import studentRoutes from './routes/students';
 import settingsRoutes from './routes/settings';
+import notificationRoutes from './routes/notifications';
+import dashboardRoutes from './routes/dashboard';
 import auditRoutes from './routes/audit';
 import pageRoutes from './routes/pages';
+import { runDailyReminders } from './lib/reminders';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -34,6 +37,8 @@ app.route('/api/actions', actionRoutes);
 app.route('/api/eval', evalRoutes);
 app.route('/api/students', studentRoutes);
 app.route('/api/settings', settingsRoutes);
+app.route('/api/notifications', notificationRoutes);
+app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/audit', auditRoutes);
 
 // معالج أخطاء موحّد
@@ -53,9 +58,10 @@ app.all('*', async (c) => {
 export default {
   fetch: app.fetch,
 
-  // المهام المجدولة (التذكيرات اليومية) — تُفعَّل في مرحلة الإشعارات.
-  async scheduled(_event: ScheduledController, env: Env, _ctx: ExecutionContext) {
+  // المهام المجدولة (التذكيرات اليومية): تذكير المهام قبل ٣ أيام/يوم الاستحقاق/التأخر،
+  // وتذكير إغلاق دورات التقييم قبل ٣ أيام لمن لم يكمل.
+  async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     await ensureBootstrap(env);
-    // TODO (المرحلة ٧): إرسال تذكيرات المهام وإغلاق الدورات.
+    ctx.waitUntil(runDailyReminders(env));
   },
 };

@@ -173,6 +173,9 @@ async function cycleDetail(id) {
     if (viewable.length) html += `<div class="card"><div class="card-head"><h3>النتائج</h3></div><div class="card-body">
       <div class="row" id="resTabs">${viewable.map((t, i) => `<button class="btn ${i === 0 ? '' : 'btn-ghost'} btn-sm" data-res="${t}">${TARGET_TYPE_AR[t]}</button>`).join('')}</div>
       <div id="resBody" class="mt"></div></div></div>`;
+    if (d.target_types.includes('students') && canViewResultsClient('students')) {
+      html += `<div class="card mt"><div class="card-head"><h3>لوحة قيادة الطلاب</h3></div><div id="stDash" class="card-body"><div class="spinner"></div></div></div>`;
+    }
   }
   if (isPres) html += `<div class="card mt"><div class="card-head"><h3>تقدّم الإدخال لكل مقيِّم</h3></div><div id="progBody" class="card-body"><div class="spinner"></div></div></div>`;
   body.innerHTML = html || '<div class="card"><div class="empty"><div class="ico">⏳</div><p>لا يوجد إجراء متاح لك في هذه الحالة.</p></div></div>';
@@ -205,6 +208,7 @@ async function cycleDetail(id) {
       });
       loadRes(viewable[0]);
     }
+    if (d.target_types.includes('students') && canViewResultsClient('students')) renderStudentDashboard(id);
   }
   if (isPres) {
     try {
@@ -216,6 +220,49 @@ async function cycleDetail(id) {
       }).join('') : '<div class="muted">لا يوجد مقيّمون</div>';
     } catch (err) { document.getElementById('progBody').innerHTML = `<div class="muted">${esc(err.message)}</div>`; }
   }
+}
+
+async function renderStudentDashboard(cycleId) {
+  const box = document.getElementById('stDash');
+  if (!box) return;
+  const isPresVice = ['president', 'vice_president'].includes(State.user.role);
+  const stageSel = isPresVice ? `<select id="dashStage" style="padding:8px 11px;border:1px solid var(--border);border-radius:8px">
+      <option value="">كل المراحل</option><option value="secondary">الثانوية</option><option value="middle">المتوسطة</option></select>` : '';
+  box.innerHTML = `<div class="row" style="margin-bottom:12px">${stageSel}</div><div id="dashInner"><div class="spinner"></div></div>`;
+
+  const load = async () => {
+    const inner = document.getElementById('dashInner');
+    inner.innerHTML = '<div class="spinner"></div>';
+    const st = document.getElementById('dashStage');
+    const q = st && st.value ? `&stage=${st.value}` : '';
+    let d;
+    try { d = await API.get(`/dashboard/students?cycle_id=${cycleId}${q}`); } catch (err) { inner.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
+    const b = d.board;
+    const distMax = Math.max(1, ...Object.values(b.distribution));
+    const distBars = Object.entries(b.distribution).map(([band, n]) => `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><span style="width:60px">${arNum(band)}</span>
+        <div style="flex:1;background:#eef1f0;border-radius:6px;overflow:hidden"><div style="height:16px;width:${(n / distMax * 100)}%;background:var(--primary)"></div></div><span>${arNum(n)}</span></div>`).join('');
+    inner.innerHTML = `
+      <div class="grid grid-4">
+        <div class="stat"><div class="v">${arNum(b.total_students)}</div><div class="l">عدد الطلاب</div></div>
+        <div class="stat"><div class="v">${arNum(b.evaluated)}</div><div class="l">المقيَّمون</div></div>
+        <div class="stat"><div class="v">${arNum(b.completion)}٪</div><div class="l">اكتمال الإدخال</div></div>
+        <div class="stat"><div class="v">${arFixed(b.overall_avg)}</div><div class="l">المتوسط العام</div></div>
+      </div>
+      ${d.previous_avg != null ? `<p class="mt muted">مقارنة بالدورة السابقة: ${arFixed(d.previous_avg)} ${b.overall_avg > d.previous_avg ? '▲' : b.overall_avg < d.previous_avg ? '▼' : '='}</p>` : ''}
+      ${d.comparison ? `<p class="muted">الثانوي: ${arFixed(d.comparison.secondary)} — المتوسط: ${arFixed(d.comparison.middle)}</p>` : ''}
+      <div class="row-2 mt">
+        <div class="card"><div class="card-head"><h3>توزيع الدرجات</h3></div><div class="card-body">${distBars}</div></div>
+        <div class="card"><div class="card-head"><h3>أضعف المعايير</h3></div><div class="card-body">
+          ${b.weakest_criteria.map((w) => `<div class="row"><span style="flex:1">${esc(w.name)}</span><b>${arFixed(w.avg)}</b></div>`).join('') || '<span class="muted">—</span>'}</div></div>
+      </div>
+      <div class="row-2 mt">
+        <div class="card"><div class="card-head"><h3>أعلى ١٠</h3></div><table class="tbl"><tbody>${b.top.map((t) => `<tr><td>${esc(t.name)}</td><td><b>${arFixed(t.score)}</b></td></tr>`).join('') || '<tr><td class="muted">—</td></tr>'}</tbody></table></div>
+        <div class="card"><div class="card-head"><h3>أدنى ١٠</h3></div><table class="tbl"><tbody>${b.bottom.map((t) => `<tr><td>${esc(t.name)}</td><td><b>${arFixed(t.score)}</b></td></tr>`).join('') || '<tr><td class="muted">—</td></tr>'}</tbody></table></div>
+      </div>`;
+  };
+  if (isPresVice) document.getElementById('dashStage').onchange = load;
+  load();
 }
 
 function canViewResultsClient(tt) {

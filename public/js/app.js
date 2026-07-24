@@ -163,6 +163,10 @@ function renderShell(view, rest) {
           <button class="menu-toggle" id="menuToggle">☰</button>
           <h2 id="pageTitle"></h2>
           <div class="spacer"></div>
+          <div style="position:relative">
+            <button class="btn-ghost btn-sm" id="bellBtn" style="font-size:16px">🔔<span id="notifBadge" class="badge" style="display:none;position:absolute;top:-6px;inset-inline-start:-6px;background:var(--danger);color:#fff;border-radius:20px;padding:0 6px;font-size:11px"></span></button>
+            <div id="notifPanel" style="display:none;position:absolute;top:110%;inset-inline-start:0;width:320px;max-height:400px;overflow:auto;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);z-index:60"></div>
+          </div>
           <button class="btn-ghost btn-sm" id="profileBtn">توقيعي</button>
           <button class="btn-ghost btn-sm" id="pwBtn">تغيير كلمة المرور</button>
         </div>
@@ -177,9 +181,49 @@ function renderShell(view, rest) {
   document.getElementById('pwBtn').onclick = () => renderChangePassword(false);
   document.getElementById('profileBtn').onclick = () => profileSignature();
   document.getElementById('menuToggle').onclick = () => document.getElementById('sidebar').classList.toggle('open');
+  setupNotifications();
 
   const handler = VIEWS[view] || VIEWS.dashboard;
   handler(rest);
+}
+
+// ---- الإشعارات (الجرس) ----
+async function refreshNotifBadge() {
+  try {
+    const { unread } = await API.get('/notifications');
+    const b = document.getElementById('notifBadge');
+    if (!b) return;
+    if (unread > 0) { b.textContent = arNum(unread); b.style.display = 'inline-block'; }
+    else b.style.display = 'none';
+  } catch {}
+}
+
+function setupNotifications() {
+  const bell = document.getElementById('bellBtn');
+  const panel = document.getElementById('notifPanel');
+  if (!bell) return;
+  bell.onclick = async (e) => {
+    e.stopPropagation();
+    if (panel.style.display === 'block') { panel.style.display = 'none'; return; }
+    panel.style.display = 'block';
+    panel.innerHTML = '<div class="spinner" style="margin:20px auto"></div>';
+    try {
+      const { notifications } = await API.get('/notifications');
+      panel.innerHTML = `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;align-items:center">
+          <b style="flex:1">الإشعارات</b><button class="btn-ghost btn-sm" id="markAll">تعليم الكل كمقروء</button></div>
+        ${notifications.length ? notifications.map((n) => `
+          <a href="${esc(n.link || '#')}" data-nid="${n.id}" style="display:block;padding:10px 12px;border-bottom:1px solid #f0f2f1;${n.is_read ? '' : 'background:#f0f7f4'}">
+            <b style="font-size:13px">${esc(n.title)}</b>
+            <div class="muted" style="font-size:12px">${esc(n.body || '')}</div>
+            <div class="muted" style="font-size:11px">${fmtDateTime(n.created_at)}</div></a>`).join('')
+          : '<div class="empty" style="padding:24px">لا إشعارات</div>'}`;
+      panel.querySelector('#markAll').onclick = async (ev) => { ev.preventDefault(); ev.stopPropagation(); await API.post('/notifications/read-all'); panel.style.display = 'none'; refreshNotifBadge(); };
+      panel.querySelectorAll('[data-nid]').forEach((a) => a.onclick = async () => { try { await API.post(`/notifications/${a.dataset.nid}/read`); } catch {} refreshNotifBadge(); });
+    } catch (err) { panel.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+  };
+  document.addEventListener('click', () => { if (panel) panel.style.display = 'none'; });
+  panel.onclick = (e) => e.stopPropagation();
+  refreshNotifBadge();
 }
 
 function setTitle(t) { const el = document.getElementById('pageTitle'); if (el) el.textContent = t; }
@@ -197,15 +241,21 @@ VIEWS.dashboard = async () => {
       <h3 style="margin-bottom:6px">مرحباً، ${esc(u.name)} 👋</h3>
       <p class="muted">${esc(ROLE_AR[u.role] || u.role)}${u.stage ? ' — المرحلة ' + STAGE_AR[u.stage] : ''}</p>
     </div></div>
-    <div class="grid grid-4 mt">
-      <div class="stat"><div class="v">${arNum(0)}</div><div class="l">مهامي المفتوحة</div></div>
-      <div class="stat"><div class="v">${arNum(0)}</div><div class="l">محاضر بانتظار توقيعي</div></div>
-      <div class="stat"><div class="v">${arNum(0)}</div><div class="l">دورات تقييم مفتوحة</div></div>
-      <div class="stat"><div class="v">${arNum(0)}</div><div class="l">آخر المحاضر</div></div>
-    </div>
-    <div class="card mt"><div class="card-body muted center">
-      لوحات الملخص تُفعَّل تِباعاً مع اكتمال وحدات المحاضر والمهام والتقييم.
-    </div></div>`;
+    <div id="dashCards" class="grid grid-4 mt"><div class="spinner"></div></div>
+    <div id="dashRecent" class="mt"></div>`;
+  let s;
+  try { s = await API.get('/dashboard/summary'); } catch (err) { return; }
+  document.getElementById('dashCards').innerHTML = `
+    <div class="stat" style="cursor:pointer" onclick="nav('tasks')"><div class="v">${arNum(s.my_tasks)}</div><div class="l">مهامي المفتوحة</div></div>
+    <div class="stat" style="cursor:pointer" onclick="nav('meetings')"><div class="v">${arNum(s.awaiting_signature)}</div><div class="l">محاضر بانتظار توقيعي</div></div>
+    <div class="stat" style="cursor:pointer" onclick="nav('evaluations')"><div class="v">${arNum(s.open_cycles)}</div><div class="l">دورات تقييم مفتوحة</div></div>
+    <div class="stat"><div class="v">${arNum(s.recent_meetings.length)}</div><div class="l">آخر المحاضر</div></div>`;
+  document.getElementById('dashRecent').innerHTML = s.recent_meetings.length ? `
+    <div class="card"><div class="card-head"><h3>آخر المحاضر</h3></div>
+      <table class="tbl"><thead><tr><th>الرقم</th><th>العنوان</th><th>الحالة</th></tr></thead>
+      <tbody>${s.recent_meetings.map((m) => `<tr style="cursor:pointer" onclick="nav('meetings/${m.id}')">
+        <td dir="ltr" style="text-align:right"><b>${esc(m.display_number)}</b></td><td>${esc(m.title || '—')}</td>
+        <td>${statusTag(m.status, MEETING_STATUS_AR, { invitation: 'tag-gray', draft: 'tag-gold', awaiting_signatures: 'tag-gold', approved: 'tag-green', archived: 'tag-gray', cancelled: 'tag-red' })}</td></tr>`).join('')}</tbody></table></div>` : '';
 };
 
 // ---- عروض مؤجلة للمراحل التالية ----
