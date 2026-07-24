@@ -7,3 +7,6 @@ dist/
 .DS_Store
 coverage/
 .mf/
+
+# test cookie jars
+*.jar
