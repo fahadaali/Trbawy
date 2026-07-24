@@ -31,3 +31,20 @@ export function formatDisplayNumber(prefix: string, hijriYear: number, number: n
   const padded = String(number).padStart(3, '0');
   return `${prefix}/${toArabicDigits(hijriYear)}/${toArabicDigits(padded)}`;
 }
+
+// ترقيم القرارات/التوصيات/المهام — تسلسل مستقل لكل مجلس ونوع.
+const ACTION_LETTER: Record<string, string> = { decision: 'ق', recommendation: 'ت', task: 'م' };
+
+export async function nextActionNumber(env: Env, councilId: number, type: string): Promise<number> {
+  const row = await env.DB.prepare(
+    'SELECT COALESCE(MAX(number), 0) AS m FROM action_items WHERE council_id = ? AND type = ?',
+  )
+    .bind(councilId, type)
+    .first<{ m: number }>();
+  return (row?.m ?? 0) + 1;
+}
+
+export function formatActionNumber(prefix: string, type: string, number: number): string {
+  const padded = String(number).padStart(3, '0');
+  return `${ACTION_LETTER[type] || 'ب'}/${prefix}/${toArabicDigits(padded)}`;
+}

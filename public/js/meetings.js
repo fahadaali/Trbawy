@@ -219,14 +219,20 @@ async function meetingDetail(id) {
 
   const followupHtml = d.followups && d.followups.length ? `
     <div class="card mt"><div class="card-head"><h3>جدول المتابعة (بنود سابقة مفتوحة)</h3></div>
-      <table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>الحالة</th><th>الإنجاز</th></tr></thead>
+      <table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>الحالة</th><th>الإنجاز</th><th>تاريخ الإنجاز</th>${p.can_edit ? '<th></th>' : ''}</tr></thead>
       <tbody>${d.followups.map((f) => `<tr><td>${esc(ACTION_TYPE_AR[f.type] || f.type)}</td><td dir="ltr" style="text-align:right">${esc(f.display_number)}</td>
-        <td>${esc(f.text)}</td><td>${statusTag(f.status, ACTION_STATUS_AR)}</td><td>${arNum(f.progress)}٪</td></tr>`).join('')}</tbody></table></div>` : '';
+        <td>${esc(f.text)}</td><td>${statusTag(f.status, ACTION_STATUS_AR)}</td><td>${arNum(f.progress)}٪</td>
+        <td>${f.completed_at ? fmtDateTime(f.completed_at) : '—'}</td>
+        ${p.can_edit ? `<td>${f.status === 'done' ? `<button class="btn-ghost btn-sm" data-fixdate="${f.id}">تعديل التاريخ</button>` : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>` : '';
 
-  const actionsHtml = d.actions && d.actions.length ? `
-    <div class="card mt"><div class="card-head"><h3>القرارات والتوصيات والمهام</h3></div>
-      <table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>الحالة</th></tr></thead>
-      <tbody>${d.actions.map((a) => `<tr><td>${esc(ACTION_TYPE_AR[a.type] || a.type)}</td><td dir="ltr" style="text-align:right">${esc(a.display_number)}</td><td>${esc(a.text)}</td><td>${statusTag(a.status, ACTION_STATUS_AR)}</td></tr>`).join('')}</tbody></table></div>` : '';
+  const actionsHtml = (d.actions && d.actions.length) || p.can_edit ? `
+    <div class="card mt"><div class="card-head"><h3>القرارات والتوصيات والمهام</h3><div class="spacer"></div>
+      ${p.can_edit ? '<button class="btn btn-sm" id="btnAddAction">+ إضافة بند</button>' : ''}</div>
+      ${(d.actions && d.actions.length) ? `<table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الاستحقاق</th><th>الحالة</th><th></th></tr></thead>
+      <tbody>${d.actions.map((a) => `<tr><td>${esc(ACTION_TYPE_AR[a.type] || a.type)}</td><td dir="ltr" style="text-align:right">${esc(a.display_number)}</td><td>${esc(a.text)}</td>
+        <td class="muted">—</td><td>${a.due_date ? esc(a.due_date) : '—'}</td><td>${statusTag(a.status, ACTION_STATUS_AR)}</td>
+        <td><button class="btn-ghost btn-sm" data-openaction="${a.id}">عرض</button>${p.can_edit ? `<button class="btn-ghost btn-sm" data-editaction="${a.id}">تعديل</button>` : ''}</td></tr>`).join('')}</tbody></table>`
+      : '<div class="card-body muted">لا توجد بنود بعد.</div>'}</div>` : '';
 
   const btns = [];
   if (m.status === 'invitation' && p.can_edit) btns.push(`<button class="btn btn-sm" id="btnStart">بدء تحرير المسودة</button>`);
@@ -290,6 +296,79 @@ async function meetingDetail(id) {
         }},
         { label: 'تراجع', class: 'btn-ghost', onClick: (cl) => cl() },
       ]});
+  });
+
+  // إدارة القرارات/المهام
+  const members = d.attendees.filter((a) => !a.is_guest);
+  bind('btnAddAction', () => actionForm(id, members, null));
+  content().querySelectorAll('[data-editaction]').forEach((b) =>
+    b.onclick = () => actionForm(id, members, d.actions.find((x) => x.id == b.dataset.editaction)));
+  content().querySelectorAll('[data-openaction]').forEach((b) =>
+    b.onclick = () => (typeof taskDetail === 'function' ? taskDetail(b.dataset.openaction, reload) : nav('tasks')));
+  content().querySelectorAll('[data-fixdate]').forEach((b) =>
+    b.onclick = () => adjustCompletionDate(b.dataset.fixdate, reload));
+}
+
+// نموذج إنشاء/تعديل قرار/توصية/مهمة داخل محضر
+function actionForm(meetingId, members, existing) {
+  const isEdit = !!existing;
+  openModal({
+    title: isEdit ? 'تعديل بند' : 'قرار / توصية / مهمة جديدة',
+    body: `
+      <div id="afErr"></div>
+      <div class="field"><label>النوع</label><select id="af_type" ${isEdit ? 'disabled' : ''}>
+        <option value="decision" ${existing && existing.type === 'decision' ? 'selected' : ''}>قرار</option>
+        <option value="recommendation" ${existing && existing.type === 'recommendation' ? 'selected' : ''}>توصية</option>
+        <option value="task" ${!existing || existing.type === 'task' ? 'selected' : ''}>مهمة</option>
+      </select></div>
+      <div class="field"><label>النص</label><textarea id="af_text" rows="3">${existing ? esc(existing.text) : ''}</textarea></div>
+      <div class="row-2">
+        <div class="field"><label>الأولوية</label><select id="af_priority">
+          ${['high', 'medium', 'low'].map((p) => `<option value="${p}" ${existing && existing.priority === p ? 'selected' : ''}>${PRIORITY_AR[p]}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>تاريخ الاستحقاق <span class="muted" id="af_dueHint"></span></label><input type="date" id="af_due" value="${existing && existing.due_date ? esc(existing.due_date) : ''}" /></div>
+      </div>
+      <div class="field"><label>المسؤولون</label>
+        <div id="af_assignees" style="max-height:150px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px">
+          ${members.map((m) => `<label style="display:block;padding:3px"><input type="checkbox" value="${m.user_id}" /> ${esc(m.user_name)}</label>`).join('')}
+        </div></div>`,
+    buttons: [
+      { label: 'حفظ', onClick: async (cl, ov) => {
+        const type = ov.querySelector('#af_type').value;
+        const assignees = Array.from(ov.querySelectorAll('#af_assignees input:checked')).map((i) => Number(i.value));
+        const payload = {
+          type, text: ov.querySelector('#af_text').value.trim(),
+          priority: ov.querySelector('#af_priority').value,
+          due_date: ov.querySelector('#af_due').value || null,
+          assignees,
+        };
+        try {
+          if (isEdit) await API.patch('/actions/' + existing.id, payload);
+          else await API.post('/actions/meeting/' + meetingId, payload);
+          cl(); toast('تم الحفظ', 'ok'); meetingDetail(meetingId);
+        } catch (err) { ov.querySelector('#afErr').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
+      }},
+      { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
+    ],
+  });
+  // إبراز أن الاستحقاق إلزامي للمهمة
+  const upd = () => { document.getElementById('af_dueHint').textContent = document.getElementById('af_type').value === 'task' ? '(إلزامي)' : '(اختياري)'; };
+  document.getElementById('af_type').onchange = upd; upd();
+}
+
+function adjustCompletionDate(actionId, onDone) {
+  openModal({
+    title: 'تعديل تاريخ الإنجاز',
+    body: `<p class="muted">يبقى التاريخ الأصلي محفوظاً في سجل التدقيق.</p>
+      <div class="field"><label>تاريخ الإنجاز الفعلي</label><input type="date" id="cd_date" /></div>`,
+    buttons: [
+      { label: 'حفظ', onClick: async (cl, ov) => {
+        const v = ov.querySelector('#cd_date').value;
+        if (!v) return toast('التاريخ مطلوب', 'err');
+        try { await API.patch(`/actions/${actionId}/completion-date`, { completed_at: v }); cl(); toast('تم', 'ok'); if (onDone) onDone(); } catch (err) { toast(err.message, 'err'); }
+      }},
+      { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
+    ],
   });
 }
 

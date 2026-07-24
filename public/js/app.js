@@ -217,7 +217,7 @@ function phasePlaceholder(title, phase) {
   };
 }
 // VIEWS.meetings يُعرَّف في meetings.js (المرحلة ٢)
-VIEWS.tasks = phasePlaceholder('المهام', 3);
+// VIEWS.tasks يُعرَّف في tasks.js (المرحلة ٣)
 VIEWS.evaluations = phasePlaceholder('التقييم التربوي', 5);
 VIEWS.students = phasePlaceholder('سجل الطلاب', 6);
 

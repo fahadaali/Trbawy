@@ -46,14 +46,19 @@ app.get('/meta/new', async (c) => {
   });
 });
 
-// القرارات/المهام المفتوحة من محاضر سابقة (بنود المتابعة)
+// القرارات/المهام المفتوحة من محاضر سابقة (بنود المتابعة).
+// تظهر: كل ما لم يُنجَز بعد + ما أُنجِز ولم يُبلَّغ عنه في محضر معتمد سابق (يظهر مرة واحدة).
 async function openFollowups(env: Env, councilId: number, excludeMeetingId: number | null) {
   const rows = await env.DB.prepare(
     `SELECT a.id, a.type, a.display_number, a.text, a.status, a.priority, a.due_date,
             a.progress, a.completed_at, a.source_meeting_id
        FROM action_items a
-      WHERE a.council_id = ? AND a.status NOT IN ('cancelled')
+      WHERE a.council_id = ?
         AND (a.source_meeting_id != ? OR ? IS NULL)
+        AND (
+          a.status IN ('not_started','in_progress','stalled')
+          OR (a.status = 'done' AND a.reported_done_meeting_id IS NULL)
+        )
       ORDER BY a.status, a.id`,
   ).bind(councilId, excludeMeetingId ?? -1, excludeMeetingId).all();
   return rows.results;
@@ -326,6 +331,13 @@ app.post('/:id/status', async (c) => {
     await c.env.DB.prepare(
       "UPDATE meetings SET status = ?, approved_at = datetime('now'), approved_by = ?, updated_at = datetime('now') WHERE id = ?",
     ).bind(newStatus, u.id, id).run();
+    // تأشير المهام المنجزة التي ظهرت في جدول متابعة هذا المحضر كـ«مُبلَّغ عنها»
+    // حتى تختفي من متابعة المحاضر اللاحقة (تظهر مرة واحدة كمنجزة).
+    await c.env.DB.prepare(
+      `UPDATE action_items SET reported_done_meeting_id = ?
+        WHERE council_id = ? AND status = 'done'
+          AND reported_done_meeting_id IS NULL AND source_meeting_id != ?`,
+    ).bind(id, m.council_id, id).run();
   } else {
     await c.env.DB.prepare("UPDATE meetings SET status = ?, updated_at = datetime('now') WHERE id = ?")
       .bind(newStatus, id).run();

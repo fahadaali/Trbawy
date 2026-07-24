@@ -161,6 +161,8 @@ CREATE TABLE action_items (
   completed_by      INTEGER REFERENCES users(id),
   completion_note   TEXT,
   original_completed_at TEXT,                  -- التاريخ الأصلي قبل أي تعديل يدوي
+  -- المحضر الذي ظهرت فيه المهمة كمنجزة (لتختفي من جدول المتابعة بعده)
+  reported_done_meeting_id INTEGER REFERENCES meetings(id),
   created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
 );
