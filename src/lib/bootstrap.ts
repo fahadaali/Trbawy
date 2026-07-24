@@ -2,13 +2,20 @@
 // البنود الثابتة الافتراضية، وقوالب المعايير. آمنة للتكرار (idempotent).
 import type { Env } from '../types';
 import { hashPassword } from './crypto';
+import { SCHEMA_STATEMENTS } from './schema';
 
 let checkedThisIsolate = false;
 
 export const DEFAULT_PASSWORD = '1234';
 
+// إنشاء الجداول والفهارس ذاتيًا (CREATE ... IF NOT EXISTS) — تُغني عن تطبيق المخطط يدويًا.
+async function ensureSchema(env: Env): Promise<void> {
+  await env.DB.batch(SCHEMA_STATEMENTS.map((s) => env.DB.prepare(s)));
+}
+
 export async function ensureBootstrap(env: Env): Promise<void> {
   if (checkedThisIsolate) return;
+  await ensureSchema(env);
   const row = await env.DB.prepare('SELECT COUNT(*) AS c FROM councils').first<{ c: number }>();
   if ((row?.c ?? 0) > 0) {
     checkedThisIsolate = true;
