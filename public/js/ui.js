@@ -11,6 +11,8 @@ function esc(s) {
 // أرقام عربية-هندية
 const AR_DIGITS = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
 function arNum(x) { return String(x).replace(/[0-9]/g, (d) => AR_DIGITS[+d]); }
+// رقم عشري بالعربية بفاصلة عربية (مثل ٤٫٢)
+function arFixed(n, d = 1) { return n == null ? '—' : arNum(Number(n).toFixed(d)).replace('.', '٫'); }
 
 // تنبيه عائم
 let toastTimer = null;
@@ -131,6 +133,10 @@ const COUNCIL_TYPE_AR = { educational: 'المجلس التربوي', secondary:
 const MEETING_STATUS_AR = {
   invitation: 'دعوة', draft: 'مسودة', awaiting_signatures: 'بانتظار التوقيعات',
   approved: 'معتمد ومقفل', archived: 'مؤرشف', cancelled: 'ملغى',
+};
+const MEETING_STATUS_COLOR = {
+  invitation: 'tag-gray', draft: 'tag-gold', awaiting_signatures: 'tag-gold',
+  approved: 'tag-green', archived: 'tag-gray', cancelled: 'tag-red',
 };
 const ACTION_TYPE_AR = { decision: 'قرار', recommendation: 'توصية', task: 'مهمة' };
 const ACTION_STATUS_AR = {

@@ -20,16 +20,6 @@ export function councilStage(type: CouncilType): 'secondary' | 'middle' | null {
   return null;
 }
 
-// هل المستخدم عضو في المجلس؟
-export async function isMember(env: Env, userId: number, councilId: number): Promise<boolean> {
-  const r = await env.DB.prepare(
-    'SELECT 1 FROM council_members WHERE council_id = ? AND user_id = ?',
-  )
-    .bind(councilId, userId)
-    .first();
-  return !!r;
-}
-
 // ---- الاطلاع على المحاضر ----
 // الرئيس والنائب: كل المجالس. المشرف الأول: التربوي (عضو فيه) + مجلس مرحلته.
 // عضو الفريق: مجلس مرحلته فقط.
@@ -79,9 +69,8 @@ export function canEditDraft(
   if (isPresident(u)) return true;
   if (isFirstSupervisor(u) && council.type !== 'educational' && u.stage === councilStage(council.type))
     return true;
-  if (meetingWriterId != null && meetingWriterId === u.id) return true; // كاتب معيّن
-  // الكاتب الافتراضي للمجلس
-  if (council.default_writer_id != null && council.default_writer_id === u.id) return true;
+  // كاتب المحضر الفعّال (writer_id يُثبَّت عند الإنشاء بالكاتب المخصّص أو الافتراضي)
+  if (meetingWriterId != null && meetingWriterId === u.id) return true;
   return false;
 }
 

@@ -230,6 +230,12 @@ function setupNotifications() {
 function setTitle(t) { const el = document.getElementById('pageTitle'); if (el) el.textContent = t; }
 function content() { return document.getElementById('content'); }
 
+// عرض خطأ في منطقة المحتوى (تُستخدم من كل العروض عند فشل الجلب)
+function renderError(err) {
+  if (err && err.status === 401) { State.user = null; return route(); }
+  content().innerHTML = `<div class="card"><div class="empty"><div class="ico">⚠️</div><p>${esc(err && err.message ? err.message : 'حدث خطأ')}</p></div></div>`;
+}
+
 // ============ العروض ============
 const VIEWS = {};
 
@@ -256,7 +262,7 @@ VIEWS.dashboard = async () => {
       <table class="tbl"><thead><tr><th>الرقم</th><th>العنوان</th><th>الحالة</th></tr></thead>
       <tbody>${s.recent_meetings.map((m) => `<tr style="cursor:pointer" onclick="nav('meetings/${m.id}')">
         <td dir="ltr" style="text-align:right"><b>${esc(m.display_number)}</b></td><td>${esc(m.title || '—')}</td>
-        <td>${statusTag(m.status, MEETING_STATUS_AR, { invitation: 'tag-gray', draft: 'tag-gold', awaiting_signatures: 'tag-gold', approved: 'tag-green', archived: 'tag-gray', cancelled: 'tag-red' })}</td></tr>`).join('')}</tbody></table></div>` : '';
+        <td>${statusTag(m.status, MEETING_STATUS_AR, MEETING_STATUS_COLOR)}</td></tr>`).join('')}</tbody></table></div>` : '';
 };
 
 // العروض المتخصّصة تُعرَّف في وحداتها:
@@ -388,10 +394,25 @@ async function councilDetail(id) {
   const canAssign = ['president'].includes(State.user.role) ||
     (State.user.role === 'first_supervisor' && d.council.type !== 'educational');
 
+  const canManageMembers = ['president', 'system_admin'].includes(State.user.role);
+  let allUsers = [];
+  if (canManageMembers) { try { allUsers = (await API.get('/users')).users; } catch {} }
+  const memberIds = new Set(d.members.map((m) => m.user_id));
+  const addableUsers = allUsers.filter((u) => u.is_active && !memberIds.has(u.id));
+
   const memberRows = d.members.map((m) => `
     <tr><td><b>${esc(m.name)}</b></td><td>${esc(ROLE_AR[m.role] || m.role)}</td>
     <td>${m.position === 'chair' ? '<span class="tag tag-gold">رئيس المجلس</span>' : 'عضو'}
-        ${d.council.default_writer_id === m.user_id ? '<span class="tag tag-green">كاتب افتراضي</span>' : ''}</td></tr>`).join('');
+        ${d.council.default_writer_id === m.user_id ? '<span class="tag tag-green">كاتب افتراضي</span>' : ''}</td>
+    <td>${canManageMembers ? `<button class="btn-ghost btn-sm" data-delmem="${m.user_id}">إزالة</button>` : ''}</td></tr>`).join('');
+
+  const addMemberHtml = canManageMembers ? `
+    <div class="row mt">
+      <select id="cd_newmem" style="flex:1;padding:8px 11px;border:1px solid var(--border);border-radius:8px">
+        <option value="">— اختر مستخدمًا —</option>${addableUsers.map((u) => `<option value="${u.id}">${esc(u.name)} (${esc(ROLE_AR[u.role] || u.role)})</option>`).join('')}</select>
+      <select id="cd_newpos" style="padding:8px 11px;border:1px solid var(--border);border-radius:8px"><option value="member">عضو</option><option value="chair">رئيس المجلس</option></select>
+      <button class="btn btn-sm" id="cd_addmem">إضافة عضو</button>
+    </div>` : '';
 
   const writerOpts = d.members.map((m) =>
     `<option value="${m.user_id}" ${d.council.default_writer_id === m.user_id ? 'selected' : ''}>${esc(m.name)}</option>`).join('');
@@ -403,7 +424,8 @@ async function councilDetail(id) {
     title: d.council.name,
     body: `
       <h4 style="margin-bottom:8px">الأعضاء</h4>
-      <table class="tbl"><thead><tr><th>الاسم</th><th>الدور</th><th></th></tr></thead><tbody>${memberRows}</tbody></table>
+      <table class="tbl"><thead><tr><th>الاسم</th><th>الدور</th><th>الصفة</th><th></th></tr></thead><tbody>${memberRows}</tbody></table>
+      ${addMemberHtml}
       ${canAssign ? `
       <div class="field mt"><label>الكاتب الافتراضي للمحاضر</label>
         <select id="cd_writer"><option value="">— بدون —</option>${writerOpts}</select>
@@ -435,6 +457,21 @@ async function councilDetail(id) {
     document.querySelectorAll('[data-delfix]').forEach((b) =>
       b.onclick = async () => {
         try { await API.del('/councils/' + id + '/fixed-items/' + b.dataset.delfix); document.querySelector('.modal-overlay').remove(); councilDetail(id); }
+        catch (err) { toast(err.message, 'err'); }
+      });
+  }
+
+  if (canManageMembers) {
+    const addMem = document.getElementById('cd_addmem');
+    if (addMem) addMem.onclick = async () => {
+      const uid = document.getElementById('cd_newmem').value;
+      if (!uid) return toast('اختر مستخدمًا', 'err');
+      try { await API.post('/councils/' + id + '/members', { user_id: Number(uid), position: document.getElementById('cd_newpos').value }); document.querySelector('.modal-overlay').remove(); councilDetail(id); }
+      catch (err) { toast(err.message, 'err'); }
+    };
+    document.querySelectorAll('[data-delmem]').forEach((b) =>
+      b.onclick = async () => {
+        try { await API.del('/councils/' + id + '/members/' + b.dataset.delmem); document.querySelector('.modal-overlay').remove(); councilDetail(id); }
         catch (err) { toast(err.message, 'err'); }
       });
   }

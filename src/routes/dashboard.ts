@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { canViewResults, isPresident, isVice } from '../permissions';
+import { canViewResults, canViewCouncil, isPresident, isVice } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -32,7 +32,6 @@ app.get('/summary', async (c) => {
     `SELECT m.id, m.display_number, m.title, m.status, m.council_id, co.type AS council_type
        FROM meetings m JOIN councils co ON co.id = m.council_id ORDER BY m.id DESC LIMIT 20`,
   ).all<any>();
-  const { canViewCouncil } = await import('../permissions');
   const visible = [];
   for (const m of recent.results) {
     if (await canViewCouncil(c.env, u, { id: m.council_id, type: m.council_type, default_writer_id: null } as any)) {
@@ -58,91 +57,108 @@ app.get('/students', async (c) => {
   if (!cycle) return c.json({ error: 'الدورة غير موجودة' }, 404);
   if (cycle.status !== 'published') return c.json({ error: 'النتائج غير منشورة' }, 409);
 
-  // نطاق المرحلة
   const canAllStages = isPresident(u) || isVice(u);
-  const stageParam = c.req.query('stage');
-  const stage = canAllStages ? (stageParam || null) : (u.stage || null);
+  const stage = canAllStages ? (c.req.query('stage') || null) : (u.stage || null);
 
-  const board = await stageBoard(c.env, cycleId, stage);
-  // مقارنة الثانوي بالمتوسط (للرئيس والنائب)
+  const board = await boardFor(c.env, cycleId, 'students', stage);
   let comparison = null;
   if (canAllStages && !stage) {
-    const sec = await stageBoard(c.env, cycleId, 'secondary');
-    const mid = await stageBoard(c.env, cycleId, 'middle');
+    const sec = await boardFor(c.env, cycleId, 'students', 'secondary');
+    const mid = await boardFor(c.env, cycleId, 'students', 'middle');
     comparison = { secondary: sec.overall_avg, middle: mid.overall_avg };
   }
-  // مقارنة بالدورة السابقة
-  const prev = await c.env.DB.prepare(
-    "SELECT id FROM eval_cycles WHERE status='published' AND id < ? AND target_types LIKE '%students%' ORDER BY id DESC LIMIT 1",
-  ).bind(cycleId).first<any>();
-  let prevAvg = null;
-  if (prev) prevAvg = (await stageBoard(c.env, prev.id, stage)).overall_avg;
-
+  const prevAvg = await previousCycleAvg(c.env, cycleId, 'students', stage);
   return c.json({ cycle, stage, board, comparison, previous_avg: prevAvg });
 });
 
-async function stageBoard(env: Env, cycleId: number, stage: string | null) {
+// ---- لوحة تحليلات المشرفين وأعضاء الفرق لدورة (القسم ٥٫٦) ----
+app.get('/staff', async (c) => {
+  const u = c.get('user');
+  const tt = c.req.query('target_type') || '';
+  if (!['team_members', 'first_supervisors'].includes(tt)) return c.json({ error: 'الفئة غير صالحة' }, 400);
+  if (!canViewResults(u, tt)) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  const cycleId = Number(c.req.query('cycle_id'));
+  const cycle = await c.env.DB.prepare('SELECT * FROM eval_cycles WHERE id = ?').bind(cycleId).first<any>();
+  if (!cycle) return c.json({ error: 'الدورة غير موجودة' }, 404);
+  if (cycle.status !== 'published') return c.json({ error: 'النتائج غير منشورة' }, 409);
+
+  // أعضاء الفرق مقيَّدون بالمرحلة (المشرف الأول يرى فريقه)؛ المشرفون الأوائل بلا مرحلة.
+  let stage: string | null = null;
+  if (tt === 'team_members') stage = isPresident(u) ? (c.req.query('stage') || null) : (u.stage || null);
+
+  const board = await boardFor(c.env, cycleId, tt, stage);
+  const prevAvg = await previousCycleAvg(c.env, cycleId, tt, stage);
+  return c.json({ cycle, target_type: tt, stage, board, previous_avg: prevAvg });
+});
+
+async function previousCycleAvg(env: Env, cycleId: number, tt: string, stage: string | null): Promise<number | null> {
+  const prev = await env.DB.prepare(
+    "SELECT id FROM eval_cycles WHERE status='published' AND id < ? AND target_types LIKE ? ORDER BY id DESC LIMIT 1",
+  ).bind(cycleId, '%' + tt + '%').first<any>();
+  if (!prev) return null;
+  return (await boardFor(env, prev.id, tt, stage)).overall_avg;
+}
+
+// جلب أهداف الفئة (طلاب/أعضاء/مشرفون) مع تقييد المرحلة إن انطبق
+async function boardTargets(env: Env, targetType: string, stage: string | null): Promise<{ id: number; name: string }[]> {
+  if (targetType === 'students')
+    return (await env.DB.prepare(`SELECT id, name FROM students WHERE status='active' ${stage ? 'AND stage = ?' : ''}`).bind(...(stage ? [stage] : [])).all<any>()).results;
+  if (targetType === 'team_members')
+    return (await env.DB.prepare(`SELECT id, name FROM users WHERE role='team_member' AND is_active=1 ${stage ? 'AND stage = ?' : ''}`).bind(...(stage ? [stage] : [])).all<any>()).results;
+  return (await env.DB.prepare("SELECT id, name FROM users WHERE role='first_supervisor' AND is_active=1").all<any>()).results;
+}
+
+// لوحة مؤشرات عامة لأي فئة تقييم
+async function boardFor(env: Env, cycleId: number, targetType: string, stage: string | null) {
   const criteria = (await env.DB.prepare(
-    "SELECT * FROM eval_criteria WHERE cycle_id = ? AND target_type = 'students' AND is_active = 1",
-  ).bind(cycleId).all<any>()).results;
+    'SELECT * FROM eval_criteria WHERE cycle_id = ? AND target_type = ? AND is_active = 1',
+  ).bind(cycleId, targetType).all<any>()).results;
 
-  const students = (await env.DB.prepare(
-    `SELECT id, name, grade FROM students WHERE status='active' ${stage ? 'AND stage = ?' : ''}`,
-  ).bind(...(stage ? [stage] : [])).all<any>()).results;
-
+  const targets = await boardTargets(env, targetType, stage);
   const evals = (await env.DB.prepare(
-    `SELECT e.id, e.target_id, e.evaluator_id FROM evaluations e
-      WHERE e.cycle_id = ? AND e.target_type='students' AND e.submitted_at IS NOT NULL`,
-  ).bind(cycleId).all<any>()).results;
+    'SELECT id, target_id FROM evaluations WHERE cycle_id = ? AND target_type = ? AND submitted_at IS NOT NULL',
+  ).bind(cycleId, targetType).all<any>()).results;
   const allScores = (await env.DB.prepare(
     `SELECT es.* FROM evaluation_scores es JOIN evaluations e ON e.id = es.evaluation_id
-      WHERE e.cycle_id = ? AND e.target_type='students'`,
-  ).bind(cycleId).all<any>()).results;
+      WHERE e.cycle_id = ? AND e.target_type = ?`,
+  ).bind(cycleId, targetType).all<any>()).results;
   const scoresByEval: Record<number, any[]> = {};
   allScores.forEach((s: any) => { (scoresByEval[s.evaluation_id] ||= []).push(s); });
 
-  const results: { id: number; name: string; grade: string; score: number | null }[] = [];
-  // متوسط كل معيار على مستوى المرحلة
+  const results: { name: string; score: number | null }[] = [];
   const critSum: Record<number, { sum: number; n: number; name: string }> = {};
   criteria.forEach((cr: any) => { critSum[cr.id] = { sum: 0, n: 0, name: cr.name }; });
 
-  for (const st of students) {
-    const evForT = evals.filter((e: any) => e.target_id === st.id);
+  for (const t of targets) {
+    const evForT = evals.filter((e: any) => e.target_id === t.id);
     const perEval = evForT.map((e: any) => weightedForEvaluation(scoresByEval[e.id] || [], criteria)).filter((x: any): x is number => x != null);
     const overall = perEval.length ? perEval.reduce((a, b) => a + b, 0) / perEval.length : null;
-    results.push({ id: st.id, name: st.name, grade: st.grade, score: overall });
+    results.push({ name: t.name, score: overall });
     for (const e of evForT) for (const s of (scoresByEval[e.id] || [])) {
       if (!s.is_na && s.score != null && critSum[s.criterion_id]) { critSum[s.criterion_id].sum += s.score; critSum[s.criterion_id].n++; }
     }
   }
 
-  const scored = results.filter((r) => r.score != null) as { id: number; name: string; grade: string; score: number }[];
+  const scored = results.filter((r) => r.score != null) as { name: string; score: number }[];
   const overallAvg = scored.length ? scored.reduce((a, b) => a + b.score, 0) / scored.length : null;
 
-  // توزيع الدرجات (نطاقات)
   const dist = { '1-2': 0, '2-3': 0, '3-4': 0, '4-5': 0 };
   scored.forEach((r) => {
     if (r.score < 2) dist['1-2']++; else if (r.score < 3) dist['2-3']++; else if (r.score < 4) dist['3-4']++; else dist['4-5']++;
   });
 
   const sorted = [...scored].sort((a, b) => b.score - a.score);
-  const top = sorted.slice(0, 10).map((r) => ({ name: r.name, score: r.score }));
-  const bottom = sorted.slice(-10).reverse().map((r) => ({ name: r.name, score: r.score }));
-
-  const weakest = Object.values(critSum).filter((c) => c.n > 0)
-    .map((c) => ({ name: c.name, avg: c.sum / c.n })).sort((a, b) => a.avg - b.avg).slice(0, 3);
-
-  const totalTargets = students.length;
-  const evaluatedCount = scored.length;
+  const weakest = Object.values(critSum).filter((cc) => cc.n > 0)
+    .map((cc) => ({ name: cc.name, avg: cc.sum / cc.n })).sort((a, b) => a.avg - b.avg).slice(0, 3);
 
   return {
-    total_students: totalTargets,
-    evaluated: evaluatedCount,
-    completion: totalTargets ? Math.round((evaluatedCount / totalTargets) * 100) : 0,
+    total_targets: targets.length,
+    evaluated: scored.length,
+    completion: targets.length ? Math.round((scored.length / targets.length) * 100) : 0,
     overall_avg: overallAvg,
     distribution: dist,
-    top,
-    bottom,
+    top: sorted.slice(0, 10).map((r) => ({ name: r.name, score: r.score })),
+    bottom: sorted.slice(-10).reverse().map((r) => ({ name: r.name, score: r.score })),
     weakest_criteria: weakest,
   };
 }

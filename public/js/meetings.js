@@ -1,10 +1,14 @@
 // وحدة المحاضر (الواجهة) — قائمة، إنشاء، تفاصيل، تحرير، حالات، اعتماد، إلغاء.
 
-const MEETING_STATUS_COLOR = {
-  invitation: 'tag-gray', draft: 'tag-gold', awaiting_signatures: 'tag-gold',
-  approved: 'tag-green', archived: 'tag-gray', cancelled: 'tag-red',
-};
 const ATT_STATUS_AR = { present: 'حاضر', apology: 'معتذر', absent: 'غائب' };
+
+// هل يملك المستخدم صلاحية إنشاء محضر لهذا المجلس؟ (يطابق canCreateMeeting في الخلفية)
+function canCreateForCouncil(cl) {
+  const u = State.user;
+  if (u.role === 'president') return true;
+  return u.role === 'first_supervisor' && cl.type !== 'educational' &&
+    ((cl.type === 'secondary' && u.stage === 'secondary') || (cl.type === 'middle' && u.stage === 'middle'));
+}
 
 function hijriFromGreg(greg) {
   if (!greg) return '';
@@ -26,10 +30,7 @@ async function meetingList() {
   let councils = [];
   try { councils = (await API.get('/councils')).councils; } catch (err) { return renderError(err); }
 
-  const canCreate = councils.some((c) =>
-    State.user.role === 'president' ||
-    (State.user.role === 'first_supervisor' && c.type !== 'educational' &&
-      ((c.type === 'secondary' && State.user.stage === 'secondary') || (c.type === 'middle' && State.user.stage === 'middle'))));
+  const canCreate = councils.some(canCreateForCouncil);
 
   const councilOpts = councils.map((c) => `<option value="${c.id}">${esc(COUNCIL_TYPE_AR[c.type] || c.name)}</option>`).join('');
   const statusOpts = Object.entries(MEETING_STATUS_AR).map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
@@ -105,10 +106,7 @@ async function meetingCreate() {
   content().innerHTML = '<div class="spinner"></div>';
   let councils;
   try { councils = (await API.get('/councils')).councils; } catch (err) { return renderError(err); }
-  const creatable = councils.filter((c) =>
-    State.user.role === 'president' ||
-    (State.user.role === 'first_supervisor' && c.type !== 'educational' &&
-      ((c.type === 'secondary' && State.user.stage === 'secondary') || (c.type === 'middle' && State.user.stage === 'middle'))));
+  const creatable = councils.filter(canCreateForCouncil);
   if (!creatable.length) { content().innerHTML = '<div class="card"><div class="empty">لا تملك صلاحية إنشاء محاضر</div></div>'; return; }
 
   const today = new Date().toISOString().slice(0, 10);
@@ -254,7 +252,7 @@ async function meetingDetail(id) {
       ${p.can_edit ? '<button class="btn btn-sm" id="btnAddAction">+ إضافة بند</button>' : ''}</div>
       ${(d.actions && d.actions.length) ? `<table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الاستحقاق</th><th>الحالة</th><th></th></tr></thead>
       <tbody>${d.actions.map((a) => `<tr><td>${esc(ACTION_TYPE_AR[a.type] || a.type)}</td><td dir="ltr" style="text-align:right">${esc(a.display_number)}</td><td>${esc(a.text)}</td>
-        <td class="muted">—</td><td>${a.due_date ? esc(a.due_date) : '—'}</td><td>${statusTag(a.status, ACTION_STATUS_AR)}</td>
+        <td>${esc(a.assignees || '—')}</td><td>${a.due_date ? esc(a.due_date) : '—'}</td><td>${statusTag(a.status, ACTION_STATUS_AR)}</td>
         <td><button class="btn-ghost btn-sm" data-openaction="${a.id}">عرض</button>${p.can_edit ? `<button class="btn-ghost btn-sm" data-editaction="${a.id}">تعديل</button>` : ''}</td></tr>`).join('')}</tbody></table>`
       : '<div class="card-body muted">لا توجد بنود بعد.</div>'}</div>` : '';
 

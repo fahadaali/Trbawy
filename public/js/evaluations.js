@@ -1,7 +1,6 @@
 // وحدة التقييم (الواجهة) — الدورات، المعايير، النماذج، النتائج، والنافذة التفصيلية.
 
 const CYCLE_STATUS_COLOR = { draft: 'tag-gray', open: 'tag-gold', closed: 'tag-gray', published: 'tag-green' };
-function arFixed(n, d = 1) { return n == null ? '—' : arNum(Number(n).toFixed(d)).replace('.', '٫'); }
 
 VIEWS.evaluations = async (rest) => {
   if (rest && rest[0] === 'criteria') return criteriaManager();
@@ -202,8 +201,8 @@ async function cycleDetail(id) {
     if (viewable.length) html += `<div class="card"><div class="card-head"><h3>النتائج</h3></div><div class="card-body">
       <div class="row" id="resTabs">${viewable.map((t, i) => `<button class="btn ${i === 0 ? '' : 'btn-ghost'} btn-sm" data-res="${t}">${TARGET_TYPE_AR[t]}</button>`).join('')}</div>
       <div id="resBody" class="mt"></div></div></div>`;
-    if (d.target_types.includes('students') && canViewResultsClient('students')) {
-      html += `<div class="card mt"><div class="card-head"><h3>لوحة قيادة الطلاب</h3></div><div id="stDash" class="card-body"><div class="spinner"></div></div></div>`;
+    for (const tt of viewable) {
+      html += `<div class="card mt"><div class="card-head"><h3>لوحة قيادة ${TARGET_TYPE_AR[tt]}</h3></div><div id="dash_${tt}" class="card-body"><div class="spinner"></div></div></div>`;
     }
   }
   if (isPres) html += `<div class="card mt"><div class="card-head"><h3>تقدّم الإدخال لكل مقيِّم</h3></div><div id="progBody" class="card-body"><div class="spinner"></div></div></div>`;
@@ -237,7 +236,7 @@ async function cycleDetail(id) {
       });
       loadRes(viewable[0]);
     }
-    if (d.target_types.includes('students') && canViewResultsClient('students')) renderStudentDashboard(id);
+    for (const tt of viewable) renderDashboard(id, tt);
   }
   if (isPres) {
     try {
@@ -251,21 +250,26 @@ async function cycleDetail(id) {
   }
 }
 
-async function renderStudentDashboard(cycleId) {
-  const box = document.getElementById('stDash');
+async function renderDashboard(cycleId, tt) {
+  const box = document.getElementById('dash_' + tt);
   if (!box) return;
-  const isPresVice = ['president', 'vice_president'].includes(State.user.role);
-  const stageSel = isPresVice ? `<select id="dashStage" style="padding:8px 11px;border:1px solid var(--border);border-radius:8px">
+  const role = State.user.role;
+  // فلتر المرحلة: الطلاب (الرئيس/النائب)، أعضاء الفرق (الرئيس فقط)، المشرفون الأوائل بلا فلتر
+  const stageFilter = (tt === 'students' && ['president', 'vice_president'].includes(role)) || (tt === 'team_members' && role === 'president');
+  const stageSel = stageFilter ? `<select id="stage_${tt}" style="padding:8px 11px;border:1px solid var(--border);border-radius:8px">
       <option value="">كل المراحل</option><option value="secondary">الثانوية</option><option value="middle">المتوسطة</option></select>` : '';
-  box.innerHTML = `<div class="row" style="margin-bottom:12px">${stageSel}</div><div id="dashInner"><div class="spinner"></div></div>`;
+  box.innerHTML = `<div class="row" style="margin-bottom:12px">${stageSel}</div><div id="inner_${tt}"><div class="spinner"></div></div>`;
 
   const load = async () => {
-    const inner = document.getElementById('dashInner');
+    const inner = document.getElementById('inner_' + tt);
     inner.innerHTML = '<div class="spinner"></div>';
-    const st = document.getElementById('dashStage');
+    const st = document.getElementById('stage_' + tt);
     const q = st && st.value ? `&stage=${st.value}` : '';
+    const url = tt === 'students'
+      ? `/dashboard/students?cycle_id=${cycleId}${q}`
+      : `/dashboard/staff?cycle_id=${cycleId}&target_type=${tt}${q}`;
     let d;
-    try { d = await API.get(`/dashboard/students?cycle_id=${cycleId}${q}`); } catch (err) { inner.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
+    try { d = await API.get(url); } catch (err) { inner.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
     const b = d.board;
     const distMax = Math.max(1, ...Object.values(b.distribution));
     const distBars = Object.entries(b.distribution).map(([band, n]) => `
@@ -273,7 +277,7 @@ async function renderStudentDashboard(cycleId) {
         <div style="flex:1;background:#eef1f0;border-radius:6px;overflow:hidden"><div style="height:16px;width:${(n / distMax * 100)}%;background:var(--primary)"></div></div><span>${arNum(n)}</span></div>`).join('');
     inner.innerHTML = `
       <div class="grid grid-4">
-        <div class="stat"><div class="v">${arNum(b.total_students)}</div><div class="l">عدد الطلاب</div></div>
+        <div class="stat"><div class="v">${arNum(b.total_targets)}</div><div class="l">العدد</div></div>
         <div class="stat"><div class="v">${arNum(b.evaluated)}</div><div class="l">المقيَّمون</div></div>
         <div class="stat"><div class="v">${arNum(b.completion)}٪</div><div class="l">اكتمال الإدخال</div></div>
         <div class="stat"><div class="v">${arFixed(b.overall_avg)}</div><div class="l">المتوسط العام</div></div>
@@ -290,7 +294,7 @@ async function renderStudentDashboard(cycleId) {
         <div class="card"><div class="card-head"><h3>أدنى ١٠</h3></div><table class="tbl"><tbody>${b.bottom.map((t) => `<tr><td>${esc(t.name)}</td><td><b>${arFixed(t.score)}</b></td></tr>`).join('') || '<tr><td class="muted">—</td></tr>'}</tbody></table></div>
       </div>`;
   };
-  if (isPresVice) document.getElementById('dashStage').onchange = load;
+  if (stageFilter) document.getElementById('stage_' + tt).onchange = load;
   load();
 }
 

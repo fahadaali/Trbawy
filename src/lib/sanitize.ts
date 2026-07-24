@@ -19,6 +19,17 @@ function safeUrl(val: string): boolean {
   return /^(https:\/\/|#|data:image\/(png|jpe?g|gif|webp);base64,)/i.test(val.trim());
 }
 
+function escapePlain(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// شبكة أمان: أي شيء خطير نجا (وسم خطير، معالج حدث، بروتوكول تنفيذي) => تحويل النص كاملًا إلى نص هارب.
+function hasResidualDanger(s: string): boolean {
+  return /<\s*(script|iframe|object|embed|svg|math|style|form|link|meta|base)\b/i.test(s)
+    || /\son\w+\s*=/i.test(s)
+    || /(javascript|vbscript|data\s*:(?!image\/(png|jpe?g|gif|webp);base64,))/i.test(s);
+}
+
 export function sanitizeHtml(dirty: string): string {
   if (!dirty) return '';
   // إزالة الكتل الخطرة والتعليقات
@@ -49,5 +60,7 @@ export function sanitizeHtml(dirty: string): string {
     return `<${tag}${clean}${SELF_CLOSING.has(tag) ? ' /' : ''}>`;
   });
 
+  // إن نجا أي خطر (مثل وسم بسمة اقتباس غير مغلقة لم يلتقطه النمط) نُحيّد المحتوى بالكامل.
+  if (hasResidualDanger(s)) return escapePlain(dirty);
   return s;
 }

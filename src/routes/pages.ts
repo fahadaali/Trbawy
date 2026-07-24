@@ -15,13 +15,14 @@ app.get('/verify/:code', async (c) => {
   return c.html(html);
 });
 
-// خدمة ملف من R2 (يتطلب جلسة) — للشعار/العلامة/التواقيع داخل صفحة الطباعة
+// خدمة أصول الهوية البصرية العامة (شعار/علامة مائية) — تتطلب جلسة فقط.
+// التواقيع ومرفقات البنود لا تُقدَّم هنا: التواقيع تُضمَّن في صفحة الطباعة (بعد فحص صلاحية المحضر)،
+// والمرفقات لها مسار مُصرَّح على مستوى الكائن في /api/actions/:id/attachments/:attId.
 app.get('/file', async (c) => {
   const s = await loadSession(c);
   if (!s) return c.text('غير مصرّح', 401);
   const key = c.req.query('key') || '';
-  // سماح فقط بالبادئات المعروفة
-  if (!/^(branding|signatures|actions)\//.test(key)) return c.text('غير مسموح', 403);
+  if (!/^branding\//.test(key)) return c.text('غير مسموح', 403);
   return serveAsset(c.env, key);
 });
 

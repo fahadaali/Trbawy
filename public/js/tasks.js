@@ -141,6 +141,7 @@ async function taskDetail(id, onBack) {
         </div>` : ''}`,
     buttons: [
       ...(iAmAssignee && a.status !== 'done' ? [{ label: '✔ تعليم منجزاً', onClick: (cl) => { cl(); completeTask(id, () => { if (onBack) onBack(); }); } }] : []),
+      ...(canManage && a.status === 'done' ? [{ label: 'إعادة فتح', class: 'btn-ghost', onClick: async (cl) => { try { await API.post(`/actions/${id}/reopen`); cl(); toast('تمت إعادة الفتح', 'ok'); if (onBack) onBack(); } catch (err) { toast(err.message, 'err'); } } }] : []),
       { label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() },
     ],
   });

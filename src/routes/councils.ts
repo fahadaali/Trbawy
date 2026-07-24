@@ -4,6 +4,7 @@ import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import { canManageUsers, canAssignWriter, canViewCouncil } from '../permissions';
+import { sanitizeHtml } from '../lib/sanitize';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -117,7 +118,7 @@ app.post('/:id/fixed-items', async (c) => {
   const res = await c.env.DB.prepare(
     'INSERT INTO fixed_agenda_templates (council_id, title, body, sort_order, is_active) VALUES (?, ?, ?, ?, 1)',
   )
-    .bind(id, title, body || null, (max?.m ?? -1) + 1)
+    .bind(id, title, body ? sanitizeHtml(body) : null, (max?.m ?? -1) + 1)
     .run();
   return c.json({ id: res.meta.last_row_id }, 201);
 });

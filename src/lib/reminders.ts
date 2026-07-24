@@ -1,8 +1,7 @@
 // التذكيرات اليومية المجدولة (Cron): المهام والدورات.
-import type { Env, User } from '../types';
+import type { Env } from '../types';
 import { notify } from './notify';
-import { canEvaluate } from '../permissions';
-import { evaluationTargets } from './evaltargets';
+import { evaluatorProgress } from './evalprogress';
 
 // منع التكرار: هل أُرسل إشعار بنفس النوع لنفس المستخدم والرابط اليوم؟
 async function alreadySentToday(env: Env, userId: number, type: string, link: string): Promise<boolean> {
@@ -65,28 +64,16 @@ async function cycleClosingReminders(env: Env): Promise<void> {
   ).bind(in3).all<any>()).results;
   if (!cycles.length) return;
 
-  const users = (await env.DB.prepare(
-    "SELECT id, name, role, stage FROM users WHERE is_active = 1",
-  ).all<any>()).results as User[];
-
   for (const cy of cycles) {
-    const types: string[] = cy.target_types.split(',');
-    for (const usr of users) {
-      let expected = 0;
-      for (const tt of types) {
-        if (!canEvaluate(usr, tt)) continue;
-        expected += (await evaluationTargets(env, usr, tt)).length;
-      }
-      if (expected === 0) continue;
-      const done = (await env.DB.prepare(
-        'SELECT COUNT(*) AS n FROM evaluations WHERE cycle_id = ? AND evaluator_id = ? AND submitted_at IS NOT NULL',
-      ).bind(cy.id, usr.id).first<{ n: number }>())?.n ?? 0;
-      if (done >= expected) continue; // أكمل
+    // من لم يكمل الإدخال بعد
+    const progress = await evaluatorProgress(env, cy);
+    for (const p of progress) {
+      if (p.submitted >= p.expected) continue;
       const link = `#/evaluations/${cy.id}`;
-      if (await alreadySentToday(env, usr.id, 'cycle_closing', link)) continue;
+      if (await alreadySentToday(env, p.id, 'cycle_closing', link)) continue;
       await notify(env, {
-        userId: usr.id, type: 'cycle_closing', title: 'تذكير: إغلاق دورة التقييم بعد ٣ أيام',
-        body: `${cy.name} — أكملتَ ${done} من ${expected}`, link, email: true,
+        userId: p.id, type: 'cycle_closing', title: 'تذكير: إغلاق دورة التقييم بعد ٣ أيام',
+        body: `${cy.name} — أكملتَ ${p.submitted} من ${p.expected}`, link, email: true,
       });
     }
   }

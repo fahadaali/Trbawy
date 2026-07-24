@@ -8,7 +8,9 @@ import {
 } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
 import { evaluationTargets } from '../lib/evaltargets';
+import { evaluatorProgress } from '../lib/evalprogress';
 import { csvCell, parseCsv } from '../lib/csv';
+import { notifyMany } from '../lib/notify';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -178,13 +180,14 @@ app.post('/cycles/:id/status', async (c) => {
   else return c.json({ error: 'تحوّل غير صالح' }, 400);
 
   await c.env.DB.prepare('UPDATE eval_cycles SET status = ? WHERE id = ?').bind(ns, id).run();
-  // إشعار المقيّمين عند الفتح
+  // إشعار المقيّمين عند الفتح (بريد + داخل المنصة)
   if (ns === 'open') {
     const evaluators = await c.env.DB.prepare(
       "SELECT id FROM users WHERE is_active = 1 AND role IN ('president','vice_president','first_supervisor','team_member')",
     ).all<{ id: number }>();
-    await c.env.DB.batch(evaluators.results.map((e) =>
-      c.env.DB.prepare(`INSERT INTO notifications (user_id, type, title, body, link) VALUES (?, 'cycle_open', 'فتح دورة تقييم', ?, ?)`).bind(e.id, cycle.name, `#/evaluations/${id}`)));
+    await notifyMany(c.env, evaluators.results.map((e) => e.id), {
+      type: 'cycle_open', title: 'فتح دورة تقييم', body: cycle.name, link: `#/evaluations/${id}`, email: true,
+    });
   }
   // إشعار أصحاب الصلاحية عند نشر النتائج (داخل المنصة)
   if (ns === 'published') {
@@ -304,25 +307,8 @@ app.get('/cycles/:id/progress', async (c) => {
   const id = Number(c.req.param('id'));
   const cycle = await c.env.DB.prepare('SELECT * FROM eval_cycles WHERE id = ?').bind(id).first<any>();
   if (!cycle) return c.json({ error: 'الدورة غير موجودة' }, 404);
-  const types: string[] = cycle.target_types.split(',');
-
-  // كل المقيّمين المحتملين
-  const users = await c.env.DB.prepare("SELECT id, name, role, stage FROM users WHERE is_active = 1").all<any>();
-  const rows: any[] = [];
-  for (const usr of users.results) {
-    let expected = 0;
-    for (const tt of types) {
-      if (!canEvaluate(usr, tt)) continue;
-      const targets = await evaluationTargets(c.env, usr, tt);
-      expected += targets.length;
-    }
-    if (expected === 0) continue;
-    const done = await c.env.DB.prepare(
-      'SELECT COUNT(*) AS n FROM evaluations WHERE cycle_id = ? AND evaluator_id = ? AND submitted_at IS NOT NULL',
-    ).bind(id, usr.id).first<{ n: number }>();
-    rows.push({ name: usr.name, role: usr.role, expected, submitted: done?.n ?? 0 });
-  }
-  return c.json({ progress: rows });
+  const progress = await evaluatorProgress(c.env, cycle);
+  return c.json({ progress });
 });
 
 // ============ النتائج (بعد النشر) ============
@@ -396,6 +382,9 @@ app.get('/cycles/:id/detail', async (c) => {
   const u = c.get('user');
   if (!canViewResults(u, tt)) return c.json({ error: 'لا تملك صلاحية' }, 403);
   if (cycle.status !== 'published') return c.json({ error: 'غير منشورة' }, 409);
+  // الهدف يجب أن يكون ضمن نطاق اطلاع المستخدم (منع تسريب نتائج مرحلة أخرى)
+  const scoped = await resultTargets(c.env, u, tt);
+  if (!scoped.some((t) => t.id === targetId)) return c.json({ error: 'الهدف خارج نطاقك' }, 403);
 
   const rows = await c.env.DB.prepare(
     `SELECT us.name AS evaluator, es.score, es.is_na, es.note

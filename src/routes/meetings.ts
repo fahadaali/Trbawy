@@ -4,7 +4,7 @@ import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import {
-  canViewCouncil, canCreateMeeting, canApproveMeeting, canEditDraft, canCancelMeeting, isPresident,
+  canViewCouncil, canCreateMeeting, canApproveMeeting, canEditDraft, canCancelMeeting, canAssignWriter, isPresident,
 } from '../permissions';
 import { getCouncil, nextMeetingNumber, formatDisplayNumber } from '../lib/meetings';
 import { hijriYear } from '../lib/hijri';
@@ -129,10 +129,12 @@ app.get('/:id', async (c) => {
     'SELECT id, sort_order, title, body, item_type FROM agenda_items WHERE meeting_id = ? ORDER BY sort_order',
   ).bind(id).all();
 
-  // القرارات/المهام المنشأة في هذا المحضر
+  // القرارات/المهام المنشأة في هذا المحضر (مع أسماء المسؤولين)
   const actions = await c.env.DB.prepare(
-    `SELECT id, type, display_number, text, status, priority, due_date, progress, completed_at
-       FROM action_items WHERE source_meeting_id = ? ORDER BY id`,
+    `SELECT a.id, a.type, a.display_number, a.text, a.status, a.priority, a.due_date, a.progress, a.completed_at,
+            (SELECT GROUP_CONCAT(u.name, '، ') FROM action_assignees aa JOIN users u ON u.id = aa.user_id
+              WHERE aa.action_item_id = a.id) AS assignees
+       FROM action_items a WHERE a.source_meeting_id = ? ORDER BY a.id`,
   ).bind(id).all();
 
   // بنود المتابعة (مفتوحة من محاضر سابقة) — تظهر عند التحرير
@@ -182,8 +184,12 @@ app.post('/', async (c) => {
   const number = await nextMeetingNumber(c.env, council.id, hy);
   const display = formatDisplayNumber(council.number_prefix, hy, number);
 
-  // كاتب المحضر: المُرسَل أو الافتراضي
+  // كاتب المحضر: المُرسَل أو الافتراضي — ويجب أن يكون عضوًا في المجلس
   const writerId = b.writer_id != null ? Number(b.writer_id) : council.default_writer_id;
+  if (writerId != null) {
+    const mem = await c.env.DB.prepare('SELECT 1 FROM council_members WHERE council_id = ? AND user_id = ?').bind(council.id, writerId).first();
+    if (!mem) return c.json({ error: 'كاتب المحضر يجب أن يكون عضوًا في المجلس' }, 400);
+  }
 
   const res = await c.env.DB.prepare(
     `INSERT INTO meetings
@@ -230,7 +236,7 @@ app.post('/', async (c) => {
   for (const a of (b.agenda || []))
     if (a.title) agStmts.push(c.env.DB.prepare(
       'INSERT INTO agenda_items (meeting_id, sort_order, title, body, item_type) VALUES (?, ?, ?, ?, ?)',
-    ).bind(meetingId, order++, a.title, a.body || null, 'new'));
+    ).bind(meetingId, order++, a.title, a.body ? sanitizeHtml(a.body) : null, 'new'));
   if (agStmts.length) await c.env.DB.batch(agStmts);
 
   // إشعار أعضاء المجلس بالدعوة (بريد + داخل المنصة)
@@ -266,11 +272,14 @@ app.patch('/:id', async (c) => {
     location: b.location !== undefined ? b.location : m.location,
     writer_id: b.writer_id !== undefined ? b.writer_id : m.writer_id,
   };
-  // تغيير الكاتب مقصور على صاحب صلاحية التعيين
+  // تغيير الكاتب مقصور على صاحب صلاحية التعيين، والكاتب يجب أن يكون عضوًا في المجلس
   if (b.writer_id !== undefined && b.writer_id !== m.writer_id) {
-    const { canAssignWriter } = await import('../permissions');
     if (!canAssignWriter(c.get('user'), council))
       return c.json({ error: 'لا تملك صلاحية تغيير كاتب المحضر' }, 403);
+    if (b.writer_id != null) {
+      const mem = await c.env.DB.prepare('SELECT 1 FROM council_members WHERE council_id = ? AND user_id = ?').bind(m.council_id, Number(b.writer_id)).first();
+      if (!mem) return c.json({ error: 'كاتب المحضر يجب أن يكون عضوًا في المجلس' }, 400);
+    }
   }
   await c.env.DB.prepare(
     `UPDATE meetings SET title=?, hijri_date=?, greg_date=?, start_time=?, end_time=?,

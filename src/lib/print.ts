@@ -9,6 +9,21 @@ import { sanitizeHtml } from './sanitize';
 const esc = (s: any) =>
   s == null ? '' : String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
+// جلب أصل من R2 وتضمينه كـ data URI (يتجنّب طلبات /file المنفصلة ويغلق أي تسريب على مستوى الكائن).
+function abToB64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+async function assetDataUri(env: Env, key: string | null | undefined): Promise<string> {
+  if (!key) return '';
+  const obj = await env.FILES.get(key);
+  if (!obj) return '';
+  const ct = obj.httpMetadata?.contentType || 'image/png';
+  return `data:${ct};base64,${abToB64(await obj.arrayBuffer())}`;
+}
+
 const ATT_AR: Record<string, string> = { present: 'حاضر', apology: 'معتذر', absent: 'غائب' };
 const TYPE_AR: Record<string, string> = { decision: 'قرار', recommendation: 'توصية', task: 'مهمة' };
 const STATUS_AR: Record<string, string> = { not_started: 'لم تبدأ', in_progress: 'جارية', done: 'منجزة', stalled: 'متعثرة', cancelled: 'ملغاة' };
@@ -70,14 +85,16 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
   const guests = attendees.filter((a) => a.is_guest);
   const finalized = m.status === 'approved' || m.status === 'archived';
 
-  const signRows = attendees.filter((a) => !a.is_guest).map((a) => {
+  const signRows = (await Promise.all(attendees.filter((a) => !a.is_guest).map(async (a) => {
     let sig = '—';
-    if (a.signed_at) sig = a.signature_image ? `<img class="sig" src="/file?key=${encodeURIComponent(a.signature_image)}" />` : `<span class="stamp">${esc(a.user_name)}</span>`;
-    else if (a.signature_override) sig = '<span class="ov">تجاوز موثّق</span>';
+    if (a.signed_at) {
+      const uri = a.signature_image ? await assetDataUri(env, a.signature_image) : '';
+      sig = uri ? `<img class="sig" src="${uri}" />` : `<span class="stamp">${esc(a.user_name)}</span>`;
+    } else if (a.signature_override) sig = '<span class="ov">تجاوز موثّق</span>';
     else if (a.attendance_status !== 'present') sig = `<span class="muted">${esc(ATT_AR[a.attendance_status])}</span>`;
     return `<tr><td>${esc(a.user_name)}</td><td>${esc(ATT_AR[a.attendance_status] || '')}</td><td>${sig}</td>
       <td class="code">${a.signature_hash ? esc(a.signature_hash) : ''}</td><td>${a.signed_at ? esc(a.signed_at) : ''}</td></tr>`;
-  }).join('');
+  }))).join('');
 
   return `<div class="content${brk ? ' brk' : ''}">
     <h1>محضر اجتماع ${finalized ? '' : '(مسودة)'}</h1>
@@ -108,9 +125,9 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
   </div>`;
 }
 
-function shell(settings: any, primary: string, footerRight: string, bodies: string): string {
-  const logoImg = settings.logo_key ? `<img class="logo" src="/file?key=${encodeURIComponent(settings.logo_key)}" />` : '';
-  const watermark = settings.watermark_key ? `<div class="watermark"><img src="/file?key=${encodeURIComponent(settings.watermark_key)}" /></div>` : '';
+function shell(settings: any, primary: string, footerRight: string, bodies: string, logoUri: string, wmUri: string): string {
+  const logoImg = logoUri ? `<img class="logo" src="${logoUri}" />` : '';
+  const watermark = wmUri ? `<div class="watermark"><img src="${wmUri}" /></div>` : '';
   return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8" />
 <title>${esc(footerRight)}</title>
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -128,8 +145,9 @@ export async function renderMeetingHtml(env: Env, meetingId: number, origin: str
   if (!m) return null;
   const settings = await getSettings(env);
   const primary = esc(settings.primary_color || '#1f6f54');
+  const [logoUri, wmUri] = await Promise.all([assetDataUri(env, settings.logo_key), assetDataUri(env, settings.watermark_key)]);
   const body = await meetingContentBlock(env, m, origin, false);
-  return shell(settings, primary, m.display_number, body);
+  return shell(settings, primary, m.display_number, body, logoUri, wmUri);
 }
 
 // حزمة محاضر فترة معيّنة في ملف واحد
@@ -138,6 +156,7 @@ export async function renderBundleHtml(
 ): Promise<string> {
   const settings = await getSettings(env);
   const primary = esc(settings.primary_color || '#1f6f54');
+  const [logoUri, wmUri] = await Promise.all([assetDataUri(env, settings.logo_key), assetDataUri(env, settings.watermark_key)]);
   const council = await getCouncil(env, councilId);
   const meetings = (await env.DB.prepare(
     `SELECT * FROM meetings WHERE council_id = ? AND status IN ('approved','archived')
@@ -145,11 +164,11 @@ export async function renderBundleHtml(
   ).bind(councilId, from, to).all()).results as any[];
 
   if (!meetings.length) {
-    return shell(settings, primary, 'حزمة محاضر', `<div class="content"><h1>حزمة محاضر</h1><p style="text-align:center" class="muted">لا توجد محاضر معتمدة في هذه الفترة.</p></div>`);
+    return shell(settings, primary, 'حزمة محاضر', `<div class="content"><h1>حزمة محاضر</h1><p style="text-align:center" class="muted">لا توجد محاضر معتمدة في هذه الفترة.</p></div>`, logoUri, wmUri);
   }
   const blocks: string[] = [];
   for (let i = 0; i < meetings.length; i++) blocks.push(await meetingContentBlock(env, meetings[i], origin, i > 0));
-  return shell(settings, primary, `حزمة ${council?.name || ''}`, blocks.join('\n'));
+  return shell(settings, primary, `حزمة ${council?.name || ''}`, blocks.join('\n'), logoUri, wmUri);
 }
 
 // صفحة التحقق العامة (بلا مصادقة)

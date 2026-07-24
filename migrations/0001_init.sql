@@ -165,7 +165,8 @@ CREATE TABLE action_items (
   -- المحضر الذي ظهرت فيه المهمة كمنجزة (لتختفي من جدول المتابعة بعده)
   reported_done_meeting_id INTEGER REFERENCES meetings(id),
   created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
-  updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+  updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (council_id, type, number)
 );
 CREATE INDEX idx_actions_council ON action_items(council_id);
 CREATE INDEX idx_actions_meeting ON action_items(source_meeting_id);

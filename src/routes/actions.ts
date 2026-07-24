@@ -5,6 +5,7 @@ import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import { canViewCouncil, canEditDraft, isPresident } from '../permissions';
 import { getCouncil, nextActionNumber, formatActionNumber } from '../lib/meetings';
+import { notifyMany } from '../lib/notify';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -59,11 +60,12 @@ app.post('/meeting/:meetingId', async (c) => {
   if (assignees.length) {
     await c.env.DB.batch(assignees.map((uid) =>
       c.env.DB.prepare('INSERT OR IGNORE INTO action_assignees (action_item_id, user_id) VALUES (?, ?)').bind(actionId, uid)));
-    // إشعار المسؤولين
-    await c.env.DB.batch(assignees.map((uid) =>
-      c.env.DB.prepare(
-        `INSERT INTO notifications (user_id, type, title, body, link) VALUES (?, 'action_assigned', ?, ?, ?)`,
-      ).bind(uid, 'إسناد ' + (type === 'task' ? 'مهمة' : type === 'decision' ? 'قرار' : 'توصية'), text, '#/tasks')));
+    // إشعار المسؤولين (بريد + داخل المنصة)
+    await notifyMany(c.env, assignees, {
+      type: 'action_assigned',
+      title: 'إسناد ' + (type === 'task' ? 'مهمة' : type === 'decision' ? 'قرار' : 'توصية'),
+      body: text, link: '#/tasks', email: true,
+    });
   }
 
   await audit(c.env, { userId: c.get('user').id, action: 'create_action', entityType: 'action_item', entityId: actionId, newValue: { type, display, text } });
@@ -137,10 +139,12 @@ app.patch('/:id', async (c) => {
   const isManager = canEditDraft(u, council!, meeting?.writer_id) || isPresident(u);
   const assignee = await isAssignee(c.env, id, u.id);
 
-  // تعديل النص/الأولوية/الاستحقاق/المسؤولين: للمدير وبينما المحضر قابل للتحرير
+  // تعديل النص/الأولوية/الاستحقاق/المسؤولين: للمدير وبينما المحضر قابل للتحرير فقط
+  // (المحضر المعتمد مقفل — أي تصحيح يكون عبر محضر تصويب/ملحق).
   const editingCore = b.text !== undefined || b.priority !== undefined || b.due_date !== undefined || b.assignees !== undefined;
   if (editingCore) {
     if (!isManager) return c.json({ error: 'لا تملك صلاحية تعديل البند' }, 403);
+    if (!EDITABLE_MEETING.includes(meeting?.status)) return c.json({ error: 'المحضر مقفل — لا يمكن تعديل نص البند' }, 409);
     const text = b.text !== undefined ? String(b.text).trim() : a.text;
     const priority = b.priority !== undefined && PRIORITIES.includes(b.priority) ? b.priority : a.priority;
     const due = b.due_date !== undefined ? (b.due_date || null) : a.due_date;
