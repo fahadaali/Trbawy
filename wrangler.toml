@@ -1,0 +1,32 @@
+name = "tarbawi-council-platform"
+main = "src/index.ts"
+compatibility_date = "2024-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+# الواجهة الأمامية (SPA) تُقدَّم كأصول ثابتة عبر الـ Worker
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+
+# قاعدة البيانات D1 — لكل البيانات المهيكلة
+# أنشئ القاعدة عبر: wrangler d1 create tarbawi-db  ثم ضع المعرّف هنا
+[[d1_databases]]
+binding = "DB"
+database_name = "tarbawi-db"
+database_id = "PLACEHOLDER_DATABASE_ID"
+migrations_dir = "migrations"
+
+# تخزين الملفات R2 — المرفقات، صور التواقيع، الشعار، الملفات المصدَّرة، النسخ الاحتياطية
+# أنشئ الحاوية عبر: wrangler r2 bucket create tarbawi-files
+[[r2_buckets]]
+binding = "FILES"
+bucket_name = "tarbawi-files"
+
+# المهام المجدولة — التذكيرات اليومية (تُفعَّل في مرحلة الإشعارات)
+[triggers]
+crons = ["0 5 * * *"]
+
+[vars]
+APP_NAME = "منصة المجلس التربوي"
+# متغيرات البريد تُضاف كأسرار: wrangler secret put RESEND_API_KEY
