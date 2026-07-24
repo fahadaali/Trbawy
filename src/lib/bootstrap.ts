@@ -9,19 +9,31 @@ let checkedThisIsolate = false;
 export const DEFAULT_PASSWORD = '1234';
 
 // إنشاء الجداول والفهارس ذاتيًا (CREATE ... IF NOT EXISTS) — تُغني عن تطبيق المخطط يدويًا.
+// تنفيذ تسلسلي (لا batch): D1 البعيد لا يقبل عدّة عبارات DDL داخل معاملة واحدة.
 async function ensureSchema(env: Env): Promise<void> {
-  await env.DB.batch(SCHEMA_STATEMENTS.map((s) => env.DB.prepare(s)));
+  for (const stmt of SCHEMA_STATEMENTS) {
+    await env.DB.prepare(stmt).run();
+  }
 }
 
 export async function ensureBootstrap(env: Env): Promise<void> {
   if (checkedThisIsolate) return;
-  await ensureSchema(env);
-  const row = await env.DB.prepare('SELECT COUNT(*) AS c FROM councils').first<{ c: number }>();
-  if ((row?.c ?? 0) > 0) {
-    checkedThisIsolate = true;
-    return;
+
+  // فحص سريع: إن كانت القاعدة مهيّأة ومزروعة، نخرج فورًا بلا أي تكلفة مخطط.
+  try {
+    const row = await env.DB.prepare('SELECT COUNT(*) AS c FROM councils').first<{ c: number }>();
+    if ((row?.c ?? 0) > 0) {
+      checkedThisIsolate = true;
+      return;
+    }
+  } catch {
+    // جدول المجالس غير موجود بعد — ننشئ المخطط أولًا.
   }
-  await seed(env);
+
+  await ensureSchema(env);
+
+  const seeded = await env.DB.prepare('SELECT COUNT(*) AS c FROM councils').first<{ c: number }>();
+  if ((seeded?.c ?? 0) === 0) await seed(env);
   checkedThisIsolate = true;
 }
 
