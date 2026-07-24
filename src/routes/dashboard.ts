@@ -2,11 +2,58 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { canViewResults, canViewCouncil, isPresident, isVice } from '../permissions';
+import { canViewResults, canViewCouncil, canEvaluate, isPresident, isVice } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
+import { evaluationTargets } from '../lib/evaltargets';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
+
+// ---- العناصر التي تنتظر إجراء المستخدم (لتنبيه منبثق عند الدخول/فتح الصفحة) ----
+app.get('/pending', async (c) => {
+  const u = c.get('user');
+
+  // محاضر بانتظار توقيعي
+  const signatures = (await c.env.DB.prepare(
+    `SELECT m.id, m.display_number FROM meeting_attendees ma JOIN meetings m ON m.id = ma.meeting_id
+      WHERE ma.user_id = ? AND ma.is_guest = 0 AND ma.attendance_status = 'present'
+        AND ma.signed_at IS NULL AND ma.signature_override = 0 AND m.status = 'awaiting_signatures'
+      ORDER BY m.id DESC`,
+  ).bind(u.id).all<any>()).results;
+
+  // مهامي المفتوحة
+  const tasks = (await c.env.DB.prepare(
+    `SELECT a.id, a.text, a.due_date FROM action_items a
+       JOIN action_assignees aa ON aa.action_item_id = a.id
+      WHERE aa.user_id = ? AND a.status NOT IN ('done','cancelled')
+      ORDER BY a.due_date IS NULL, a.due_date LIMIT 20`,
+  ).bind(u.id).all<any>()).results;
+
+  // دورات تقييم مفتوحة لم أُكملها بعد
+  const openCycles = (await c.env.DB.prepare(
+    "SELECT id, name, target_types FROM eval_cycles WHERE status = 'open'",
+  ).all<any>()).results;
+  const evaluations: { id: number; name: string; remaining: number }[] = [];
+  for (const cy of openCycles) {
+    const types: string[] = cy.target_types.split(',');
+    let expected = 0;
+    for (const tt of types) {
+      if (!canEvaluate(u, tt)) continue;
+      expected += (await evaluationTargets(c.env, u, tt)).length;
+    }
+    if (expected === 0) continue;
+    const done = (await c.env.DB.prepare(
+      'SELECT COUNT(*) AS n FROM evaluations WHERE cycle_id = ? AND evaluator_id = ? AND submitted_at IS NOT NULL',
+    ).bind(cy.id, u.id).first<{ n: number }>())?.n ?? 0;
+    if (done < expected) evaluations.push({ id: cy.id, name: cy.name, remaining: expected - done });
+  }
+
+  return c.json({
+    signatures: signatures.map((s) => ({ title: s.display_number, link: `#/meetings/${s.id}` })),
+    tasks: tasks.map((t) => ({ title: t.text, link: '#/tasks' })),
+    evaluations: evaluations.map((e) => ({ title: e.name, remaining: e.remaining, link: `#/evaluations/${e.id}` })),
+  });
+});
 
 // ---- ملخص الصفحة الرئيسية ----
 app.get('/summary', async (c) => {

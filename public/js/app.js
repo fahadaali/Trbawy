@@ -1,7 +1,7 @@
 // التطبيق الرئيسي (SPA) — منصة المجلس التربوي.
 // المرحلة ١: المصادقة، الهيكل العربي، إدارة المستخدمين والمجالس، سجل التدقيق.
 
-const State = { user: null };
+const State = { user: null, pendingShown: false };
 const app = () => document.getElementById('app');
 
 // ============ نقطة البدء ============
@@ -60,6 +60,7 @@ function renderLogin() {
         password: document.getElementById('password').value,
       });
       State.user = user;
+      State.pendingShown = false;
       location.hash = '#/dashboard';
       route();
     } catch (err) {
@@ -177,15 +178,47 @@ function renderShell(view, rest) {
 
   document.getElementById('logoutBtn').onclick = async () => {
     try { await API.post('/auth/logout'); } catch {}
-    State.user = null; location.hash = ''; route();
+    State.user = null; State.pendingShown = false; document.querySelectorAll('.pending-pop').forEach((el) => el.remove());
+    location.hash = ''; route();
   };
   document.getElementById('pwBtn').onclick = () => renderChangePassword(false);
   document.getElementById('profileBtn').onclick = () => profileSignature();
   document.getElementById('menuToggle').onclick = () => document.getElementById('sidebar').classList.toggle('open');
   setupNotifications();
 
+  // تنبيه العناصر المنتظرة — مرة واحدة عند فتح الصفحة/الدخول
+  if (!State.pendingShown) { State.pendingShown = true; setTimeout(showPendingPopup, 500); }
+
   const handler = VIEWS[view] || VIEWS.dashboard;
   handler(rest);
+}
+
+// ---- تنبيه منبثق عائم بالعناصر التي تنتظر المستخدم ----
+async function showPendingPopup() {
+  let d;
+  try { d = await API.get('/dashboard/pending'); } catch { return; }
+  const items = [];
+  (d.signatures || []).forEach((s) => items.push({ ic: '✍', bg: '#f8f0da', label: 'محضر بانتظار توقيعك', name: s.title, link: s.link }));
+  (d.evaluations || []).forEach((e) => items.push({ ic: '📊', bg: '#e7f2ee', label: 'دورة تقييم مفتوحة' + (e.remaining ? ` — متبقٍ ${arNum(e.remaining)}` : ''), name: e.title, link: e.link }));
+  (d.tasks || []).forEach((t) => items.push({ ic: '✅', bg: '#eef1f0', label: 'مهمة عليك', name: t.title, link: t.link }));
+  if (!items.length) return;
+
+  document.querySelectorAll('.pending-pop').forEach((el) => el.remove());
+  const pop = document.createElement('div');
+  pop.className = 'pending-pop';
+  pop.innerHTML = `
+    <div class="pp-head"><span>🔔</span><b>لديك ${arNum(items.length)} عنصرًا بانتظارك</b><button class="x" aria-label="إغلاق">&times;</button></div>
+    <div class="pp-body">${items.map((it, i) => `
+      <button class="pp-item" data-i="${i}">
+        <span class="ic" style="background:${it.bg}">${it.ic}</span>
+        <span class="tx"><b>${esc(it.name || '—')}</b><span>${esc(it.label)}</span></span>
+        <span class="go">‹</span>
+      </button>`).join('')}</div>`;
+  document.body.appendChild(pop);
+  requestAnimationFrame(() => pop.classList.add('show'));
+  const close = () => { pop.classList.remove('show'); setTimeout(() => pop.remove(), 250); };
+  pop.querySelector('.x').onclick = close;
+  pop.querySelectorAll('.pp-item').forEach((b) => b.onclick = () => { location.hash = items[b.dataset.i].link; close(); });
 }
 
 // ---- الإشعارات (الجرس) ----
