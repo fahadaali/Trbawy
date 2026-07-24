@@ -9,6 +9,7 @@ import councilRoutes from './routes/councils';
 import meetingRoutes from './routes/meetings';
 import actionRoutes from './routes/actions';
 import evalRoutes from './routes/evaluations';
+import studentRoutes from './routes/students';
 import settingsRoutes from './routes/settings';
 import auditRoutes from './routes/audit';
 import pageRoutes from './routes/pages';
@@ -31,6 +32,7 @@ app.route('/api/councils', councilRoutes);
 app.route('/api/meetings', meetingRoutes);
 app.route('/api/actions', actionRoutes);
 app.route('/api/eval', evalRoutes);
+app.route('/api/students', studentRoutes);
 app.route('/api/settings', settingsRoutes);
 app.route('/api/audit', auditRoutes);
 

@@ -6,6 +6,7 @@ import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import {
   canCreateEvalCycle, canManageCriteria, canEvaluate, canViewResults, isPresident, isVice,
 } from '../permissions';
+import { weightedForEvaluation } from '../lib/evalcalc';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -300,21 +301,6 @@ app.get('/cycles/:id/progress', async (c) => {
 });
 
 // ============ النتائج (بعد النشر) ============
-// حساب المتوسط المرجّح مع معالجة «لا ينطبق» (إعادة توزيع الوزن)
-function weightedForEvaluation(scoreRows: any[], criteria: any[]): number | null {
-  let wSum = 0, acc = 0;
-  const byId: Record<number, any> = {};
-  scoreRows.forEach((s) => { byId[s.criterion_id] = s; });
-  for (const cr of criteria) {
-    const s = byId[cr.id];
-    if (!s || s.is_na || s.score == null) continue;
-    wSum += cr.weight;
-    acc += cr.weight * s.score;
-  }
-  if (wSum === 0) return null;
-  return acc / wSum; // 1..5
-}
-
 app.get('/cycles/:id/results', async (c) => {
   const id = Number(c.req.param('id'));
   const tt = c.req.query('target_type') || '';
