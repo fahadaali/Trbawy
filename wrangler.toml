@@ -14,7 +14,7 @@ not_found_handling = "single-page-application"
 [[d1_databases]]
 binding = "DB"
 database_name = "tarbawi-db"
-database_id = "PLACEHOLDER_DATABASE_ID"
+database_id = "190aa70c-f20f-44c3-8a5d-794abff77dc7"
 migrations_dir = "migrations"
 
 # تخزين الملفات R2 — المرفقات، صور التواقيع، الشعار، الملفات المصدَّرة، النسخ الاحتياطية
