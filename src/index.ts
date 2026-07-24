@@ -6,6 +6,7 @@ import { ensureBootstrap } from './lib/bootstrap';
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
 import councilRoutes from './routes/councils';
+import meetingRoutes from './routes/meetings';
 import auditRoutes from './routes/audit';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -23,6 +24,7 @@ app.get('/api/health', (c) => c.json({ ok: true, app: c.env.APP_NAME }));
 app.route('/api/auth', authRoutes);
 app.route('/api/users', userRoutes);
 app.route('/api/councils', councilRoutes);
+app.route('/api/meetings', meetingRoutes);
 app.route('/api/audit', auditRoutes);
 
 // معالج أخطاء موحّد
