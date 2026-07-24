@@ -27,7 +27,9 @@ function escapePlain(s: string): string {
 function hasResidualDanger(s: string): boolean {
   return /<\s*(script|iframe|object|embed|svg|math|style|form|link|meta|base)\b/i.test(s)
     || /\son\w+\s*=/i.test(s)
-    || /(javascript|vbscript|data\s*:(?!image\/(png|jpe?g|gif|webp);base64,))/i.test(s);
+    // بروتوكولات تنفيذية فعلية (بنقطتين) لا مجرد ذكر الكلمة، و data: غير الصور
+    || /(javascript|vbscript)\s*:/i.test(s)
+    || /data\s*:(?!image\/(png|jpe?g|gif|webp);base64,)/i.test(s);
 }
 
 export function sanitizeHtml(dirty: string): string {

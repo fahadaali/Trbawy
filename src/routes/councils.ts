@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { canManageUsers, canAssignWriter, canViewCouncil } from '../permissions';
+import { canAssignWriter, canViewCouncil, isPresident } from '../permissions';
 import { sanitizeHtml } from '../lib/sanitize';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -74,9 +74,9 @@ app.put('/:id/default-writer', async (c) => {
   return c.json({ ok: true });
 });
 
-// إدارة العضوية (الرئيس/مدير النظام)
+// إدارة العضوية (الرئيس فقط — بنية تنظيمية تربوية)
 app.post('/:id/members', async (c) => {
-  if (!canManageUsers(c.get('user'))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!isPresident(c.get('user'))) return c.json({ error: 'إدارة عضوية المجالس للرئيس فقط' }, 403);
   const id = Number(c.req.param('id'));
   const { user_id, position } = await c.req.json().catch(() => ({}));
   const pos = position === 'chair' ? 'chair' : 'member';
@@ -91,7 +91,7 @@ app.post('/:id/members', async (c) => {
 });
 
 app.delete('/:id/members/:userId', async (c) => {
-  if (!canManageUsers(c.get('user'))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!isPresident(c.get('user'))) return c.json({ error: 'إدارة عضوية المجالس للرئيس فقط' }, 403);
   const id = Number(c.req.param('id'));
   const userId = Number(c.req.param('userId'));
   await c.env.DB.prepare('DELETE FROM council_members WHERE council_id = ? AND user_id = ?')

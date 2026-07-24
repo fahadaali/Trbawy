@@ -239,6 +239,9 @@ app.get('/cycles/:id/form', async (c) => {
   if (!cycle) return c.json({ error: 'الدورة غير موجودة' }, 404);
   const u = c.get('user');
   if (!canEvaluate(u, tt)) return c.json({ error: 'لا تقيّم هذه الفئة' }, 403);
+  // الهدف يجب أن يكون ضمن نطاق تقييم المستخدم (منع كشف أسماء مرحلة أخرى)
+  const allowedTargets = await evaluationTargets(c.env, u, tt);
+  if (!allowedTargets.some((t) => t.id === targetId)) return c.json({ error: 'الهدف خارج نطاق تقييمك' }, 403);
 
   const criteria = await cycleCriteria(c.env, id, tt, cycle.status);
   const evalRow = await c.env.DB.prepare(

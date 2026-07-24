@@ -394,7 +394,7 @@ async function councilDetail(id) {
   const canAssign = ['president'].includes(State.user.role) ||
     (State.user.role === 'first_supervisor' && d.council.type !== 'educational');
 
-  const canManageMembers = ['president', 'system_admin'].includes(State.user.role);
+  const canManageMembers = State.user.role === 'president';
   let allUsers = [];
   if (canManageMembers) { try { allUsers = (await API.get('/users')).users; } catch {} }
   const memberIds = new Set(d.members.map((m) => m.user_id));
