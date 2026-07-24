@@ -35,7 +35,7 @@ async function seed(env: Env): Promise<void> {
   // 2) المستخدمون (كلمة المرور الافتراضية 1234 مع إلزام التغيير)
   const users: Array<[string, string, string, string | null]> = [
     // name, email, role, stage
-    ['رئيس المجلس التربوي', 'president@tarbawi.local', 'president', null],
+    ['رئيس المجلس التربوي', 'fahad2ao@gmail.com', 'president', null],
     ['نائب الرئيس', 'vice@tarbawi.local', 'vice_president', null],
     ['مشرف الثانوي الأول', 'sec.super@tarbawi.local', 'first_supervisor', 'secondary'],
     ['مشرف المتوسط الأول', 'mid.super@tarbawi.local', 'first_supervisor', 'middle'],
@@ -58,7 +58,7 @@ async function seed(env: Env): Promise<void> {
   const idOf = async (email: string) =>
     (await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email).first<{ id: number }>())?.id!;
 
-  const president = await idOf('president@tarbawi.local');
+  const president = await idOf('fahad2ao@gmail.com');
   const vice = await idOf('vice@tarbawi.local');
   const secSuper = await idOf('sec.super@tarbawi.local');
   const midSuper = await idOf('mid.super@tarbawi.local');
