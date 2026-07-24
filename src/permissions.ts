@@ -13,8 +13,8 @@ export const isFirstSupervisor = (u: User) => u.role === 'first_supervisor';
 export const isTeamMember = (u: User) => u.role === 'team_member';
 export const isAdmin = (u: User) => u.role === 'system_admin';
 
-// المرحلة المرتبطة بنوع المجلس (educational يخدم الجميع)
-export function councilStage(type: CouncilType): 'secondary' | 'middle' | null {
+// المرحلة المرتبطة بنوع المجلس (educational يخدم الجميع) — تُستخدم داخليًا فقط
+function councilStage(type: CouncilType): 'secondary' | 'middle' | null {
   if (type === 'secondary') return 'secondary';
   if (type === 'middle') return 'middle';
   return null;
