@@ -42,7 +42,7 @@ VIEWS.students = async () => {
           <td>${esc(STAGE_AR[s.stage] || s.stage)}</td><td>${esc(s.grade || '—')}</td><td>${esc(s.class || '—')}</td>
           <td>${statusTag(s.status, STUDENT_STATUS_AR, STUDENT_STATUS_COLOR)}</td>
           <td class="row">${canManage ? `<button class="btn-ghost btn-sm" data-edit="${s.id}">تعديل</button><button class="btn-ghost btn-sm" data-transfer="${s.id}">نقل</button>` : ''}</td>
-        </tr>`).join('')}</tbody></table>` : '<div class="empty"><div class="ico">🎓</div><p>لا يوجد طلاب</p></div>';
+        </tr>`).join('')}</tbody></table>` : `<div class="empty"><div class="ico">${icon('students', 42)}</div><p>لا يوجد طلاب</p></div>`;
       box.querySelectorAll('[data-hist]').forEach((a) => a.onclick = (e) => { e.preventDefault(); studentHistory(a.dataset.hist); });
       box.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => studentForm(students.find((x) => x.id == b.dataset.edit), load));
       box.querySelectorAll('[data-transfer]').forEach((b) => b.onclick = () => transferStudent(students.find((x) => x.id == b.dataset.transfer), load));
@@ -148,8 +148,8 @@ async function studentHistory(id) {
   let d;
   try { d = await API.get('/students/' + id + '/history'); } catch (err) { return toast(err.message, 'err'); }
   const s = d.student;
-  const alertHtml = d.alert === 'low' ? '<div class="form-error">⚠ أداء متدنٍّ (أقل من ٣)</div>'
-    : d.alert === 'declining' ? '<div class="tag tag-gold" style="display:block;padding:8px">⚠ تراجع عن الدورة السابقة</div>' : '';
+  const alertHtml = d.alert === 'low' ? `<div class="form-error">${icon('warning', 15)} أداء متدنٍّ (أقل من ٣)</div>`
+    : d.alert === 'declining' ? `<div class="tag tag-gold" style="display:block;padding:8px">${icon('warning', 15)} تراجع عن الدورة السابقة</div>` : '';
 
   // مخطط تطوّر بسيط (SVG) للطالب مقابل متوسط المرحلة
   const chart = buildTrendChart(d.timeline);

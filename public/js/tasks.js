@@ -32,7 +32,7 @@ async function loadMine() {
     const done = actions.filter((a) => a.status === 'done');
     box.innerHTML = `
       <div class="card"><div class="card-head"><h3>البنود المفتوحة (${arNum(open.length)})</h3></div>
-        ${open.length ? taskTable(open, true) : '<div class="empty"><div class="ico">✅</div><p>لا توجد بنود مفتوحة عليك</p></div>'}</div>
+        ${open.length ? taskTable(open, true) : `<div class="empty"><div class="ico">${icon('tasks', 42)}</div><p>لا توجد بنود مفتوحة عليك</p></div>`}</div>
       ${done.length ? `<div class="card mt"><div class="card-head"><h3>المنجزة (${arNum(done.length)})</h3></div>${taskTable(done, false)}</div>` : ''}`;
     wireTaskTable(box);
   } catch (err) { box.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
@@ -59,7 +59,7 @@ async function loadAll() {
     list.innerHTML = '<div class="spinner"></div>';
     try {
       const { actions } = await API.get('/actions?' + p.toString());
-      list.innerHTML = actions.length ? taskTable(actions, false) : '<div class="empty"><div class="ico">📭</div><p>لا توجد بنود</p></div>';
+      list.innerHTML = actions.length ? taskTable(actions, false) : `<div class="empty"><div class="ico">${icon('inbox', 42)}</div><p>لا توجد بنود</p></div>`;
       wireTaskTable(list);
     } catch (err) { list.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
   };
@@ -80,7 +80,7 @@ function taskTable(actions, allowComplete) {
       <td>${arNum(a.progress)}٪</td>
       <td class="row">
         <button class="btn-ghost btn-sm" data-open="${a.id}">تفاصيل</button>
-        ${allowComplete && a.status !== 'done' ? `<button class="btn btn-sm" data-done="${a.id}">✔ إنجاز</button>` : ''}
+        ${allowComplete && a.status !== 'done' ? `<button class="btn btn-sm" data-done="${a.id}">${icon('check', 15)} إنجاز</button>` : ''}
       </td></tr>`).join('')}</tbody></table>`;
 }
 
@@ -94,7 +94,7 @@ function completeTask(id, onDone) {
     title: 'تعليم البند منجزاً',
     body: `<div class="field"><label>ملاحظة الإنجاز (اختياري)</label><textarea id="cn" rows="2"></textarea></div>`,
     buttons: [
-      { label: '✔ تأكيد الإنجاز', onClick: async (cl, ov) => {
+      { label: 'تأكيد الإنجاز', onClick: async (cl, ov) => {
         try { await API.post(`/actions/${id}/complete`, { note: ov.querySelector('#cn').value.trim() || null }); cl(); toast('تم تسجيل الإنجاز', 'ok'); if (onDone) onDone(); } catch (err) { toast(err.message, 'err'); }
       }},
       { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
@@ -140,7 +140,7 @@ async function taskDetail(id, onBack) {
           <button class="btn-ghost btn-sm" id="td_save">حفظ</button>
         </div>` : ''}`,
     buttons: [
-      ...(iAmAssignee && a.status !== 'done' ? [{ label: '✔ تعليم منجزاً', onClick: (cl) => { cl(); completeTask(id, () => { if (onBack) onBack(); }); } }] : []),
+      ...(iAmAssignee && a.status !== 'done' ? [{ label: 'تعليم منجزاً', onClick: (cl) => { cl(); completeTask(id, () => { if (onBack) onBack(); }); } }] : []),
       ...(canManage && a.status === 'done' ? [{ label: 'إعادة فتح', class: 'btn-ghost', onClick: async (cl) => { try { await API.post(`/actions/${id}/reopen`); cl(); toast('تمت إعادة الفتح', 'ok'); if (onBack) onBack(); } catch (err) { toast(err.message, 'err'); } } }] : []),
       { label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() },
     ],

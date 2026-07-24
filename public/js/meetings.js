@@ -40,7 +40,7 @@ async function meetingList() {
       <div class="card-head">
         <h3>المحاضر</h3>
         <div class="spacer"></div>
-        <button class="btn-ghost btn-sm" id="bundleBtn">📦 تصدير حزمة</button>
+        <button class="btn-ghost btn-sm" id="bundleBtn">${icon('package', 16)} تصدير حزمة</button>
         ${canCreate ? '<button class="btn btn-sm" id="newMeeting">+ دعوة/محضر جديد</button>' : ''}
       </div>
       <div class="card-body">
@@ -82,7 +82,7 @@ async function meetingList() {
     box.innerHTML = '<div class="spinner"></div>';
     try {
       const { meetings } = await API.get('/meetings?' + p.toString());
-      if (!meetings.length) { box.innerHTML = '<div class="empty"><div class="ico">📋</div><p>لا توجد محاضر</p></div>'; return; }
+      if (!meetings.length) { box.innerHTML = `<div class="empty"><div class="ico">${icon('meetings', 42)}</div><p>لا توجد محاضر</p></div>`; return; }
       box.innerHTML = `<table class="tbl">
         <thead><tr><th>رقم المحضر</th><th>العنوان</th><th>المجلس</th><th>التاريخ</th><th>الحالة</th><th></th></tr></thead>
         <tbody>${meetings.map((m) => `<tr>
@@ -263,12 +263,12 @@ async function meetingDetail(id) {
     btns.push(`<button class="btn-ghost btn-sm" id="btnAgenda">تعديل البنود</button>`);
     btns.push(`<button class="btn-ghost btn-sm" id="btnAtt">تعديل الحضور</button>`);
   }
-  if (p.can_sign) btns.push(`<button class="btn btn-sm" id="btnSign">✍ توقيع المحضر</button>`);
+  if (p.can_sign) btns.push(`<button class="btn btn-sm" id="btnSign">${icon('pen', 16)} توقيع المحضر</button>`);
   if (p.can_submit) btns.push(`<button class="btn btn-sm" id="btnSubmit">إرسال للتوقيعات</button>`);
   if (p.can_approve) btns.push(`<button class="btn btn-sm" id="btnApprove">اعتماد وإقفال</button>`);
   if (p.can_archive) btns.push(`<button class="btn-ghost btn-sm" id="btnArchive">أرشفة</button>`);
-  if (p.can_print) btns.push(`<button class="btn-ghost btn-sm" id="btnPrint">🖨 طباعة / تصدير PDF</button>`);
-  if (p.can_amend) btns.push(`<button class="btn-ghost btn-sm" id="btnAmend">📝 محضر تصويب/ملحق</button>`);
+  if (p.can_print) btns.push(`<button class="btn-ghost btn-sm" id="btnPrint">${icon('print', 16)} طباعة / تصدير PDF</button>`);
+  if (p.can_amend) btns.push(`<button class="btn-ghost btn-sm" id="btnAmend">${icon('meetings', 16)} محضر تصويب/ملحق</button>`);
   if (p.can_cancel) btns.push(`<button class="btn-danger btn-sm" id="btnCancel">إلغاء المحضر</button>`);
 
   // لوحة التوقيعات في مرحلة الانتظار
@@ -277,7 +277,7 @@ async function meetingDetail(id) {
     const present = d.attendees.filter((a) => !a.is_guest && a.attendance_status === 'present');
     const pending = present.filter((a) => !a.signed_at && !a.signature_override);
     signPanel = `<div class="card mt"><div class="card-head"><h3>حالة التوقيعات</h3></div><div class="card-body">
-      ${pending.length ? `<div class="tag tag-gold" style="display:block;padding:8px">بانتظار توقيع: ${pending.map((a) => esc(a.user_name)).join('، ')}</div>` : '<div class="tag tag-green" style="display:block;padding:8px">اكتملت التوقيعات ✔</div>'}
+      ${pending.length ? `<div class="tag tag-gold" style="display:block;padding:8px">بانتظار توقيع: ${pending.map((a) => esc(a.user_name)).join('، ')}</div>` : `<div class="tag tag-green" style="display:block;padding:8px">اكتملت التوقيعات ${icon('check', 15)}</div>`}
       <table class="tbl mt"><thead><tr><th>العضو</th><th>التوقيع</th><th>الوقت</th><th>الرمز</th>${p.can_override ? '<th></th>' : ''}</tr></thead><tbody>
       ${present.map((a) => `<tr><td>${esc(a.user_name)}</td>
         <td>${a.signed_at ? '<span class="tag tag-green">وقّع</span>' : (a.signature_override ? '<span class="tag tag-gold">تجاوز</span>' : '<span class="tag tag-gray">لم يوقّع</span>')}</td>
@@ -296,7 +296,7 @@ async function meetingDetail(id) {
       </div>
       <div class="card-body">
         ${m.status === 'cancelled' ? `<div class="form-error">هذا المحضر <b>ملغى</b>. السبب: ${esc(m.cancel_reason || '')}</div>` : ''}
-        ${m.status === 'approved' ? `<div class="tag tag-green" style="display:block;padding:10px">✔ محضر معتمد ومقفل — أي تصحيح يكون عبر محضر تصويب/ملحق.</div>` : ''}
+        ${m.status === 'approved' ? `<div class="tag tag-green" style="display:block;padding:10px">${icon('check', 15)} محضر معتمد ومقفل — أي تصحيح يكون عبر محضر تصويب/ملحق.</div>` : ''}
         <div class="row-2 mt">
           <div><span class="muted">العنوان:</span> ${esc(m.title || '—')}</div>
           <div><span class="muted">المجلس:</span> ${esc(COUNCIL_TYPE_AR[d.council.type] || d.council.name)}</div>

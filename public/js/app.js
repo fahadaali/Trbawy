@@ -75,7 +75,7 @@ function renderChangePassword(forced) {
   app().innerHTML = `
     <div class="auth-wrap">
       <form class="auth-card" id="cpForm">
-        <div class="auth-logo">🔑</div>
+        <div class="auth-logo">${icon('key', 30)}</div>
         <h1>${forced ? 'تغيير كلمة المرور' : 'تحديث كلمة المرور'}</h1>
         <p class="sub">${forced ? 'يجب تغيير كلمة المرور الافتراضية قبل المتابعة' : ''}</p>
         <div id="cpErr"></div>
@@ -118,20 +118,20 @@ function renderChangePassword(forced) {
 // ============ الهيكل العام ============
 const NAV = [
   { group: 'الرئيسية', items: [
-    { key: 'dashboard', label: 'الصفحة الرئيسية', ico: '🏠', roles: '*' },
+    { key: 'dashboard', label: 'الصفحة الرئيسية', ico: 'home', roles: '*' },
   ]},
   { group: 'العمل التربوي', items: [
-    { key: 'meetings', label: 'المحاضر', ico: '📋', roles: ['president','vice_president','first_supervisor','team_member'] },
-    { key: 'tasks', label: 'المهام', ico: '✅', roles: ['president','vice_president','first_supervisor','team_member'] },
-    { key: 'evaluations', label: 'التقييم', ico: '📊', roles: ['president','vice_president','first_supervisor','team_member'] },
-    { key: 'students', label: 'سجل الطلاب', ico: '🎓', roles: ['president','first_supervisor'] },
+    { key: 'meetings', label: 'المحاضر', ico: 'meetings', roles: ['president','vice_president','first_supervisor','team_member'] },
+    { key: 'tasks', label: 'المهام', ico: 'tasks', roles: ['president','vice_president','first_supervisor','team_member'] },
+    { key: 'evaluations', label: 'التقييم', ico: 'evaluations', roles: ['president','vice_president','first_supervisor','team_member'] },
+    { key: 'students', label: 'سجل الطلاب', ico: 'students', roles: ['president','first_supervisor'] },
   ]},
   { group: 'الإدارة', items: [
-    { key: 'users', label: 'المستخدمون', ico: '👥', roles: ['president','system_admin'] },
-    { key: 'councils', label: 'المجالس', ico: '🏛️', roles: ['president','vice_president','first_supervisor','team_member'] },
-    { key: 'branding', label: 'الهوية البصرية', ico: '🎨', roles: ['president','system_admin'] },
-    { key: 'audit', label: 'سجل التدقيق', ico: '🛡️', roles: ['president','system_admin'] },
-    { key: 'backups', label: 'النسخ الاحتياطي', ico: '💾', roles: ['president','system_admin'] },
+    { key: 'users', label: 'المستخدمون', ico: 'users', roles: ['president','system_admin'] },
+    { key: 'councils', label: 'المجالس', ico: 'councils', roles: ['president','vice_president','first_supervisor','team_member'] },
+    { key: 'branding', label: 'الهوية البصرية', ico: 'branding', roles: ['president','system_admin'] },
+    { key: 'audit', label: 'سجل التدقيق', ico: 'audit', roles: ['president','system_admin'] },
+    { key: 'backups', label: 'النسخ الاحتياطي', ico: 'backups', roles: ['president','system_admin'] },
   ]},
 ];
 
@@ -145,7 +145,7 @@ function renderShell(view, rest) {
     const items = g.items.filter(canSee);
     if (!items.length) return '';
     return `<div class="nav-group-title">${g.group}</div>` + items.map((it) =>
-      `<a href="#/${it.key}" class="${view === it.key ? 'active' : ''}"><span class="ico">${it.ico}</span>${it.label}</a>`
+      `<a href="#/${it.key}" class="${view === it.key ? 'active' : ''}"><span class="ico">${icon(it.ico)}</span>${it.label}</a>`
     ).join('');
   }).join('');
 
@@ -157,16 +157,16 @@ function renderShell(view, rest) {
         <div class="userbox">
           <div class="av">${esc(initials(u.name))}</div>
           <div class="meta"><b>${esc(u.name)}</b><span>${esc(ROLE_AR[u.role] || u.role)}${u.stage ? ' — ' + STAGE_AR[u.stage] : ''}</span></div>
-          <button class="btn-ghost btn-sm" id="logoutBtn" title="خروج">↩</button>
+          <button class="btn-ghost btn-sm" id="logoutBtn" title="خروج">${icon('logout', 16)}</button>
         </div>
       </aside>
       <div class="main">
         <div class="topbar">
-          <button class="menu-toggle" id="menuToggle">☰</button>
+          <button class="menu-toggle" id="menuToggle">${icon('menu', 18)}</button>
           <h2 id="pageTitle"></h2>
           <div class="spacer"></div>
           <div style="position:relative">
-            <button class="btn-ghost btn-sm" id="bellBtn" style="font-size:16px">🔔<span id="notifBadge" class="badge" style="display:none;position:absolute;top:-6px;inset-inline-start:-6px;background:var(--danger);color:#fff;border-radius:20px;padding:0 6px;font-size:11px"></span></button>
+            <button class="btn-ghost btn-sm" id="bellBtn">${icon('bell', 18)}<span id="notifBadge" class="badge" style="display:none;position:absolute;top:-6px;inset-inline-start:-6px;background:var(--danger);color:#fff;border-radius:20px;padding:0 6px;font-size:11px"></span></button>
             <div id="notifPanel" style="display:none;position:absolute;top:110%;inset-inline-start:0;width:320px;max-height:400px;overflow:auto;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);z-index:60"></div>
           </div>
           <button class="btn-ghost btn-sm" id="profileBtn">توقيعي</button>
@@ -198,19 +198,19 @@ async function showPendingPopup() {
   let d;
   try { d = await API.get('/dashboard/pending'); } catch { return; }
   const items = [];
-  (d.signatures || []).forEach((s) => items.push({ ic: '✍', bg: '#f8f0da', label: 'محضر بانتظار توقيعك', name: s.title, link: s.link }));
-  (d.evaluations || []).forEach((e) => items.push({ ic: '📊', bg: '#e7f2ee', label: 'دورة تقييم مفتوحة' + (e.remaining ? ` — متبقٍ ${arNum(e.remaining)}` : ''), name: e.title, link: e.link }));
-  (d.tasks || []).forEach((t) => items.push({ ic: '✅', bg: '#eef1f0', label: 'مهمة عليك', name: t.title, link: t.link }));
+  (d.signatures || []).forEach((s) => items.push({ ic: 'pen', bg: '#f8f0da', color: '#b9770e', label: 'محضر بانتظار توقيعك', name: s.title, link: s.link }));
+  (d.evaluations || []).forEach((e) => items.push({ ic: 'evaluations', bg: '#e7f2ee', color: 'var(--primary)', label: 'دورة تقييم مفتوحة' + (e.remaining ? ` — متبقٍ ${arNum(e.remaining)}` : ''), name: e.title, link: e.link }));
+  (d.tasks || []).forEach((t) => items.push({ ic: 'tasks', bg: '#eef1f0', color: '#556', label: 'مهمة عليك', name: t.title, link: t.link }));
   if (!items.length) return;
 
   document.querySelectorAll('.pending-pop').forEach((el) => el.remove());
   const pop = document.createElement('div');
   pop.className = 'pending-pop';
   pop.innerHTML = `
-    <div class="pp-head"><span>🔔</span><b>لديك ${arNum(items.length)} عنصرًا بانتظارك</b><button class="x" aria-label="إغلاق">&times;</button></div>
+    <div class="pp-head">${icon('bell', 18)}<b>لديك ${arNum(items.length)} عنصرًا بانتظارك</b><button class="x" aria-label="إغلاق">&times;</button></div>
     <div class="pp-body">${items.map((it, i) => `
       <button class="pp-item" data-i="${i}">
-        <span class="ic" style="background:${it.bg}">${it.ic}</span>
+        <span class="ic" style="background:${it.bg};color:${it.color}">${icon(it.ic, 18)}</span>
         <span class="tx"><b>${esc(it.name || '—')}</b><span>${esc(it.label)}</span></span>
         <span class="go">‹</span>
       </button>`).join('')}</div>`;
@@ -266,7 +266,7 @@ function content() { return document.getElementById('content'); }
 // عرض خطأ في منطقة المحتوى (تُستخدم من كل العروض عند فشل الجلب)
 function renderError(err) {
   if (err && err.status === 401) { State.user = null; return route(); }
-  content().innerHTML = `<div class="card"><div class="empty"><div class="ico">⚠️</div><p>${esc(err && err.message ? err.message : 'حدث خطأ')}</p></div></div>`;
+  content().innerHTML = `<div class="card"><div class="empty"><div class="ico">${icon('warning', 42)}</div><p>${esc(err && err.message ? err.message : 'حدث خطأ')}</p></div></div>`;
 }
 
 // ============ العروض ============
@@ -278,7 +278,7 @@ VIEWS.dashboard = async () => {
   const u = State.user;
   content().innerHTML = `
     <div class="card"><div class="card-body">
-      <h3 style="margin-bottom:6px">مرحباً، ${esc(u.name)} 👋</h3>
+      <h3 style="margin-bottom:6px">مرحباً، ${esc(u.name)}</h3>
       <p class="muted">${esc(ROLE_AR[u.role] || u.role)}${u.stage ? ' — المرحلة ' + STAGE_AR[u.stage] : ''}</p>
     </div></div>
     <div id="dashCards" class="grid grid-4 mt"><div class="spinner"></div></div>

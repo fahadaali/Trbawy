@@ -27,7 +27,7 @@ async function cyclesList() {
         <p class="muted" style="font-size:13px">${esc(cy.start_date)} → ${esc(cy.end_date)}</p>
         <p class="muted" style="font-size:12px">${cy.target_types.split(',').map((t) => TARGET_TYPE_AR[t] || t).join('، ')}</p>
         <button class="btn-ghost btn-sm mt" data-cy="${cy.id}">فتح</button>
-      </div></div>`).join('') || '<div class="empty"><div class="ico">📊</div><p>لا توجد دورات تقييم</p></div>'}</div>`;
+      </div></div>`).join('') || `<div class="empty"><div class="ico">${icon('evaluations', 42)}</div><p>لا توجد دورات تقييم</p></div>`}</div>`;
 
   if (isPres) document.getElementById('newCycle').onclick = newCycleForm;
   content().querySelectorAll('[data-cy]').forEach((b) => b.onclick = () => nav('evaluations/' + b.dataset.cy));
