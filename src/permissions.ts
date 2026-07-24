@@ -50,11 +50,10 @@ export function canCreateMeeting(u: User, council: CouncilRow): boolean {
 // ---- تعيين كاتب المحضر ---- (نفس صلاحية الإنشاء)
 export const canAssignWriter = canCreateMeeting;
 
-// ---- اعتماد وإقفال المحضر ----
-// التربوي: الرئيس. مجلس المرحلة: مشرف تلك المرحلة (وأيضاً الرئيس صلاحيته كاملة).
+// ---- اعتماد وإقفال المحضر (جهة الاعتماد الوحيدة لكل مجلس) ----
+// المجلس التربوي: الرئيس فقط. مجلس كل مرحلة: مشرفها الأول فقط (الرئيس لا يعتمد محاضر المراحل).
 export function canApproveMeeting(u: User, council: CouncilRow): boolean {
   if (council.type === 'educational') return isPresident(u);
-  if (isPresident(u)) return true;
   if (isFirstSupervisor(u)) return u.stage === councilStage(council.type);
   return false;
 }
