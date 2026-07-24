@@ -130,6 +130,7 @@ const NAV = [
     { key: 'councils', label: 'المجالس', ico: '🏛️', roles: ['president','vice_president','first_supervisor','team_member'] },
     { key: 'branding', label: 'الهوية البصرية', ico: '🎨', roles: ['president','system_admin'] },
     { key: 'audit', label: 'سجل التدقيق', ico: '🛡️', roles: ['president','system_admin'] },
+    { key: 'backups', label: 'النسخ الاحتياطي', ico: '💾', roles: ['president','system_admin'] },
   ]},
 ];
 
@@ -452,29 +453,64 @@ async function councilDetail(id) {
 }
 
 // ---- سجل التدقيق ----
+const AUDIT_ENTITIES = { '': 'كل الكيانات', meeting: 'محضر', action_item: 'قرار/مهمة', evaluation: 'تقييم', eval_cycle: 'دورة تقييم', student: 'طالب', user: 'مستخدم', council: 'مجلس', settings: 'الإعدادات', backup: 'نسخة احتياطية' };
+let auditOffset = 0;
+
 VIEWS.audit = async () => {
   setTitle('سجل التدقيق');
+  auditOffset = 0;
+  content().innerHTML = `
+    <div class="card"><div class="card-head"><h3>سجل التدقيق</h3><div class="spacer"></div>
+      <select id="auEntity" style="padding:8px 11px;border:1px solid var(--border);border-radius:8px">${Object.entries(AUDIT_ENTITIES).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+      <button class="btn-ghost btn-sm" id="auApply">تصفية</button></div>
+      <table class="tbl"><thead><tr><th>الوقت</th><th>المستخدم</th><th>العملية</th><th>الكيان</th><th></th></tr></thead>
+        <tbody id="auBody"></tbody></table>
+      <div class="card-body center"><button class="btn-ghost btn-sm" id="auMore">تحميل المزيد</button></div>
+    </div>`;
+  const load = async (reset) => {
+    if (reset) { auditOffset = 0; document.getElementById('auBody').innerHTML = ''; }
+    const ent = document.getElementById('auEntity').value;
+    let data;
+    try { data = await API.get(`/audit?limit=50&offset=${auditOffset}${ent ? '&entity_type=' + ent : ''}`); }
+    catch (err) { return renderError(err); }
+    const rows = data.entries.map((e) => `<tr>
+      <td>${fmtDateTime(e.timestamp)}</td><td>${esc(e.user_name || '—')}</td>
+      <td><span class="tag tag-gray">${esc(e.action)}</span></td>
+      <td>${esc(AUDIT_ENTITIES[e.entity_type] || e.entity_type || '')} ${e.entity_id ? '#' + arNum(e.entity_id) : ''}</td>
+      <td>${(e.old_value || e.new_value) ? `<button class="btn-ghost btn-sm" data-det='${encodeURIComponent(JSON.stringify({ o: e.old_value, n: e.new_value }))}'>تفاصيل</button>` : ''}</td>
+    </tr>`).join('');
+    document.getElementById('auBody').insertAdjacentHTML('beforeend', rows || (auditOffset === 0 ? '<tr><td colspan="5" class="center muted">لا سجلات</td></tr>' : ''));
+    auditOffset += data.entries.length;
+    document.getElementById('auMore').style.display = data.entries.length < 50 ? 'none' : 'inline-flex';
+    document.querySelectorAll('#auBody [data-det]').forEach((b) => b.onclick = () => {
+      const d = JSON.parse(decodeURIComponent(b.dataset.det));
+      openModal({ title: 'تفاصيل العملية', body: `<h4>قبل</h4><pre style="background:#f4f6f5;padding:10px;border-radius:8px;overflow:auto;direction:ltr;font-size:12px">${esc(d.o || '—')}</pre><h4 class="mt">بعد</h4><pre style="background:#f4f6f5;padding:10px;border-radius:8px;overflow:auto;direction:ltr;font-size:12px">${esc(d.n || '—')}</pre>`, buttons: [{ label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() }] });
+    });
+  };
+  document.getElementById('auApply').onclick = () => load(true);
+  document.getElementById('auMore').onclick = () => load(false);
+  load(true);
+};
+
+// ---- النسخ الاحتياطي ----
+VIEWS.backups = async () => {
+  setTitle('النسخ الاحتياطي');
   content().innerHTML = '<div class="spinner"></div>';
   let data;
-  try { data = await API.get('/audit?limit=200'); }
-  catch (err) { return renderError(err); }
-
-  const rows = data.entries.map((e) => `
-    <tr>
-      <td>${fmtDateTime(e.timestamp)}</td>
-      <td>${esc(e.user_name || '—')}</td>
-      <td><span class="tag tag-gray">${esc(e.action)}</span></td>
-      <td>${esc(e.entity_type || '')} ${e.entity_id ? '#' + arNum(e.entity_id) : ''}</td>
-    </tr>`).join('');
-
+  try { data = await API.get('/admin/backups'); } catch (err) { return renderError(err); }
   content().innerHTML = `
-    <div class="card">
-      <div class="card-head"><h3>آخر العمليات (${arNum(data.entries.length)})</h3></div>
-      <table class="tbl">
-        <thead><tr><th>الوقت</th><th>المستخدم</th><th>العملية</th><th>الكيان</th></tr></thead>
-        <tbody>${rows || '<tr><td colspan="4" class="center muted">لا توجد سجلات</td></tr>'}</tbody>
-      </table>
-    </div>`;
+    <div class="card"><div class="card-head"><h3>النسخ الاحتياطية</h3><div class="spacer"></div>
+      <button class="btn btn-sm" id="bkNow">إنشاء نسخة الآن</button></div>
+    <div class="card-body">
+      <p class="muted">تُنشأ نسخة احتياطية تلقائية يومياً وتُخزَّن في R2. يمكن إنشاء نسخة يدوية وتنزيلها.</p>
+      <table class="tbl mt"><thead><tr><th>الملف</th><th>الحجم</th><th>التاريخ</th><th></th></tr></thead>
+        <tbody>${data.backups.map((b) => `<tr><td dir="ltr" style="text-align:right">${esc(b.key.split('/').pop())}</td>
+          <td>${arNum((b.size / 1024).toFixed(1))} ك.ب</td><td>${fmtDateTime(b.uploaded)}</td>
+          <td><a class="btn-ghost btn-sm" href="/api/admin/backups/download?key=${encodeURIComponent(b.key)}">تنزيل</a></td></tr>`).join('') || '<tr><td colspan="4" class="center muted">لا نسخ بعد</td></tr>'}</tbody></table>
+    </div></div>`;
+  document.getElementById('bkNow').onclick = async () => {
+    try { await API.post('/admin/backups'); toast('تم إنشاء النسخة', 'ok'); VIEWS.backups(); } catch (err) { toast(err.message, 'err'); }
+  };
 };
 
 // ---- توقيعي الشخصي ----

@@ -13,9 +13,11 @@ import studentRoutes from './routes/students';
 import settingsRoutes from './routes/settings';
 import notificationRoutes from './routes/notifications';
 import dashboardRoutes from './routes/dashboard';
+import adminRoutes from './routes/admin';
 import auditRoutes from './routes/audit';
 import pageRoutes from './routes/pages';
 import { runDailyReminders } from './lib/reminders';
+import { createBackup } from './lib/backup';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -39,6 +41,7 @@ app.route('/api/students', studentRoutes);
 app.route('/api/settings', settingsRoutes);
 app.route('/api/notifications', notificationRoutes);
 app.route('/api/dashboard', dashboardRoutes);
+app.route('/api/admin', adminRoutes);
 app.route('/api/audit', auditRoutes);
 
 // معالج أخطاء موحّد
@@ -62,6 +65,9 @@ export default {
   // وتذكير إغلاق دورات التقييم قبل ٣ أيام لمن لم يكمل.
   async scheduled(_event: ScheduledController, env: Env, ctx: ExecutionContext) {
     await ensureBootstrap(env);
-    ctx.waitUntil(runDailyReminders(env));
+    ctx.waitUntil((async () => {
+      await runDailyReminders(env);
+      await createBackup(env); // نسخة احتياطية يومية إلى R2
+    })());
   },
 };
