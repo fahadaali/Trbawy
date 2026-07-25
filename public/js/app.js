@@ -222,6 +222,7 @@ function renderShell(view, rest) {
             <div id="notifPanel" style="display:none;position:absolute;top:110%;inset-inline-start:0;width:320px;max-height:400px;overflow:auto;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);z-index:60"></div>
           </div>
           <button class="btn-ghost btn-sm" id="profileBtn">توقيعي</button>
+          <button class="btn-ghost btn-sm" id="devicesBtn">${icon('key', 16)} أجهزتي</button>
           <button class="btn-ghost btn-sm" id="pwBtn">تغيير كلمة المرور</button>
         </div>
         <div class="content" id="content"><div class="spinner"></div></div>
@@ -235,6 +236,7 @@ function renderShell(view, rest) {
   };
   document.getElementById('pwBtn').onclick = () => renderChangePassword(false);
   document.getElementById('profileBtn').onclick = () => profileSignature();
+  document.getElementById('devicesBtn').onclick = () => myDevicesDialog();
   document.getElementById('menuToggle').onclick = () => document.getElementById('sidebar').classList.toggle('open');
   setupNotifications();
   setupGlobalSearch();
@@ -723,12 +725,125 @@ VIEWS.backups = async () => {
       <table class="tbl mt"><thead><tr><th>الملف</th><th>الحجم</th><th>التاريخ</th><th></th></tr></thead>
         <tbody>${data.backups.map((b) => `<tr><td dir="ltr" style="text-align:right">${esc(b.key.split('/').pop())}</td>
           <td>${arNum((b.size / 1024).toFixed(1))} ك.ب</td><td>${fmtDateTime(b.uploaded)}</td>
-          <td><a class="btn-ghost btn-sm" href="/api/admin/backups/download?key=${encodeURIComponent(b.key)}">تنزيل</a></td></tr>`).join('') || '<tr><td colspan="4" class="center muted">لا نسخ بعد</td></tr>'}</tbody></table>
-    </div></div>`;
+          <td><a class="btn-ghost btn-sm" href="/api/admin/backups/download?key=${encodeURIComponent(b.key)}">تنزيل</a>
+            ${isSysAdmin() ? `<button class="btn-danger btn-sm" data-restore="${esc(b.key)}">استعادة</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="center muted">لا نسخ بعد</td></tr>'}</tbody></table>
+      ${isSysAdmin() ? '<p class="hint mt">الاستعادة تستبدل كل البيانات الحالية بمحتوى النسخة، وتُنشئ نسخة وقائية تلقائياً قبل التنفيذ.</p>' : ''}
+    </div></div>
+
+    <div class="card mt"><div class="card-head"><h3>${icon('key', 16)} الجلسات النشطة</h3><div class="spacer"></div>
+      <button class="btn-ghost btn-sm" id="sesReload">تحديث</button></div>
+      <div class="card-body"><div id="sesBox"><div class="spinner"></div></div></div></div>`;
+
   document.getElementById('bkNow').onclick = async () => {
     try { await API.post('/admin/backups'); toast('تم إنشاء النسخة', 'ok'); VIEWS.backups(); } catch (err) { toast(err.message, 'err'); }
   };
+  content().querySelectorAll('[data-restore]').forEach((b) => b.onclick = () => restoreBackupDialog(b.dataset.restore));
+  document.getElementById('sesReload').onclick = loadSessions;
+  loadSessions();
 };
+
+const isSysAdmin = () => State.user && State.user.role === 'system_admin';
+
+// جدول الجلسات النشطة مع الإنهاء عن بُعد
+async function loadSessions() {
+  const box = document.getElementById('sesBox');
+  if (!box) return;
+  box.innerHTML = '<div class="spinner"></div>';
+  let data;
+  try { data = await API.get('/admin/sessions'); }
+  catch (err) { box.innerHTML = `<div class="form-error">${esc(err.message)}</div>`; return; }
+  box.innerHTML = `<p class="muted">تنتهي الجلسة تلقائياً بعد ٨ ساعات خمول. يمكنك إنهاء أي جلسة فوراً.</p>
+    <table class="tbl mt"><thead><tr><th>المستخدم</th><th>آخر نشاط</th><th>البداية</th><th>العنوان</th><th>الجهاز</th><th></th></tr></thead>
+      <tbody>${data.sessions.map((x) => `<tr>
+        <td><b>${esc(x.user_name)}</b>${x.is_current ? ' <span class="tag tag-green">جلستك</span>' : ''}</td>
+        <td>${fmtDateTime(x.last_active)}</td><td>${fmtDateTime(x.created_at)}</td>
+        <td dir="ltr" style="text-align:right">${esc(x.ip || '—')}</td>
+        <td class="muted" style="font-size:12px">${esc(shortUa(x.user_agent))}</td>
+        <td>${x.is_current ? '' : `<button class="btn-danger btn-sm" data-kill="${esc(x.id)}">إنهاء</button>`}</td></tr>`).join('')
+        || '<tr><td colspan="6" class="center muted">لا جلسات</td></tr>'}</tbody></table>`;
+  box.querySelectorAll('[data-kill]').forEach((b) => b.onclick = () =>
+    confirmModal('إنهاء الجلسة', 'سيُسجَّل خروج هذا المستخدم فوراً من الجهاز المحدَّد. متابعة؟', async () => {
+      try { await API.del('/admin/sessions/' + encodeURIComponent(b.dataset.kill)); toast('أُنهيت الجلسة', 'ok'); loadSessions(); }
+      catch (err) { toast(err.message, 'err'); }
+    }, { danger: true }));
+}
+
+// اسم مختصر للمتصفح/النظام من ترويسة user-agent
+function shortUa(ua) {
+  if (!ua) return '—';
+  const os = /Android/i.test(ua) ? 'أندرويد' : /iPhone|iPad|iOS/i.test(ua) ? 'iOS'
+    : /Windows/i.test(ua) ? 'ويندوز' : /Mac OS/i.test(ua) ? 'ماك' : /Linux/i.test(ua) ? 'لينكس' : '';
+  const br = /Edg\//i.test(ua) ? 'Edge' : /OPR\//i.test(ua) ? 'Opera' : /Chrome\//i.test(ua) ? 'Chrome'
+    : /Firefox\//i.test(ua) ? 'Firefox' : /Safari\//i.test(ua) ? 'Safari' : '';
+  // تعذّر التعرّف (أداة سطر أوامر مثلاً): نعرض الترويسة مختصرة كما هي
+  if (!br && !os) return ua.length > 34 ? ua.slice(0, 34) + '…' : ua;
+  return [br, os].filter(Boolean).join(' — ');
+}
+
+// حوار استعادة نسخة احتياطية (تأكيد نصّي صريح)
+function restoreBackupDialog(key) {
+  const { overlay } = openModal({
+    title: 'استعادة نسخة احتياطية',
+    body: `<div class="form-error">تحذير: ستُستبدل <b>كل</b> البيانات الحالية بمحتوى النسخة
+        <span dir="ltr">${esc(key.split('/').pop())}</span>. تُنشأ نسخة وقائية تلقائياً قبل التنفيذ.</div>
+      <div id="rbErr"></div>
+      <div class="field"><label>اكتب كلمة «استعادة» للتأكيد</label><input id="rb_confirm" placeholder="استعادة" /></div>`,
+    buttons: [
+      { label: 'تنفيذ الاستعادة', class: 'btn-danger', onClick: async (cl, ov) => {
+        const btn = ov.querySelector('[data-i="0"]');
+        btn.disabled = true; btn.textContent = 'جارٍ التنفيذ…';
+        try {
+          const res = await API.post('/admin/backups/restore', { key, confirm: ov.querySelector('#rb_confirm').value.trim() });
+          const total = res.report.reduce((a, r) => a + r.rows, 0);
+          cl(); toast(`اكتملت الاستعادة — ${arNum(total)} صف`, 'ok');
+          VIEWS.backups();
+        } catch (err) {
+          btn.disabled = false; btn.textContent = 'تنفيذ الاستعادة';
+          ov.querySelector('#rbErr').innerHTML = `<div class="form-error">${esc(err.message)}</div>`;
+        }
+      }},
+      { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
+    ],
+  });
+  overlay.querySelector('#rb_confirm').focus();
+}
+
+// ---- أجهزتي: الجلسات النشطة للحساب الحالي ----
+function myDevicesDialog() {
+  const { overlay } = openModal({
+    title: 'أجهزتي — الجلسات النشطة',
+    body: `<p class="muted">هذه الأجهزة مسجَّلة الدخول بحسابك الآن. تنتهي أي جلسة تلقائياً بعد ٨ ساعات خمول.</p>
+      <div id="mdErr"></div><div id="mdBox"><div class="spinner"></div></div>
+      <button class="btn-ghost btn-sm mt" id="md_all">إنهاء كل الجلسات الأخرى</button>`,
+    buttons: [{ label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() }],
+  });
+  const err = (m) => overlay.querySelector('#mdErr').innerHTML = m ? `<div class="form-error">${esc(m)}</div>` : '';
+
+  const load = async () => {
+    const box = overlay.querySelector('#mdBox');
+    box.innerHTML = '<div class="spinner"></div>';
+    try {
+      const { sessions } = await API.get('/auth/sessions');
+      box.innerHTML = `<table class="tbl"><thead><tr><th>الجهاز</th><th>آخر نشاط</th><th>العنوان</th><th></th></tr></thead>
+        <tbody>${sessions.map((x) => `<tr>
+          <td>${esc(shortUa(x.user_agent))}${x.is_current ? ' <span class="tag tag-green">هذا الجهاز</span>' : ''}</td>
+          <td>${fmtDateTime(x.last_active)}</td>
+          <td dir="ltr" style="text-align:right">${esc(x.ip || '—')}</td>
+          <td>${x.is_current ? '' : `<button class="btn-danger btn-sm" data-md="${esc(x.id)}">إنهاء</button>`}</td></tr>`).join('')}
+        </tbody></table>`;
+      box.querySelectorAll('[data-md]').forEach((b) => b.onclick = async () => {
+        try { await API.del('/auth/sessions/' + encodeURIComponent(b.dataset.md)); toast('أُنهيت الجلسة', 'ok'); load(); }
+        catch (ex) { err(ex.message); }
+      });
+    } catch (ex) { box.innerHTML = `<div class="form-error">${esc(ex.message)}</div>`; }
+  };
+
+  overlay.querySelector('#md_all').onclick = async () => {
+    try { const r = await API.post('/auth/sessions/revoke-others'); toast(`أُنهيت ${arNum(r.revoked)} جلسة`, 'ok'); load(); }
+    catch (ex) { err(ex.message); }
+  };
+  load();
+}
 
 // ---- توقيعي الشخصي ----
 async function profileSignature() {
@@ -815,6 +930,9 @@ VIEWS.branding = async () => {
       <div class="field"><label>نص الترويسة</label><input id="br_header" value="${esc(s.header_text || '')}" /></div>
       <div class="field"><label>نص التذييل</label><input id="br_footer" value="${esc(s.footer_text || '')}" /></div>
       <div class="field"><label>اللون الأساسي</label><input type="color" id="br_color" value="${esc(s.primary_color || '#1f6f54')}" style="width:80px;height:40px;padding:2px" /></div>
+      <div class="field"><label>السنة الدراسية الحالية</label>
+        <input id="br_year" value="${esc(s.current_academic_year || '')}" placeholder="مثال: ١٤٤٧/١٤٤٨" />
+        <p class="hint">تُختم على كل محضر ودورة تقييم جديدة، وتُستخدم في فلترة الأرشيف.</p></div>
       <button class="btn" id="br_save">حفظ الإعدادات</button>
 
       <h4 class="mt">الشعار والعلامة المائية</h4>
@@ -832,6 +950,7 @@ VIEWS.branding = async () => {
         footer_text: document.getElementById('br_footer').value,
         primary_color: document.getElementById('br_color').value,
         font_family: document.getElementById('br_font').value,
+        current_academic_year: document.getElementById('br_year').value.trim(),
       };
       await API.patch('/settings', payload);
       await applyBranding({ ...State.settings, ...payload }); // تطبيق فوري على الواجهة

@@ -11,6 +11,7 @@ import { evaluationTargets, resultTargets } from '../lib/evaltargets';
 import { evaluatorProgress } from '../lib/evalprogress';
 import { csvCell, parseCsv } from '../lib/csv';
 import { notifyMany } from '../lib/notify';
+import { currentAcademicYear } from '../lib/meetings';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -126,8 +127,9 @@ app.post('/cycles', async (c) => {
   const types = (Array.isArray(b.target_types) ? b.target_types : []).filter((t: string) => TARGET_TYPES.includes(t));
   if (!types.length) return c.json({ error: 'حدد فئة واحدة على الأقل' }, 400);
   const res = await c.env.DB.prepare(
-    `INSERT INTO eval_cycles (name, start_date, end_date, status, target_types, created_by) VALUES (?, ?, ?, 'draft', ?, ?)`,
-  ).bind(b.name, b.start_date, b.end_date, types.join(','), c.get('user').id).run();
+    `INSERT INTO eval_cycles (name, start_date, end_date, status, target_types, academic_year, created_by)
+     VALUES (?, ?, ?, 'draft', ?, ?, ?)`,
+  ).bind(b.name, b.start_date, b.end_date, types.join(','), await currentAcademicYear(c.env), c.get('user').id).run();
   await audit(c.env, { userId: c.get('user').id, action: 'create_cycle', entityType: 'eval_cycle', entityId: res.meta.last_row_id, newValue: { name: b.name, types } });
   return c.json({ id: res.meta.last_row_id }, 201);
 });

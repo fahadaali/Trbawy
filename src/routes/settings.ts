@@ -27,14 +27,17 @@ app.patch('/', async (c) => {
     footer_text: b.footer_text ?? cur.footer_text,
     primary_color: b.primary_color ?? cur.primary_color,
     font_family: b.font_family ?? cur.font_family,
+    // السنة الدراسية الحالية — تُختم على كل محضر ودورة تقييم جديدة
+    current_academic_year: (b.current_academic_year ?? cur.current_academic_year) || null,
   };
   await c.env.DB.prepare(
-    `INSERT INTO settings (id, org_name, header_text, footer_text, primary_color, font_family, updated_at)
-     VALUES (1, ?, ?, ?, ?, ?, datetime('now'))
+    `INSERT INTO settings (id, org_name, header_text, footer_text, primary_color, font_family, current_academic_year, updated_at)
+     VALUES (1, ?, ?, ?, ?, ?, ?, datetime('now'))
      ON CONFLICT(id) DO UPDATE SET org_name=excluded.org_name, header_text=excluded.header_text,
        footer_text=excluded.footer_text, primary_color=excluded.primary_color,
-       font_family=excluded.font_family, updated_at=datetime('now')`,
-  ).bind(f.org_name, f.header_text, f.footer_text, f.primary_color, f.font_family).run();
+       font_family=excluded.font_family, current_academic_year=excluded.current_academic_year,
+       updated_at=datetime('now')`,
+  ).bind(f.org_name, f.header_text, f.footer_text, f.primary_color, f.font_family, f.current_academic_year).run();
   await audit(c.env, { userId: c.get('user').id, action: 'update_settings', entityType: 'settings', entityId: 1, newValue: f });
   return c.json({ ok: true });
 });

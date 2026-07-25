@@ -73,6 +73,7 @@ app.get('/', async (c) => {
   const councilId = c.req.query('council_id');
   const status = c.req.query('status');
   const year = c.req.query('year');
+  const academicYear = c.req.query('academic_year');
   const q = c.req.query('q');
 
   const where: string[] = [];
@@ -80,6 +81,7 @@ app.get('/', async (c) => {
   if (councilId) { where.push('m.council_id = ?'); binds.push(Number(councilId)); }
   if (status) { where.push('m.status = ?'); binds.push(status); }
   if (year) { where.push('m.hijri_year = ?'); binds.push(Number(year)); }
+  if (academicYear) { where.push('m.academic_year = ?'); binds.push(academicYear); }
   if (q) {
     // بحث الأرشيف: العنوان، الرقم، نص البنود، أسماء الحضور، ونص القرارات/المهام المرتبطة.
     const like = '%' + q + '%';
@@ -94,7 +96,7 @@ app.get('/', async (c) => {
 
   const rows = await c.env.DB.prepare(
     `SELECT m.id, m.council_id, m.display_number, m.title, m.hijri_date, m.greg_date,
-            m.status, m.hijri_year, co.name AS council_name, co.type AS council_type
+            m.status, m.hijri_year, m.academic_year, co.name AS council_name, co.type AS council_type
        FROM meetings m JOIN councils co ON co.id = m.council_id
        ${whereSql} ORDER BY m.id DESC LIMIT 300`,
   ).bind(...binds).all<any>();
@@ -106,6 +108,21 @@ app.get('/', async (c) => {
     if (await canViewCouncil(c.env, u, council as any)) out.push(m);
   }
   return c.json({ meetings: out });
+});
+
+// ---- السنوات المتاحة للفلترة (هجرية ودراسية) ----
+app.get('/meta/years', async (c) => {
+  const hijri = await c.env.DB.prepare(
+    'SELECT DISTINCT hijri_year AS y FROM meetings ORDER BY y DESC',
+  ).all<{ y: number }>();
+  const academic = await c.env.DB.prepare(
+    "SELECT DISTINCT academic_year AS y FROM meetings WHERE academic_year IS NOT NULL AND academic_year != '' ORDER BY y DESC",
+  ).all<{ y: string }>();
+  return c.json({
+    hijri_years: hijri.results.map((r) => r.y),
+    academic_years: academic.results.map((r) => r.y),
+    current_academic_year: await currentAcademicYear(c.env),
+  });
 });
 
 // ---- تفاصيل محضر ----

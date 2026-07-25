@@ -32,6 +32,11 @@ async function meetingList() {
     .formatToParts(new Date()).find((x) => x.type === 'year').value.replace(/\D/g, ''));
   const yearOpts = Array.from({ length: 5 }, (_, i) => curHijri - i)
     .map((y) => `<option value="${y}">${arNum(y)}هـ</option>`).join('');
+  // السنوات الدراسية المسجّلة فعلياً على المحاضر
+  let years = { academic_years: [], current_academic_year: null };
+  try { years = await API.get('/meetings/meta/years'); } catch { /* الفلترة اختيارية */ }
+  const acadOpts = (years.academic_years || [])
+    .map((y) => `<option value="${esc(y)}">${esc(y)}</option>`).join('');
 
   content().innerHTML = `
     <div class="card">
@@ -45,7 +50,8 @@ async function meetingList() {
         <div class="row" style="margin-bottom:14px">
           <select id="fCouncil" style="padding:9px 12px;border:1px solid var(--border);border-radius:8px"><option value="">كل المجالس</option>${councilOpts}</select>
           <select id="fStatus" style="padding:9px 12px;border:1px solid var(--border);border-radius:8px"><option value="">كل الحالات</option>${statusOpts}</select>
-          <select id="fYear" style="padding:9px 12px;border:1px solid var(--border);border-radius:8px"><option value="">كل السنوات</option>${yearOpts}</select>
+          <select id="fYear" style="padding:9px 12px;border:1px solid var(--border);border-radius:8px"><option value="">كل السنوات الهجرية</option>${yearOpts}</select>
+          ${acadOpts ? `<select id="fAcad" style="padding:9px 12px;border:1px solid var(--border);border-radius:8px"><option value="">كل السنوات الدراسية</option>${acadOpts}</select>` : ''}
           <input id="fQ" placeholder="بحث في الرقم والعنوان والبنود والحضور والمهام" style="flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--border);border-radius:8px" />
           <button class="btn-ghost btn-sm" id="fApply">تصفية</button>
         </div>
@@ -77,6 +83,8 @@ async function meetingList() {
     if (document.getElementById('fCouncil').value) p.set('council_id', document.getElementById('fCouncil').value);
     if (document.getElementById('fStatus').value) p.set('status', document.getElementById('fStatus').value);
     if (document.getElementById('fYear').value) p.set('year', document.getElementById('fYear').value);
+    const acad = document.getElementById('fAcad');
+    if (acad && acad.value) p.set('academic_year', acad.value);
     if (document.getElementById('fQ').value) p.set('q', document.getElementById('fQ').value);
     const box = document.getElementById('mList');
     box.innerHTML = '<div class="spinner"></div>';
