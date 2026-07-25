@@ -164,9 +164,17 @@ app.get('/:id', async (c) => {
     'SELECT id, display_number, status FROM meetings WHERE parent_meeting_id = ? ORDER BY id',
   ).bind(id).all()).results;
 
+  // أعضاء المجلس غير المُدرجين في الحضور (أُضيفوا للمجلس بعد إنشاء المحضر)
+  const missingMembers = (await c.env.DB.prepare(
+    `SELECT cm.user_id, u.name FROM council_members cm JOIN users u ON u.id = cm.user_id
+      WHERE cm.council_id = ? AND u.is_active = 1
+        AND cm.user_id NOT IN (SELECT COALESCE(user_id, -1) FROM meeting_attendees WHERE meeting_id = ?)`,
+  ).bind(m.council_id, id).all()).results;
+
   return c.json({
     meeting: m, council, attendees: attendees.results, agenda: agenda.results,
     actions: actions.results, followups, perms, parent, amendments,
+    missing_members: missingMembers,
   });
 });
 
@@ -324,12 +332,23 @@ app.put('/:id/attendees', async (c) => {
   if (!canEditDraft(c.get('user'), council!, m.writer_id)) return c.json({ error: 'لا تملك صلاحية' }, 403);
 
   const b = await c.req.json().catch(() => ({}));
-  // تحديث حالات الأعضاء
+  // تحديث حالات الأعضاء — ومن لم يكن مُدرجًا (عضو أُضيف للمجلس لاحقًا) يُضاف
   for (const a of (b.attendees || [])) {
     const st = ['present', 'apology', 'absent'].includes(a.attendance_status) ? a.attendance_status : 'present';
-    await c.env.DB.prepare(
+    const res = await c.env.DB.prepare(
       'UPDATE meeting_attendees SET attendance_status = ? WHERE meeting_id = ? AND user_id = ?',
     ).bind(st, id, a.user_id).run();
+    if (!res.meta.changes) {
+      // يُقبل فقط إن كان عضوًا في المجلس
+      const isMember = await c.env.DB.prepare(
+        'SELECT 1 FROM council_members WHERE council_id = ? AND user_id = ?',
+      ).bind(m.council_id, a.user_id).first();
+      if (isMember) {
+        await c.env.DB.prepare(
+          'INSERT INTO meeting_attendees (meeting_id, user_id, attendance_status) VALUES (?, ?, ?)',
+        ).bind(id, a.user_id, st).run();
+      }
+    }
   }
   // إعادة ضبط الضيوف
   if (Array.isArray(b.guests)) {

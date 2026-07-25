@@ -1,0 +1,18 @@
+{
+  "name": "منصة المجلس التربوي",
+  "short_name": "المجلس التربوي",
+  "description": "إدارة محاضر الاجتماعات والتقييمات التربوية",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f4f6f5",
+  "theme_color": "#1f6f54",
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

@@ -66,6 +66,31 @@ app.put('/my-signature', async (c) => {
   return c.json({ ok: true });
 });
 
+// عرض توقيعي الحالي (للمستخدم نفسه فقط)
+app.get('/my-signature', async (c) => {
+  const u = c.get('user');
+  const row = await c.env.DB.prepare('SELECT signature_image FROM users WHERE id = ?')
+    .bind(u.id).first<{ signature_image: string | null }>();
+  if (!row?.signature_image) return c.json({ error: 'لا يوجد توقيع' }, 404);
+  const obj = await c.env.FILES.get(row.signature_image);
+  if (!obj) return c.json({ error: 'الملف غير موجود' }, 404);
+  const headers = new Headers();
+  obj.writeHttpMetadata(headers);
+  headers.set('Cache-Control', 'no-store');
+  return new Response(obj.body, { headers });
+});
+
+// حذف توقيعي (يعود الختم الافتراضي المُولَّد من الاسم)
+app.delete('/my-signature', async (c) => {
+  const u = c.get('user');
+  const row = await c.env.DB.prepare('SELECT signature_image FROM users WHERE id = ?')
+    .bind(u.id).first<{ signature_image: string | null }>();
+  if (row?.signature_image) { try { await c.env.FILES.delete(row.signature_image); } catch { /* الملف قد يكون محذوفًا */ } }
+  await c.env.DB.prepare('UPDATE users SET signature_image = NULL WHERE id = ?').bind(u.id).run();
+  await audit(c.env, { userId: u.id, action: 'delete_signature', entityType: 'user', entityId: u.id });
+  return c.json({ ok: true });
+});
+
 export default app;
 
 // جلب أصل من R2 (يُستخدم من صفحات الطباعة أيضاً)

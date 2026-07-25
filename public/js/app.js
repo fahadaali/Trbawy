@@ -206,6 +206,10 @@ function renderShell(view, rest) {
         <div class="topbar">
           <button class="menu-toggle" id="menuToggle">${icon('menu', 18)}</button>
           <h2 id="pageTitle"></h2>
+          <div class="gsearch">
+            <input id="gsInput" placeholder="بحث شامل…" autocomplete="off" />
+            <div id="gsResults" class="gsearch-results" style="display:none"></div>
+          </div>
           <div class="spacer"></div>
           <div style="position:relative">
             <button class="btn-ghost btn-sm" id="bellBtn">${icon('bell', 18)}<span id="notifBadge" class="badge" style="display:none;position:absolute;top:-6px;inset-inline-start:-6px;background:var(--danger);color:#fff;border-radius:20px;padding:0 6px;font-size:11px"></span></button>
@@ -227,6 +231,7 @@ function renderShell(view, rest) {
   document.getElementById('profileBtn').onclick = () => profileSignature();
   document.getElementById('menuToggle').onclick = () => document.getElementById('sidebar').classList.toggle('open');
   setupNotifications();
+  setupGlobalSearch();
 
   // تنبيه العناصر المنتظرة — مرة واحدة عند فتح الصفحة/الدخول
   if (!State.pendingShown) { State.pendingShown = true; setTimeout(showPendingPopup, 500); }
@@ -261,6 +266,47 @@ async function showPendingPopup() {
   const close = () => { pop.classList.remove('show'); setTimeout(() => pop.remove(), 250); };
   pop.querySelector('.x').onclick = close;
   pop.querySelectorAll('.pp-item').forEach((b) => b.onclick = () => { location.hash = items[b.dataset.i].link; close(); });
+}
+
+// ---- البحث الشامل ----
+function setupGlobalSearch() {
+  const inp = document.getElementById('gsInput');
+  const box = document.getElementById('gsResults');
+  if (!inp) return;
+  let timer = null;
+
+  const hide = () => { box.style.display = 'none'; };
+  const run = async () => {
+    const q = inp.value.trim();
+    if (q.length < 2) return hide();
+    box.style.display = 'block';
+    box.innerHTML = '<div class="spinner" style="margin:18px auto"></div>';
+    let d;
+    try { d = await API.get('/dashboard/search?q=' + encodeURIComponent(q)); }
+    catch { return hide(); }
+    const group = (title, items, ic) => items.length ? `
+      <div class="gs-group">${esc(title)}</div>
+      ${items.map((it) => `<a class="gs-item" href="${esc(it.link)}">
+        <span class="gs-ic">${icon(ic, 16)}</span>
+        <span class="gs-tx"><b>${esc(it.title)}</b><span>${esc(it.sub || '')}</span></span></a>`).join('')}` : '';
+    const html = group('المحاضر', d.meetings, 'meetings')
+      + group('القرارات والمهام', d.actions, 'tasks')
+      + group('الطلاب', d.students, 'students');
+    box.innerHTML = html || '<div class="empty" style="padding:20px">لا نتائج</div>';
+    box.querySelectorAll('.gs-item').forEach((a) => a.onclick = () => { hide(); inp.value = ''; });
+  };
+
+  inp.oninput = () => { clearTimeout(timer); timer = setTimeout(run, 250); };
+  inp.onkeydown = (e) => { if (e.key === 'Escape') { hide(); inp.blur(); } };
+  inp.onclick = (e) => e.stopPropagation();
+  box.onclick = (e) => e.stopPropagation();
+  if (!State.gsBound) {
+    State.gsBound = true;
+    document.addEventListener('click', () => {
+      const b = document.getElementById('gsResults');
+      if (b) b.style.display = 'none';
+    });
+  }
 }
 
 // ---- الإشعارات (الجرس) ----
@@ -679,24 +725,72 @@ VIEWS.backups = async () => {
 };
 
 // ---- توقيعي الشخصي ----
-function profileSignature() {
-  openModal({
-    title: 'صورة التوقيع الشخصي',
-    body: `<p class="muted">تُستخدم صورة التوقيع في النسخة المصدَّرة من المحاضر. إن لم تُرفع صورة، يُولَّد ختم افتراضي من اسمك.</p>
-      <div class="field mt"><label>اختر صورة التوقيع (PNG بخلفية شفافة يُفضَّل)</label><input type="file" id="sigFile" accept="image/*" /></div>`,
+async function profileSignature() {
+  // هل يوجد توقيع محفوظ؟
+  let hasSig = false;
+  try { hasSig = (await fetch('/api/settings/my-signature', { credentials: 'same-origin' })).ok; } catch {}
+  const pad = signaturePad();
+
+  const { overlay, close } = openModal({
+    title: 'توقيعي',
+    body: `<p class="muted">يُستخدم التوقيع في النسخة المصدَّرة من المحاضر. إن لم يوجد، يُولَّد ختم افتراضي من اسمك.</p>
+      ${hasSig ? `<div class="field"><label>التوقيع الحالي</label>
+        <div style="border:1px solid var(--border);border-radius:10px;padding:10px;background:#fff;text-align:center">
+          <img src="/api/settings/my-signature?t=${Date.now()}" style="max-height:90px" /></div>
+        <button class="btn-ghost btn-sm mt" id="sigDel">حذف التوقيع الحالي</button></div>` : ''}
+      <div class="row" style="margin-bottom:10px">
+        <button class="btn btn-sm" id="tabDraw">رسم التوقيع</button>
+        <button class="btn-ghost btn-sm" id="tabUpload">رفع صورة</button>
+      </div>
+      <div id="sigDraw"></div>
+      <div id="sigUpload" style="display:none">
+        <div class="field"><label>صورة التوقيع (PNG بخلفية شفافة يُفضَّل)</label><input type="file" id="sigFile" accept="image/*" /></div>
+      </div>`,
     buttons: [
-      { label: 'رفع', onClick: async (cl, ov) => {
-        const f = ov.querySelector('#sigFile').files[0];
-        if (!f) return toast('اختر صورة', 'err');
+      { label: 'حفظ', onClick: async (cl, ov) => {
+        const mode = ov._mode || 'draw';
+        let blob = null;
+        if (mode === 'draw') {
+          if (pad.isEmpty()) return toast('ارسم توقيعك أولًا', 'err');
+          blob = await pad.toBlob();
+        } else {
+          const f = ov.querySelector('#sigFile').files[0];
+          if (!f) return toast('اختر صورة', 'err');
+          blob = f;
+        }
         try {
-          const res = await fetch('/api/settings/my-signature', { method: 'PUT', body: f, credentials: 'same-origin', headers: { 'content-type': f.type || 'image/png' } });
-          if (!res.ok) throw new Error('فشل الرفع');
+          const res = await fetch('/api/settings/my-signature', {
+            method: 'PUT', body: blob, credentials: 'same-origin',
+            headers: { 'content-type': blob.type || 'image/png' },
+          });
+          if (!res.ok) throw new Error('فشل الحفظ');
           cl(); toast('تم حفظ التوقيع', 'ok');
         } catch (err) { toast(err.message, 'err'); }
       }},
       { label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() },
     ],
   });
+
+  overlay._mode = 'draw';
+  overlay.querySelector('#sigDraw').appendChild(pad.el);
+  overlay.querySelector('#tabDraw').onclick = () => {
+    overlay._mode = 'draw';
+    overlay.querySelector('#tabDraw').className = 'btn btn-sm';
+    overlay.querySelector('#tabUpload').className = 'btn-ghost btn-sm';
+    overlay.querySelector('#sigDraw').style.display = ''; overlay.querySelector('#sigUpload').style.display = 'none';
+  };
+  overlay.querySelector('#tabUpload').onclick = () => {
+    overlay._mode = 'upload';
+    overlay.querySelector('#tabUpload').className = 'btn btn-sm';
+    overlay.querySelector('#tabDraw').className = 'btn-ghost btn-sm';
+    overlay.querySelector('#sigUpload').style.display = ''; overlay.querySelector('#sigDraw').style.display = 'none';
+  };
+  const del = overlay.querySelector('#sigDel');
+  if (del) del.onclick = () => confirmModal('حذف التوقيع', 'سيُحذف توقيعك المحفوظ ويعود الختم الافتراضي. متابعة؟',
+    async () => {
+      try { await API.del('/settings/my-signature'); close(); toast('تم حذف التوقيع', 'ok'); }
+      catch (err) { toast(err.message, 'err'); }
+    }, { danger: true });
 }
 
 // ---- الهوية البصرية ----

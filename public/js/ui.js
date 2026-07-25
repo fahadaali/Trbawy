@@ -156,6 +156,49 @@ function richEditor(initialHtml) {
   return { el: wrap, getHtml: () => area.innerHTML.trim() };
 }
 
+// لوح رسم التوقيع (يدعم الفأرة واللمس) — يُرجع { el, toBlob, clear, isEmpty }
+function signaturePad(width = 460, height = 180) {
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+    <div class="sigpad">
+      <canvas class="sigpad-canvas" width="${width * 2}" height="${height * 2}"
+        style="width:100%;height:${height}px;touch-action:none"></canvas>
+      <div class="sigpad-hint">ارسم توقيعك هنا بالإصبع أو الفأرة</div>
+    </div>
+    <div class="row mt"><button type="button" class="btn-ghost btn-sm" data-clear>مسح</button></div>`;
+  const cv = wrap.querySelector('canvas');
+  const ctx = cv.getContext('2d');
+  ctx.scale(2, 2);
+  ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = '#12303f';
+  let drawing = false, empty = true;
+
+  const pos = (e) => {
+    const r = cv.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (cv.width / 2 / r.width), y: (p.clientY - r.top) * (cv.height / 2 / r.height) };
+  };
+  const start = (e) => { e.preventDefault(); drawing = true; const { x, y } = pos(e); ctx.beginPath(); ctx.moveTo(x, y); };
+  const move = (e) => { if (!drawing) return; e.preventDefault(); const { x, y } = pos(e); ctx.lineTo(x, y); ctx.stroke(); empty = false; wrap.querySelector('.sigpad-hint').style.display = 'none'; };
+  const end = () => { drawing = false; };
+  cv.addEventListener('mousedown', start); cv.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', end);
+  cv.addEventListener('touchstart', start, { passive: false });
+  cv.addEventListener('touchmove', move, { passive: false });
+  cv.addEventListener('touchend', end);
+
+  const clear = () => {
+    ctx.clearRect(0, 0, cv.width, cv.height); empty = true;
+    wrap.querySelector('.sigpad-hint').style.display = '';
+  };
+  wrap.querySelector('[data-clear]').onclick = clear;
+  return {
+    el: wrap,
+    isEmpty: () => empty,
+    clear,
+    toBlob: () => new Promise((res) => cv.toBlob(res, 'image/png')),
+  };
+}
+
 function confirmModal(title, message, onConfirm, opts = {}) {
   openModal({
     title,

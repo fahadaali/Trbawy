@@ -485,15 +485,40 @@ function editAgenda(id, d) {
   const items = d.agenda.map((a) => ({ title: a.title, body: a.body, item_type: a.item_type }));
   const render = (ov) => {
     ov.querySelector('#ea_list').innerHTML = items.map((it, i) => `
-      <div class="row" style="margin-bottom:8px">
+      <div class="drag-row" draggable="true" data-idx="${i}">
+        <span class="drag-handle" title="اسحب لإعادة الترتيب">⠿</span>
         <input data-t="${i}" value="${esc(it.title)}" style="flex:1;padding:8px 11px;border:1px solid var(--border);border-radius:8px" />
         ${it.item_type === 'fixed' ? '<span class="tag tag-gray">ثابت</span>' : ''}
+        <button class="btn-ghost btn-sm" data-up="${i}" title="أعلى" ${i === 0 ? 'disabled' : ''}>▲</button>
+        <button class="btn-ghost btn-sm" data-dn="${i}" title="أسفل" ${i === items.length - 1 ? 'disabled' : ''}>▼</button>
         <button class="btn-ghost btn-sm" data-body="${i}">محتوى${it.body ? ' ✓' : ''}</button>
         <button class="btn-ghost btn-sm" data-d="${i}">حذف</button>
       </div>`).join('');
     ov.querySelectorAll('[data-t]').forEach((el) => el.oninput = () => items[el.dataset.t].title = el.value);
     ov.querySelectorAll('[data-d]').forEach((el) => el.onclick = () => { items.splice(el.dataset.d, 1); render(ov); });
     ov.querySelectorAll('[data-body]').forEach((el) => el.onclick = () => editItemBody(items, +el.dataset.body, () => render(ov)));
+    const move = (from, to) => {
+      if (to < 0 || to >= items.length) return;
+      items.splice(to, 0, items.splice(from, 1)[0]);
+      render(ov);
+    };
+    ov.querySelectorAll('[data-up]').forEach((el) => el.onclick = () => move(+el.dataset.up, +el.dataset.up - 1));
+    ov.querySelectorAll('[data-dn]').forEach((el) => el.onclick = () => move(+el.dataset.dn, +el.dataset.dn + 1));
+
+    // السحب والإفلات
+    let dragIdx = null;
+    ov.querySelectorAll('.drag-row').forEach((row) => {
+      row.ondragstart = (e) => { dragIdx = +row.dataset.idx; row.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; };
+      row.ondragend = () => row.classList.remove('dragging');
+      row.ondragover = (e) => { e.preventDefault(); row.classList.add('drag-over'); };
+      row.ondragleave = () => row.classList.remove('drag-over');
+      row.ondrop = (e) => {
+        e.preventDefault(); row.classList.remove('drag-over');
+        const to = +row.dataset.idx;
+        if (dragIdx != null && dragIdx !== to) move(dragIdx, to);
+        dragIdx = null;
+      };
+    });
   };
   const { overlay } = openModal({
     title: 'تعديل بنود جدول الأعمال',
@@ -545,11 +570,25 @@ function editAttendees(id, d) {
           <option value="apology" ${mm.attendance_status === 'apology' ? 'selected' : ''}>معتذر</option>
           <option value="absent" ${mm.attendance_status === 'absent' ? 'selected' : ''}>غائب</option>
         </select></div>`).join('')}
+      ${(d.missing_members && d.missing_members.length) ? `
+        <h4 class="mt">أعضاء المجلس غير المُدرجين</h4>
+        <p class="hint">أُضيفوا للمجلس بعد إنشاء هذا المحضر — حدّد من حضر منهم.</p>
+        ${d.missing_members.map((mm) => `<div class="row" style="margin-bottom:6px">
+          <label class="check-inline" style="flex:1"><input type="checkbox" data-addmem="${mm.user_id}" /> <b>${esc(mm.name)}</b></label>
+          <select data-newatt="${mm.user_id}" style="padding:7px 10px;border:1px solid var(--border);border-radius:8px">
+            <option value="present">حاضر</option><option value="apology">معتذر</option><option value="absent">غائب</option>
+          </select></div>`).join('')}` : ''}
       <h4 class="mt">الضيوف</h4><div id="eag"></div>
       <button class="btn-ghost btn-sm mt" id="eag_add">+ إضافة ضيف</button>`,
     buttons: [
       { label: 'حفظ', onClick: async (cl, ov) => {
         const attendees = Array.from(ov.querySelectorAll('[data-att]')).map((s) => ({ user_id: Number(s.dataset.att), attendance_status: s.value }));
+        // إضافة الأعضاء المحدَّدين حديثًا
+        ov.querySelectorAll('[data-addmem]:checked').forEach((chk) => {
+          const uid = chk.dataset.addmem;
+          const sel = ov.querySelector(`[data-newatt="${uid}"]`);
+          attendees.push({ user_id: Number(uid), attendance_status: sel ? sel.value : 'present' });
+        });
         try { await API.put(`/meetings/${id}/attendees`, { attendees, guests: guests.filter((g) => g.name.trim()) }); cl(); toast('تم الحفظ', 'ok'); meetingDetail(id); } catch (err) { toast(err.message, 'err'); }
       }},
       { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },

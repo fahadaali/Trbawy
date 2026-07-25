@@ -55,6 +55,57 @@ app.get('/pending', async (c) => {
   });
 });
 
+// ---- بحث شامل موحّد (محاضر + بنود/مهام + طلاب) ضمن نطاق صلاحية المستخدم ----
+app.get('/search', async (c) => {
+  const u = c.get('user');
+  const q = (c.req.query('q') || '').trim();
+  if (q.length < 2) return c.json({ meetings: [], actions: [], students: [] });
+  const like = '%' + q + '%';
+
+  // المحاضر (مع تصفية صلاحية الاطلاع)
+  const mRows = (await c.env.DB.prepare(
+    `SELECT m.id, m.display_number, m.title, m.status, m.council_id, co.type AS council_type, co.name AS council_name
+       FROM meetings m JOIN councils co ON co.id = m.council_id
+      WHERE m.display_number LIKE ? OR m.title LIKE ?
+         OR EXISTS (SELECT 1 FROM agenda_items ai WHERE ai.meeting_id = m.id AND (ai.title LIKE ? OR ai.body LIKE ?))
+      ORDER BY m.id DESC LIMIT 30`,
+  ).bind(like, like, like, like).all<any>()).results;
+  const meetings = [];
+  for (const m of mRows) {
+    if (await canViewCouncil(c.env, u, { id: m.council_id, type: m.council_type, default_writer_id: null } as any)) {
+      meetings.push({ id: m.id, title: m.display_number, sub: m.title || m.council_name, link: `#/meetings/${m.id}` });
+      if (meetings.length >= 8) break;
+    }
+  }
+
+  // القرارات والمهام
+  const aRows = (await c.env.DB.prepare(
+    `SELECT a.id, a.type, a.display_number, a.text, a.council_id, co.type AS council_type
+       FROM action_items a JOIN councils co ON co.id = a.council_id
+      WHERE a.text LIKE ? OR a.display_number LIKE ? ORDER BY a.id DESC LIMIT 30`,
+  ).bind(like, like).all<any>()).results;
+  const actions = [];
+  for (const a of aRows) {
+    if (await canViewCouncil(c.env, u, { id: a.council_id, type: a.council_type, default_writer_id: null } as any)) {
+      actions.push({ id: a.id, title: a.text, sub: a.display_number, link: `#/tasks/${a.id}` });
+      if (actions.length >= 8) break;
+    }
+  }
+
+  // الطلاب (ضمن نطاق المرحلة)
+  const canAll = isPresident(u) || isVice(u);
+  const scopeStage = canAll ? null : (u.stage || null);
+  const canSeeStudents = canAll || u.role === 'first_supervisor' || u.role === 'team_member';
+  const students = canSeeStudents ? (await c.env.DB.prepare(
+    `SELECT id, name, national_id, stage FROM students
+      WHERE (name LIKE ? OR national_id LIKE ?) ${scopeStage ? 'AND stage = ?' : ''}
+      ORDER BY name LIMIT 8`,
+  ).bind(...(scopeStage ? [like, like, scopeStage] : [like, like])).all<any>()).results
+    .map((s: any) => ({ id: s.id, title: s.name, sub: s.national_id, link: `#/students` })) : [];
+
+  return c.json({ meetings, actions, students });
+});
+
 // ---- ملخص الصفحة الرئيسية ----
 app.get('/summary', async (c) => {
   const u = c.get('user');
