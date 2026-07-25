@@ -39,6 +39,16 @@ function esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+// هل يملك المستخدم صلاحية الإنشاء/تعيين الكاتب/البنود الثابتة لهذا المجلس؟
+// يطابق canCreateMeeting و canAssignWriter في الخادم (بما فيه فحص المرحلة).
+function canCreateForCouncil(cl) {
+  const u = State.user;
+  if (!u || !cl) return false;
+  if (u.role === 'president') return true;
+  return u.role === 'first_supervisor' && cl.type !== 'educational' &&
+    ((cl.type === 'secondary' && u.stage === 'secondary') || (cl.type === 'middle' && u.stage === 'middle'));
+}
+
 // أرقام عربية-هندية
 const AR_DIGITS = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
 function arNum(x) { return String(x).replace(/[0-9]/g, (d) => AR_DIGITS[+d]); }

@@ -3,6 +3,12 @@
 import type { Env } from '../types';
 import { sendEmail } from './mail';
 
+function escHtml(s: string): string {
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 export interface NotifyOpts {
   userId: number;
   type: string;
@@ -24,7 +30,9 @@ export async function notify(env: Env, opts: NotifyOpts): Promise<void> {
       .bind(opts.userId)
       .first<{ email: string }>();
     if (u?.email) {
-      await sendEmail(env, u.email, opts.title, `<h3>${opts.title}</h3><p>${opts.body || ''}</p>`);
+      // تهريب محتوى المستخدم (عناوين المحاضر، نصوص المهام) قبل وضعه في قالب HTML.
+      const html = `<h3>${escHtml(opts.title)}</h3><p>${escHtml(opts.body || '')}</p>`;
+      await sendEmail(env, u.email, opts.title, html);
     }
   } catch (e) {
     // لا نُفشل العملية بسبب البريد — الإشعار داخل التطبيق سُجِّل بالفعل.

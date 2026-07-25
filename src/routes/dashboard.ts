@@ -50,7 +50,7 @@ app.get('/pending', async (c) => {
 
   return c.json({
     signatures: signatures.map((s) => ({ title: s.display_number, link: `#/meetings/${s.id}` })),
-    tasks: tasks.map((t) => ({ title: t.text, link: '#/tasks' })),
+    tasks: tasks.map((t) => ({ title: t.text, due_date: t.due_date, link: `#/tasks/${t.id}` })),
     evaluations: evaluations.map((e) => ({ title: e.name, remaining: e.remaining, link: `#/evaluations/${e.id}` })),
   });
 });

@@ -41,6 +41,9 @@ function printStyles(primary: string): string {
     justify-content: space-between; border-bottom: 2px solid ${primary}; padding: 4px 0; }
   .page-head .org { font-weight: 700; color: ${primary}; }
   .page-head .logo { height: 15mm; }
+  /* ترقيم الصفحات: يُعرض عند الطباعة (counter(page) لا يعمل على الشاشة) */
+  .page-foot .pgno::after { content: counter(page); }
+  @media screen { .page-foot .pgno { display: none; } }
   .page-foot { position: fixed; bottom: 0; left: 0; right: 0; height: 14mm; border-top: 1px solid #ccc;
     display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: #667; padding-top: 4px; }
   .watermark { position: fixed; inset: 0; display: grid; place-items: center; opacity: .06; z-index: -1; }
@@ -77,6 +80,14 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
   ).bind(m.id).all()).results as any[];
   const agenda = (await env.DB.prepare('SELECT * FROM agenda_items WHERE meeting_id = ? ORDER BY sort_order').bind(m.id).all()).results as any[];
   const actions = (await env.DB.prepare('SELECT * FROM action_items WHERE source_meeting_id = ? ORDER BY id').bind(m.id).all()).results as any[];
+  // جدول المتابعة: بنود سابقة تابعة لهذا المجلس ظهرت في هذا المحضر (§٤٫٣)
+  const followups = (await env.DB.prepare(
+    `SELECT type, display_number, text, status, due_date, progress, completed_at FROM action_items
+      WHERE council_id = ? AND source_meeting_id != ?
+        AND (status IN ('not_started','in_progress','stalled')
+             OR (status = 'done' AND (reported_done_meeting_id = ? OR reported_done_meeting_id IS NULL)))
+      ORDER BY status, id`,
+  ).bind(m.council_id, m.id, m.id).all()).results as any[];
   const writer = m.writer_id ? await env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(m.writer_id).first<any>() : null;
   const approver = m.approved_by ? await env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(m.approved_by).first<any>() : null;
 
@@ -115,6 +126,10 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
     </tbody></table>
     <h2>جدول الأعمال والبنود</h2>
     <ol class="agenda">${agenda.map((it) => `<li><b>${esc(it.title)}</b>${it.body ? `<div class="body-rich">${sanitizeHtml(it.body)}</div>` : ''}</li>`).join('') || '<li>—</li>'}</ol>
+    ${followups.length ? `<h2>متابعة بنود المحاضر السابقة</h2>
+    <table><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>الاستحقاق</th><th>الحالة</th><th>الإنجاز</th><th>تاريخ الإنجاز</th></tr></thead><tbody>
+      ${followups.map((f) => `<tr><td>${esc(TYPE_AR[f.type] || f.type)}</td><td class="code">${esc(f.display_number)}</td><td>${esc(f.text)}</td><td>${esc(f.due_date || '')}</td><td>${esc(STATUS_AR[f.status] || f.status)}</td><td>${esc(String(f.progress ?? 0))}٪</td><td>${esc(f.completed_at || '')}</td></tr>`).join('')}
+    </tbody></table>` : ''}
     ${actions.length ? `<h2>القرارات والتوصيات والمهام</h2>
     <table><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤولية/الاستحقاق</th><th>الحالة</th></tr></thead><tbody>
       ${actions.map((a) => `<tr><td>${esc(TYPE_AR[a.type] || a.type)}</td><td class="code">${esc(a.display_number)}</td><td>${esc(a.text)}</td><td>${esc(a.due_date || '')}</td><td>${esc(STATUS_AR[a.status] || a.status)}</td></tr>`).join('')}
@@ -134,7 +149,7 @@ function shell(settings: any, primary: string, footerRight: string, bodies: stri
 <style>${printStyles(primary)}</style></head><body>
 ${watermark}
 <div class="page-head"><span class="org">${esc(settings.header_text || settings.org_name || '')}</span>${logoImg}</div>
-<div class="page-foot"><span>${esc(settings.footer_text || '')}</span><span dir="ltr">${esc(footerRight)}</span></div>
+<div class="page-foot"><span>${esc(settings.footer_text || '')}</span><span class="pgno">صفحة </span><span dir="ltr">${esc(footerRight)}</span></div>
 ${bodies}
 <script>window.addEventListener('load',function(){if(location.search.indexOf('print=1')>-1)window.print();});</script>
 </body></html>`;

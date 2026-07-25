@@ -32,7 +32,7 @@ async function taskReminders(env: Env): Promise<void> {
   const in3 = (await env.DB.prepare("SELECT date('now','+3 day') AS d").first<{ d: string }>())!.d;
 
   for (const t of tasks) {
-    const link = `#/tasks?a=${t.id}`;
+    const link = `#/tasks/${t.id}`;
     let type: string | null = null, title = '';
     if (t.due_date === in3) { type = 'task_due_3'; title = 'تذكير: مهمة تستحق بعد ٣ أيام'; }
     else if (t.due_date === today) { type = 'task_due_today'; title = 'تذكير: مهمة تستحق اليوم'; }

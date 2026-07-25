@@ -3,13 +3,6 @@
 const ATT_STATUS_AR = { present: 'حاضر', apology: 'معتذر', absent: 'غائب' };
 
 // هل يملك المستخدم صلاحية إنشاء محضر لهذا المجلس؟ (يطابق canCreateMeeting في الخلفية)
-function canCreateForCouncil(cl) {
-  const u = State.user;
-  if (u.role === 'president') return true;
-  return u.role === 'first_supervisor' && cl.type !== 'educational' &&
-    ((cl.type === 'secondary' && u.stage === 'secondary') || (cl.type === 'middle' && u.stage === 'middle'));
-}
-
 function hijriFromGreg(greg) {
   if (!greg) return '';
   try {

@@ -217,8 +217,10 @@ table.tbl tr:hover td { background: #fafbfb; }
 .toast.ok { background: var(--success); }
 
 /* ---------- تنبيه العناصر المنتظرة (منبثق عائم) ---------- */
+/* ملاحظة: نستخدم left الفيزيائية لأن translateX فيزيائية أيضًا — inset-inline-start
+   تنقلب في RTL بينما translateX لا تنقلب، فيختل التمركز. */
 .pending-pop {
-  position: fixed; top: 78px; inset-inline-start: 50%; transform: translateX(-50%) translateY(-8px);
+  position: fixed; top: 78px; left: 50%; transform: translateX(-50%) translateY(-8px);
   width: 380px; max-width: calc(100vw - 32px); background: var(--surface);
   border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 16px 48px rgba(0,0,0,.22);
   z-index: 150; opacity: 0; transition: opacity .25s, transform .25s; overflow: hidden;

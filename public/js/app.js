@@ -200,7 +200,7 @@ async function showPendingPopup() {
   const items = [];
   (d.signatures || []).forEach((s) => items.push({ ic: 'pen', bg: '#f8f0da', color: '#b9770e', label: 'محضر بانتظار توقيعك', name: s.title, link: s.link }));
   (d.evaluations || []).forEach((e) => items.push({ ic: 'evaluations', bg: '#e7f2ee', color: 'var(--primary)', label: 'دورة تقييم مفتوحة' + (e.remaining ? ` — متبقٍ ${arNum(e.remaining)}` : ''), name: e.title, link: e.link }));
-  (d.tasks || []).forEach((t) => items.push({ ic: 'tasks', bg: '#eef1f0', color: '#556', label: 'مهمة عليك', name: t.title, link: t.link }));
+  (d.tasks || []).forEach((t) => items.push({ ic: 'tasks', bg: '#eef1f0', color: '#556', label: 'مهمة عليك' + (t.due_date ? ` — تستحق ${t.due_date}` : ''), name: t.title, link: t.link }));
   if (!items.length) return;
 
   document.querySelectorAll('.pending-pop').forEach((el) => el.remove());
@@ -255,7 +255,14 @@ function setupNotifications() {
       panel.querySelectorAll('[data-nid]').forEach((a) => a.onclick = async () => { try { await API.post(`/notifications/${a.dataset.nid}/read`); } catch {} refreshNotifBadge(); });
     } catch (err) { panel.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
   };
-  document.addEventListener('click', () => { if (panel) panel.style.display = 'none'; });
+  // مستمع وحيد يُسجَّل مرة واحدة لعمر الصفحة (setupNotifications تُستدعى عند كل تنقّل)
+  if (!State.outsideClickBound) {
+    State.outsideClickBound = true;
+    document.addEventListener('click', () => {
+      const p = document.getElementById('notifPanel');
+      if (p) p.style.display = 'none';
+    });
+  }
   panel.onclick = (e) => e.stopPropagation();
   refreshNotifBadge();
 }
@@ -284,7 +291,7 @@ VIEWS.dashboard = async () => {
     <div id="dashCards" class="grid grid-4 mt"><div class="spinner"></div></div>
     <div id="dashRecent" class="mt"></div>`;
   let s;
-  try { s = await API.get('/dashboard/summary'); } catch (err) { return; }
+  try { s = await API.get('/dashboard/summary'); } catch (err) { return renderError(err); }
   document.getElementById('dashCards').innerHTML = `
     <div class="stat" style="cursor:pointer" onclick="nav('tasks')"><div class="v">${arNum(s.my_tasks)}</div><div class="l">مهامي المفتوحة</div></div>
     <div class="stat" style="cursor:pointer" onclick="nav('meetings')"><div class="v">${arNum(s.awaiting_signature)}</div><div class="l">محاضر بانتظار توقيعي</div></div>
@@ -424,8 +431,8 @@ async function councilDetail(id) {
   let d;
   try { d = await API.get('/councils/' + id); }
   catch (err) { return toast(err.message, 'err'); }
-  const canAssign = ['president'].includes(State.user.role) ||
-    (State.user.role === 'first_supervisor' && d.council.type !== 'educational');
+  // يطابق canAssignWriter/canCreateMeeting في الخادم (بما فيه فحص المرحلة)
+  const canAssign = canCreateForCouncil(d.council);
 
   const canManageMembers = State.user.role === 'president';
   let allUsers = [];

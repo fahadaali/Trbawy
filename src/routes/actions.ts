@@ -18,6 +18,11 @@ const EDITABLE_MEETING = ['invitation', 'draft', 'awaiting_signatures'];
 async function loadAction(env: Env, id: number) {
   return await env.DB.prepare('SELECT * FROM action_items WHERE id = ?').bind(id).first<any>();
 }
+// كاتب المحضر المصدر — يجب تمريره لـ canEditDraft وإلا حُرم الكاتب المعيَّن من صلاحياته.
+async function meetingWriterOf(env: Env, meetingId: number): Promise<number | null> {
+  const m = await env.DB.prepare('SELECT writer_id FROM meetings WHERE id = ?').bind(meetingId).first<any>();
+  return m?.writer_id ?? null;
+}
 async function assigneesOf(env: Env, id: number) {
   const r = await env.DB.prepare(
     `SELECT aa.user_id, u.name FROM action_assignees aa JOIN users u ON u.id = aa.user_id WHERE aa.action_item_id = ?`,
@@ -181,7 +186,8 @@ app.post('/:id/complete', async (c) => {
   if (!a) return c.json({ error: 'البند غير موجود' }, 404);
   const u = c.get('user');
   const council = await getCouncil(c.env, a.council_id);
-  if (!(await isAssignee(c.env, id, u.id)) && !isPresident(u) && !canEditDraft(u, council!, null))
+  const writerId = await meetingWriterOf(c.env, a.source_meeting_id);
+  if (!(await isAssignee(c.env, id, u.id)) && !isPresident(u) && !canEditDraft(u, council!, writerId))
     return c.json({ error: 'الإنجاز متاح للمسؤول عن البند' }, 403);
   if (a.status === 'done') return c.json({ error: 'البند منجز مسبقاً' }, 409);
 
@@ -202,7 +208,7 @@ app.post('/:id/reopen', async (c) => {
   if (!a) return c.json({ error: 'البند غير موجود' }, 404);
   const u = c.get('user');
   const council = await getCouncil(c.env, a.council_id);
-  if (!isPresident(u) && !canEditDraft(u, council!, null) && !(await isAssignee(c.env, id, u.id)))
+  if (!isPresident(u) && !canEditDraft(u, council!, await meetingWriterOf(c.env, a.source_meeting_id)) && !(await isAssignee(c.env, id, u.id)))
     return c.json({ error: 'لا تملك صلاحية' }, 403);
   await c.env.DB.prepare(
     "UPDATE action_items SET status='in_progress', completed_at=NULL, updated_at=datetime('now') WHERE id=?",
@@ -218,7 +224,8 @@ app.patch('/:id/completion-date', async (c) => {
   if (!a) return c.json({ error: 'البند غير موجود' }, 404);
   const u = c.get('user');
   const council = await getCouncil(c.env, a.council_id);
-  if (!canEditDraft(u, council!, null) && !isPresident(u)) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!canEditDraft(u, council!, await meetingWriterOf(c.env, a.source_meeting_id)) && !isPresident(u))
+    return c.json({ error: 'لا تملك صلاحية' }, 403);
   if (a.status !== 'done') return c.json({ error: 'البند غير منجز' }, 400);
   const { completed_at } = await c.req.json().catch(() => ({}));
   if (!completed_at) return c.json({ error: 'التاريخ مطلوب' }, 400);

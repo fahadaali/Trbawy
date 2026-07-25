@@ -16,6 +16,9 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
 
 const TARGET_TYPES = ['students', 'team_members', 'first_supervisors'];
+const TARGET_TYPE_AR: Record<string, string> = {
+  students: 'الطلاب', team_members: 'أعضاء الفرق', first_supervisors: 'المشرفون الأوائل',
+};
 
 // ============ المعايير (قوالب مرجعية: cycle_id = NULL) ============
 app.get('/criteria', async (c) => {
@@ -161,8 +164,8 @@ app.post('/cycles/:id/status', async (c) => {
       const sum = await c.env.DB.prepare(
         'SELECT COALESCE(SUM(weight),0) AS s, COUNT(*) AS n FROM eval_criteria WHERE cycle_id IS NULL AND target_type = ? AND is_active = 1',
       ).bind(tt).first<{ s: number; n: number }>();
-      if (!sum || sum.n === 0) return c.json({ error: `لا توجد معايير مفعّلة للفئة: ${tt}` }, 400);
-      if (Math.round(sum.s) !== 100) return c.json({ error: `مجموع أوزان معايير «${tt}» = ${sum.s}%، ويجب أن يكون 100%` }, 400);
+      if (!sum || sum.n === 0) return c.json({ error: `لا توجد معايير مفعّلة للفئة: ${TARGET_TYPE_AR[tt] || tt}` }, 400);
+      if (Math.round(sum.s) !== 100) return c.json({ error: `مجموع أوزان معايير «${TARGET_TYPE_AR[tt] || tt}» = ${sum.s}٪، ويجب أن يكون ١٠٠٪` }, 400);
     }
     // نسخ المعايير (تثبيت التاريخ)
     for (const tt of types) {
@@ -180,12 +183,21 @@ app.post('/cycles/:id/status', async (c) => {
   else return c.json({ error: 'تحوّل غير صالح' }, 400);
 
   await c.env.DB.prepare('UPDATE eval_cycles SET status = ? WHERE id = ?').bind(ns, id).run();
-  // إشعار المقيّمين عند الفتح (بريد + داخل المنصة)
+  // إشعار من يقيّم فعلًا في هذه الدورة فقط (لا كل المستخدمين)
   if (ns === 'open') {
-    const evaluators = await c.env.DB.prepare(
-      "SELECT id FROM users WHERE is_active = 1 AND role IN ('president','vice_president','first_supervisor','team_member')",
-    ).all<{ id: number }>();
-    await notifyMany(c.env, evaluators.results.map((e) => e.id), {
+    const candidates = await c.env.DB.prepare(
+      "SELECT id, role, stage FROM users WHERE is_active = 1 AND role IN ('president','vice_president','first_supervisor','team_member')",
+    ).all<any>();
+    const targeted: number[] = [];
+    for (const usr of candidates.results) {
+      let has = false;
+      for (const tt of types) {
+        if (!canEvaluate(usr, tt)) continue;
+        if ((await evaluationTargets(c.env, usr, tt)).length > 0) { has = true; break; }
+      }
+      if (has) targeted.push(usr.id);
+    }
+    await notifyMany(c.env, targeted, {
       type: 'cycle_open', title: 'فتح دورة تقييم', body: cycle.name, link: `#/evaluations/${id}`,
     });
   }
