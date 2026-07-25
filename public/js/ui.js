@@ -49,6 +49,12 @@ function canCreateForCouncil(cl) {
     ((cl.type === 'secondary' && u.stage === 'secondary') || (cl.type === 'middle' && u.stage === 'middle'));
 }
 
+// تفعيل البحث بالضغط على Enter داخل حقل
+function onEnter(inputId, fn) {
+  const el = document.getElementById(inputId);
+  if (el) el.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); fn(); } };
+}
+
 // أرقام عربية-هندية
 const AR_DIGITS = ['٠', '١', '٢', '٣', '٤', '٥', '٦', '٧', '٨', '٩'];
 function arNum(x) { return String(x).replace(/[0-9]/g, (d) => AR_DIGITS[+d]); }

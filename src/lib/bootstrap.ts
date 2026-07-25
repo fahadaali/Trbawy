@@ -3,6 +3,7 @@
 import type { Env } from '../types';
 import { hashPassword } from './crypto';
 import { SCHEMA_STATEMENTS } from './schema';
+import { runColumnMigrations } from './migrate';
 
 let checkedThisIsolate = false;
 
@@ -23,6 +24,9 @@ export async function ensureBootstrap(env: Env): Promise<void> {
   try {
     const row = await env.DB.prepare('SELECT COUNT(*) AS c FROM councils').first<{ c: number }>();
     if ((row?.c ?? 0) > 0) {
+      // القاعدة قائمة — نطبّق ترقيات الأعمدة والجداول الجديدة مرة واحدة لكل isolate.
+      await ensureSchema(env);
+      await runColumnMigrations(env);
       checkedThisIsolate = true;
       return;
     }
@@ -31,6 +35,7 @@ export async function ensureBootstrap(env: Env): Promise<void> {
   }
 
   await ensureSchema(env);
+  await runColumnMigrations(env);
 
   const seeded = await env.DB.prepare('SELECT COUNT(*) AS c FROM councils').first<{ c: number }>();
   if ((seeded?.c ?? 0) === 0) await seed(env);

@@ -171,6 +171,7 @@ const NAV = [
     { key: 'users', label: 'المستخدمون', ico: 'users', roles: ['president','system_admin'] },
     { key: 'councils', label: 'المجالس', ico: 'councils', roles: ['president','vice_president','first_supervisor','team_member'] },
     { key: 'branding', label: 'الهوية البصرية', ico: 'branding', roles: ['president','system_admin'] },
+    { key: 'notifications', label: 'الإشعارات', ico: 'bell', roles: '*' },
     { key: 'audit', label: 'سجل التدقيق', ico: 'audit', roles: ['president','system_admin'] },
     { key: 'backups', label: 'النسخ الاحتياطي', ico: 'backups', roles: ['president','system_admin'] },
   ]},
@@ -558,6 +559,60 @@ async function councilDetail(id) {
   }
 }
 
+// ---- شاشة الإشعارات الكاملة ----
+const NOTIF_TYPE_AR = {
+  '': 'كل الأنواع', meeting_invitation: 'دعوة اجتماع', awaiting_signature: 'بانتظار توقيع',
+  meeting_approved: 'اعتماد محضر', action_assigned: 'إسناد مهمة', task_due_3: 'تذكير قبل ٣ أيام',
+  task_due_today: 'تستحق اليوم', task_overdue: 'مهمة متأخرة', task_overdue_chair: 'تأخر في مجلسك',
+  cycle_open: 'فتح دورة', cycle_closing: 'اقتراب إغلاق دورة', results_published: 'نشر نتائج',
+};
+let notifOffset = 0;
+
+VIEWS.notifications = async () => {
+  setTitle('الإشعارات');
+  notifOffset = 0;
+  content().innerHTML = `
+    <div class="card"><div class="card-head"><h3>الإشعارات</h3><div class="spacer"></div>
+      <select id="nfType" style="padding:8px 11px;border:1px solid var(--border);border-radius:8px">
+        ${Object.entries(NOTIF_TYPE_AR).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+      <label class="check-inline"><input type="checkbox" id="nfUnread" /> غير المقروء فقط</label>
+      <button class="btn-ghost btn-sm" id="nfApply">تصفية</button>
+      <button class="btn-ghost btn-sm" id="nfReadAll">تعليم الكل كمقروء</button></div>
+      <div id="nfList" class="card-body"></div>
+      <div class="card-body center"><button class="btn-ghost btn-sm" id="nfMore">تحميل المزيد</button></div>
+    </div>`;
+
+  const load = async (reset) => {
+    if (reset) { notifOffset = 0; document.getElementById('nfList').innerHTML = ''; }
+    const p = new URLSearchParams({ limit: '30', offset: String(notifOffset) });
+    if (document.getElementById('nfType').value) p.set('type', document.getElementById('nfType').value);
+    if (document.getElementById('nfUnread').checked) p.set('unread', '1');
+    let d;
+    try { d = await API.get('/notifications?' + p.toString()); } catch (err) { return renderError(err); }
+    const html = d.notifications.map((n) => `
+      <a href="${esc(n.link || '#')}" data-nid="${n.id}" style="display:flex;gap:12px;align-items:flex-start;padding:12px;border-bottom:1px solid #f0f2f1;${n.is_read ? '' : 'background:#f0f7f4'}">
+        <span style="flex:1">
+          <b style="font-size:14px">${esc(n.title)}</b>
+          <div class="muted" style="font-size:13px">${esc(n.body || '')}</div>
+          <div class="muted" style="font-size:11px">${esc(NOTIF_TYPE_AR[n.type] || n.type)} · ${fmtDateTime(n.created_at)}</div>
+        </span>${n.is_read ? '' : '<span class="tag tag-green">جديد</span>'}</a>`).join('');
+    document.getElementById('nfList').insertAdjacentHTML('beforeend',
+      html || (notifOffset === 0 ? '<div class="empty"><div class="ico">' + icon('bell', 42) + '</div><p>لا إشعارات</p></div>' : ''));
+    notifOffset += d.notifications.length;
+    document.getElementById('nfMore').style.display = d.notifications.length < 30 ? 'none' : 'inline-flex';
+    document.querySelectorAll('#nfList [data-nid]').forEach((a) => a.onclick = async () => {
+      try { await API.post(`/notifications/${a.dataset.nid}/read`); } catch {} refreshNotifBadge();
+    });
+  };
+  document.getElementById('nfApply').onclick = () => load(true);
+  document.getElementById('nfMore').onclick = () => load(false);
+  document.getElementById('nfReadAll').onclick = async () => {
+    try { await API.post('/notifications/read-all'); toast('تم', 'ok'); refreshNotifBadge(); load(true); }
+    catch (err) { toast(err.message, 'err'); }
+  };
+  load(true);
+};
+
 // ---- سجل التدقيق ----
 const AUDIT_ENTITIES = { '': 'كل الكيانات', meeting: 'محضر', action_item: 'قرار/مهمة', evaluation: 'تقييم', eval_cycle: 'دورة تقييم', student: 'طالب', user: 'مستخدم', council: 'مجلس', settings: 'الإعدادات', backup: 'نسخة احتياطية' };
 let auditOffset = 0;
@@ -568,24 +623,27 @@ VIEWS.audit = async () => {
   content().innerHTML = `
     <div class="card"><div class="card-head"><h3>سجل التدقيق</h3><div class="spacer"></div>
       <select id="auEntity" style="padding:8px 11px;border:1px solid var(--border);border-radius:8px">${Object.entries(AUDIT_ENTITIES).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+      <input id="auAction" placeholder="نوع العملية (مثل: approve_meeting)" dir="ltr" style="width:230px;text-align:right;padding:8px 11px;border:1px solid var(--border);border-radius:8px" />
       <button class="btn-ghost btn-sm" id="auApply">تصفية</button></div>
-      <table class="tbl"><thead><tr><th>الوقت</th><th>المستخدم</th><th>العملية</th><th>الكيان</th><th></th></tr></thead>
+      <table class="tbl"><thead><tr><th>الوقت</th><th>المستخدم</th><th>العملية</th><th>الكيان</th><th>IP</th><th></th></tr></thead>
         <tbody id="auBody"></tbody></table>
       <div class="card-body center"><button class="btn-ghost btn-sm" id="auMore">تحميل المزيد</button></div>
     </div>`;
   const load = async (reset) => {
     if (reset) { auditOffset = 0; document.getElementById('auBody').innerHTML = ''; }
     const ent = document.getElementById('auEntity').value;
+    const act = document.getElementById('auAction').value.trim();
     let data;
-    try { data = await API.get(`/audit?limit=50&offset=${auditOffset}${ent ? '&entity_type=' + ent : ''}`); }
+    try { data = await API.get(`/audit?limit=50&offset=${auditOffset}${ent ? '&entity_type=' + ent : ''}${act ? '&action=' + encodeURIComponent(act) : ''}`); }
     catch (err) { return renderError(err); }
     const rows = data.entries.map((e) => `<tr>
       <td>${fmtDateTime(e.timestamp)}</td><td>${esc(e.user_name || '—')}</td>
       <td><span class="tag tag-gray">${esc(e.action)}</span></td>
       <td>${esc(AUDIT_ENTITIES[e.entity_type] || e.entity_type || '')} ${e.entity_id ? '#' + arNum(e.entity_id) : ''}</td>
+      <td dir="ltr" style="text-align:right" class="muted">${esc(e.ip || '—')}</td>
       <td>${(e.old_value || e.new_value) ? `<button class="btn-ghost btn-sm" data-det='${encodeURIComponent(JSON.stringify({ o: e.old_value, n: e.new_value }))}'>تفاصيل</button>` : ''}</td>
     </tr>`).join('');
-    document.getElementById('auBody').insertAdjacentHTML('beforeend', rows || (auditOffset === 0 ? '<tr><td colspan="5" class="center muted">لا سجلات</td></tr>' : ''));
+    document.getElementById('auBody').insertAdjacentHTML('beforeend', rows || (auditOffset === 0 ? '<tr><td colspan="6" class="center muted">لا سجلات</td></tr>' : ''));
     auditOffset += data.entries.length;
     document.getElementById('auMore').style.display = data.entries.length < 50 ? 'none' : 'inline-flex';
     document.querySelectorAll('#auBody [data-det]').forEach((b) => b.onclick = () => {
@@ -594,6 +652,7 @@ VIEWS.audit = async () => {
     });
   };
   document.getElementById('auApply').onclick = () => load(true);
+  onEnter('auAction', () => load(true));
   document.getElementById('auMore').onclick = () => load(false);
   load(true);
 };

@@ -19,6 +19,7 @@ VIEWS.students = async () => {
         ${isPres ? `<select id="fStage" style="padding:9px 12px;border:1px solid var(--border);border-radius:8px"><option value="">كل المراحل</option><option value="secondary">الثانوية</option><option value="middle">المتوسطة</option></select>` : ''}
         <select id="fStatus" style="padding:9px 12px;border:1px solid var(--border);border-radius:8px"><option value="">كل الحالات</option>
           ${Object.entries(STUDENT_STATUS_AR).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
+        <input id="fGrade" placeholder="الصف" style="width:110px;padding:9px 12px;border:1px solid var(--border);border-radius:8px" />
         <input id="fQ" placeholder="بحث بالاسم أو الهوية" style="flex:1;min-width:160px;padding:9px 12px;border:1px solid var(--border);border-radius:8px" />
         <button class="btn-ghost btn-sm" id="fApply">تصفية</button>
       </div>
@@ -29,6 +30,7 @@ VIEWS.students = async () => {
     const p = new URLSearchParams();
     const st = document.getElementById('fStage'); if (st && st.value) p.set('stage', st.value);
     if (document.getElementById('fStatus').value) p.set('status', document.getElementById('fStatus').value);
+    if (document.getElementById('fGrade').value) p.set('grade', document.getElementById('fGrade').value);
     if (document.getElementById('fQ').value) p.set('q', document.getElementById('fQ').value);
     const box = document.getElementById('stList');
     box.innerHTML = '<div class="spinner"></div>';
@@ -49,6 +51,7 @@ VIEWS.students = async () => {
     } catch (err) { box.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
   };
   document.getElementById('fApply').onclick = load;
+  onEnter('fQ', load); onEnter('fGrade', load);
   if (canManage) {
     document.getElementById('addStudent').onclick = () => studentForm(null, load);
     document.getElementById('importBtn').onclick = () => importStudents(load);

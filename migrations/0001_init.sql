@@ -104,6 +104,7 @@ CREATE TABLE meetings (
   verify_code    TEXT,                         -- رمز تحقق فريد للمحضر (QR)
   cancel_reason  TEXT,
   parent_meeting_id INTEGER REFERENCES meetings(id), -- لمحاضر التصويب/الملحق
+  academic_year  TEXT,                         -- السنة الدراسية (سياق)
   created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at     TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (council_id, hijri_year, number)
@@ -232,6 +233,7 @@ CREATE TABLE eval_cycles (
   status       TEXT    NOT NULL DEFAULT 'draft' CHECK (status IN
                  ('draft','open','closed','published')),
   target_types TEXT    NOT NULL,               -- CSV
+  academic_year TEXT,                          -- السنة الدراسية (سياق)
   created_by   INTEGER NOT NULL REFERENCES users(id),
   created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
 );
@@ -321,5 +323,31 @@ CREATE TABLE settings (
   watermark_key  TEXT,     -- R2
   primary_color  TEXT    DEFAULT '#1f6f54',
   font_family    TEXT    DEFAULT 'Tajawal',
+  current_academic_year TEXT,                  -- السنة الدراسية الحالية
   updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
+
+-- ============================================================
+-- توسعة: تعليقات المحضر، مرفقات المحضر، والسنة الدراسية
+-- ============================================================
+
+-- تعليقات/مناقشة على مسودة المحضر قبل الاعتماد
+CREATE TABLE meeting_comments (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  meeting_id INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id),
+  body       TEXT    NOT NULL,
+  created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_mcomments_meeting ON meeting_comments(meeting_id);
+
+-- مرفقات على مستوى المحضر نفسه (مفاتيح R2)
+CREATE TABLE meeting_attachments (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  meeting_id  INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  r2_key      TEXT    NOT NULL,
+  file_name   TEXT    NOT NULL,
+  uploaded_by INTEGER REFERENCES users(id),
+  uploaded_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_mattach_meeting ON meeting_attachments(meeting_id);

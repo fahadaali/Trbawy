@@ -27,6 +27,11 @@ async function meetingList() {
 
   const councilOpts = councils.map((c) => `<option value="${c.id}">${esc(COUNCIL_TYPE_AR[c.type] || c.name)}</option>`).join('');
   const statusOpts = Object.entries(MEETING_STATUS_AR).map(([v, l]) => `<option value="${v}">${l}</option>`).join('');
+  // سنوات هجرية للتصفية (السنة الحالية وأربع سابقة)
+  const curHijri = Number(new Intl.DateTimeFormat('en-u-ca-islamic-umalqura', { year: 'numeric' })
+    .formatToParts(new Date()).find((x) => x.type === 'year').value.replace(/\D/g, ''));
+  const yearOpts = Array.from({ length: 5 }, (_, i) => curHijri - i)
+    .map((y) => `<option value="${y}">${arNum(y)}هـ</option>`).join('');
 
   content().innerHTML = `
     <div class="card">
@@ -40,7 +45,8 @@ async function meetingList() {
         <div class="row" style="margin-bottom:14px">
           <select id="fCouncil" style="padding:9px 12px;border:1px solid var(--border);border-radius:8px"><option value="">كل المجالس</option>${councilOpts}</select>
           <select id="fStatus" style="padding:9px 12px;border:1px solid var(--border);border-radius:8px"><option value="">كل الحالات</option>${statusOpts}</select>
-          <input id="fQ" placeholder="بحث برقم المحضر أو العنوان" style="flex:1;min-width:180px;padding:9px 12px;border:1px solid var(--border);border-radius:8px" />
+          <select id="fYear" style="padding:9px 12px;border:1px solid var(--border);border-radius:8px"><option value="">كل السنوات</option>${yearOpts}</select>
+          <input id="fQ" placeholder="بحث في الرقم والعنوان والبنود والحضور والمهام" style="flex:1;min-width:200px;padding:9px 12px;border:1px solid var(--border);border-radius:8px" />
           <button class="btn-ghost btn-sm" id="fApply">تصفية</button>
         </div>
         <div id="mList"><div class="spinner"></div></div>
@@ -70,6 +76,7 @@ async function meetingList() {
     const p = new URLSearchParams();
     if (document.getElementById('fCouncil').value) p.set('council_id', document.getElementById('fCouncil').value);
     if (document.getElementById('fStatus').value) p.set('status', document.getElementById('fStatus').value);
+    if (document.getElementById('fYear').value) p.set('year', document.getElementById('fYear').value);
     if (document.getElementById('fQ').value) p.set('q', document.getElementById('fQ').value);
     const box = document.getElementById('mList');
     box.innerHTML = '<div class="spinner"></div>';
@@ -90,6 +97,7 @@ async function meetingList() {
     } catch (err) { box.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
   };
   document.getElementById('fApply').onclick = load;
+  onEnter('fQ', load);
   load();
 }
 
