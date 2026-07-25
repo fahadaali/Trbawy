@@ -1,10 +1,10 @@
 // عامل الخدمة — تخزين هيكل التطبيق للفتح السريع والعمل دون اتصال جزئيًا.
 // مهم: لا نُخزّن أي استجابة من /api أبدًا (بيانات حية وحسّاسة).
 
-const CACHE = 'tarbawi-shell-v3';
+const CACHE = 'tarbawi-shell-v4';
 const SHELL = [
   '/', '/index.html', '/css/styles.css',
-  '/js/api.js', '/js/xlsx.js', '/js/ui.js', '/js/app.js',
+  '/js/api.js', '/js/xlsx.js', '/js/ui.js', '/js/ai.js', '/js/app.js',
   '/js/meetings.js', '/js/tasks.js', '/js/evaluations.js', '/js/students.js',
   '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png',
 ];

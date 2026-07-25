@@ -23,6 +23,10 @@ migrations_dir = "migrations"
 binding = "FILES"
 bucket_name = "tarbawi-files"
 
+# الذكاء الاصطناعي (Workers AI) — صياغة المحاضر، استخراج القرارات، التفريغ الصوتي، التلخيص
+[ai]
+binding = "AI"
+
 # المهام المجدولة — التذكيرات اليومية (تُفعَّل في مرحلة الإشعارات)
 [triggers]
 crons = ["0 5 * * *"]

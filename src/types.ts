@@ -7,6 +7,8 @@ export interface Env {
   APP_NAME: string;
   RESEND_API_KEY?: string;
   MAIL_FROM?: string;
+  // Workers AI — قد يكون غير مُهيّأ (تُعطَّل مزايا الذكاء الاصطناعي عندها بلطف)
+  AI?: { run: (model: string, input: any) => Promise<any> };
 }
 
 export type Role =

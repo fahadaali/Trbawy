@@ -7,7 +7,7 @@ import {
   canCreateEvalCycle, canManageCriteria, canEvaluate, canViewResults, isPresident, isVice,
 } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
-import { evaluationTargets } from '../lib/evaltargets';
+import { evaluationTargets, resultTargets } from '../lib/evaltargets';
 import { evaluatorProgress } from '../lib/evalprogress';
 import { csvCell, parseCsv } from '../lib/csv';
 import { notifyMany } from '../lib/notify';
@@ -412,23 +412,6 @@ app.get('/cycles/:id/results', async (c) => {
   return c.json({ criteria, results, cycle });
 });
 
-async function resultTargets(env: Env, u: User, tt: string): Promise<{ id: number; name: string }[]> {
-  if (tt === 'students') {
-    // الرئيس/النائب: الكل. المشرف/العضو: مرحلته.
-    if (isPresident(u) || isVice(u)) {
-      return (await env.DB.prepare("SELECT id, name FROM students WHERE status='active' ORDER BY stage, name").all<any>()).results;
-    }
-    return (await env.DB.prepare("SELECT id, name FROM students WHERE stage=? AND status='active' ORDER BY name").bind(u.stage).all<any>()).results;
-  }
-  if (tt === 'team_members') {
-    if (isPresident(u)) return (await env.DB.prepare("SELECT id, name FROM users WHERE role='team_member' AND is_active=1 ORDER BY name").all<any>()).results;
-    return (await env.DB.prepare("SELECT id, name FROM users WHERE role='team_member' AND stage=? AND is_active=1 ORDER BY name").bind(u.stage).all<any>()).results;
-  }
-  if (tt === 'first_supervisors') {
-    return (await env.DB.prepare("SELECT id, name FROM users WHERE role='first_supervisor' AND is_active=1 ORDER BY name").all<any>()).results;
-  }
-  return [];
-}
 
 // النافذة التفصيلية: تقييم كل مقيّم لبند معيّن لهدف معيّن
 // تصدير نتائج دورة إلى CSV (§٥٫٤) — ضمن نطاق اطلاع المستخدم

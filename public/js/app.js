@@ -1,7 +1,7 @@
 // التطبيق الرئيسي (SPA) — منصة المجلس التربوي.
 // المرحلة ١: المصادقة، الهيكل العربي، إدارة المستخدمين والمجالس، سجل التدقيق.
 
-const State = { user: null, pendingShown: false };
+const State = { user: null, pendingShown: false, aiEnabled: false };
 const app = () => document.getElementById('app');
 
 // ============ نقطة البدء ============
@@ -12,9 +12,15 @@ async function boot() {
   } catch {
     State.user = null;
   }
-  if (State.user) await applyBranding();
+  if (State.user) { await applyBranding(); await loadAiStatus(); }
   window.addEventListener('hashchange', route);
   route();
+}
+
+// هل مزايا الذكاء الاصطناعي مُهيّأة على هذا النشر؟ (تُخفى أزرارها عند التعطيل)
+async function loadAiStatus() {
+  try { State.aiEnabled = !!(await API.get('/ai/status')).enabled; }
+  catch { State.aiEnabled = false; }
 }
 
 // تطبيق الهوية البصرية (اللون الأساسي والخط) على الواجهة
@@ -101,7 +107,7 @@ function renderLogin() {
       });
       State.user = user;
       State.pendingShown = false;
-      if (!user.must_change_password) await applyBranding();
+      if (!user.must_change_password) { await applyBranding(); await loadAiStatus(); }
       location.hash = '#/dashboard';
       route();
     } catch (err) {

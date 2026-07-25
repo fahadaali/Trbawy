@@ -250,6 +250,7 @@ async function meetingDetail(id) {
 
   const actionsHtml = (d.actions && d.actions.length) || p.can_edit ? `
     <div class="card mt"><div class="card-head"><h3>القرارات والتوصيات والمهام</h3><div class="spacer"></div>
+      ${p.can_edit && State.aiEnabled ? aiBtn('btnAiExtract', 'استخراج بالذكاء الاصطناعي') : ''}
       ${p.can_edit ? '<button class="btn btn-sm" id="btnAddAction">+ إضافة بند</button>' : ''}</div>
       ${(d.actions && d.actions.length) ? `<table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الاستحقاق</th><th>الحالة</th><th></th></tr></thead>
       <tbody>${d.actions.map((a) => `<tr><td>${esc(ACTION_TYPE_AR[a.type] || a.type)}</td><td dir="ltr" style="text-align:right">${esc(a.display_number)}</td><td>${esc(a.text)}</td>
@@ -271,6 +272,7 @@ async function meetingDetail(id) {
   if (p.can_archive) btns.push(`<button class="btn-ghost btn-sm" id="btnArchive">أرشفة</button>`);
   if (p.can_print) btns.push(`<button class="btn-ghost btn-sm" id="btnPrint">${icon('print', 16)} طباعة / تصدير PDF</button>`);
   btns.push(`<button class="btn-ghost btn-sm" id="btnIcs">${icon('calendar2', 16)} إضافة للتقويم</button>`);
+  if (State.aiEnabled) btns.push(aiBtn('btnAiSummary', 'ملخّص تنفيذي'));
   if (canCreateForCouncil(d.council)) btns.push(`<button class="btn-ghost btn-sm" id="btnDup">${icon('copy', 16)} نسخ كمحضر جديد</button>`);
   if (p.can_amend) btns.push(`<button class="btn-ghost btn-sm" id="btnAmend">${icon('meetings', 16)} محضر تصويب/ملحق</button>`);
   if (p.can_cancel) btns.push(`<button class="btn-danger btn-sm" id="btnCancel">إلغاء المحضر</button>`);
@@ -446,6 +448,14 @@ async function meetingDetail(id) {
   // إدارة القرارات/المهام
   const members = d.attendees.filter((a) => !a.is_guest);
   bind('btnAddAction', () => actionForm(id, members, null));
+  bind('btnAiSummary', () => aiSummaryDialog(id));
+  // نص المناقشة المبدئي = محتوى بنود جدول الأعمال بعد تجريد الوسوم
+  bind('btnAiExtract', () => {
+    const seed = (d.agenda || [])
+      .map((a) => `${a.title}: ${String(a.body || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()}`)
+      .join('\n');
+    aiExtractDialog(id, seed, reload);
+  });
   content().querySelectorAll('[data-editaction]').forEach((b) =>
     b.onclick = () => actionForm(id, members, d.actions.find((x) => x.id == b.dataset.editaction)));
   content().querySelectorAll('[data-openaction]').forEach((b) =>
@@ -574,7 +584,7 @@ function editAgenda(id, d) {
       </div>`).join('');
     ov.querySelectorAll('[data-t]').forEach((el) => el.oninput = () => items[el.dataset.t].title = el.value);
     ov.querySelectorAll('[data-d]').forEach((el) => el.onclick = () => { items.splice(el.dataset.d, 1); render(ov); });
-    ov.querySelectorAll('[data-body]').forEach((el) => el.onclick = () => editItemBody(items, +el.dataset.body, () => render(ov)));
+    ov.querySelectorAll('[data-body]').forEach((el) => el.onclick = () => editItemBody(items, +el.dataset.body, () => render(ov), id));
     const move = (from, to) => {
       if (to < 0 || to >= items.length) return;
       items.splice(to, 0, items.splice(from, 1)[0]);
@@ -612,18 +622,23 @@ function editAgenda(id, d) {
   overlay.querySelector('#ea_add').onclick = () => { items.push({ title: '', body: null, item_type: 'new' }); render(overlay); };
 }
 
-// تحرير محتوى بند بالمحرر الغني
-function editItemBody(items, i, onDone) {
+// تحرير محتوى بند بالمحرر الغني (مع مساعد الصياغة عند تهيئة الذكاء الاصطناعي)
+function editItemBody(items, i, onDone, meetingId) {
   const ed = richEditor(items[i].body || '');
+  const showAi = State.aiEnabled && meetingId;
   const { overlay, close } = openModal({
     title: 'محتوى البند (محرر غني)',
-    body: '<div id="rich_mount"></div>',
+    body: `${showAi ? `<div class="row" style="margin-bottom:10px">${aiBtn('ib_ai', 'صياغة بالذكاء الاصطناعي')}</div>` : ''}<div id="rich_mount"></div>`,
     buttons: [
       { label: 'حفظ المحتوى', onClick: () => { items[i].body = ed.getHtml(); close(); if (onDone) onDone(); } },
       { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
     ],
   });
   overlay.querySelector('#rich_mount').appendChild(ed.el);
+  if (showAi) {
+    overlay.querySelector('#ib_ai').onclick = () =>
+      aiComposeDialog(meetingId, items[i].title || '', (html) => { ed.setHtml(html); toast('أُدرجت الصياغة — راجعها قبل الحفظ', 'ok'); });
+  }
 }
 
 function editAttendees(id, d) {

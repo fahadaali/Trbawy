@@ -29,6 +29,8 @@ const ICON_PATHS = {
   paperclip: '<path d="M20 11.5 12 19.5a4.5 4.5 0 0 1-6.4-6.4l8.4-8.4a3 3 0 0 1 4.3 4.3l-8.4 8.4a1.5 1.5 0 0 1-2.1-2.1l7.7-7.7"/>',
   comment: '<path d="M4.5 5.5h15v10h-9L6 19.5v-4H4.5z"/><path d="M8.5 9.5h7M8.5 12h4.5"/>',
   share: '<circle cx="17.5" cy="6" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><circle cx="17.5" cy="18" r="2.5"/><path d="M8.8 10.8 15.2 7.4M8.8 13.2l6.4 3.4"/>',
+  sparkle: '<path d="M12 3.5l1.9 4.9 4.9 1.9-4.9 1.9L12 17.1l-1.9-4.9L5.2 10.3l4.9-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
+  mic: '<rect x="9" y="3.5" width="6" height="10" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v2.5M9 20.5h6"/>',
   logout: '<path d="M14 4H6v16h8"/><path d="M18 12H10"/><path d="M15 9l3 3-3 3"/>',
 };
 function icon(name, size = 20) {
@@ -101,7 +103,7 @@ function openModal({ title, body, buttons }) {
 }
 
 // محرر نصوص غني عربي RTL (عناوين، قوائم، جداول، تظليل، صور).
-// يُرجع { el, getHtml } — يعتمد contenteditable وأوامر التحرير القياسية.
+// يُرجع { el, getHtml, setHtml } — يعتمد contenteditable وأوامر التحرير القياسية.
 function richEditor(initialHtml) {
   const wrap = document.createElement('div');
   wrap.className = 'rich';
@@ -158,7 +160,11 @@ function richEditor(initialHtml) {
     };
     inp.click();
   };
-  return { el: wrap, getHtml: () => area.innerHTML.trim() };
+  return {
+    el: wrap,
+    getHtml: () => area.innerHTML.trim(),
+    setHtml: (html) => { area.innerHTML = html || ''; },
+  };
 }
 
 // لوح رسم التوقيع (يدعم الفأرة واللمس) — يُرجع { el, toBlob, clear, isEmpty }

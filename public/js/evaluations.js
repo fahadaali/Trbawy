@@ -471,14 +471,15 @@ async function renderResults(cycleId, tt) {
     <td>${tt === 'students' ? `<a href="#" data-hist="${r.target_id}"><b>${esc(r.name)}</b></a>` : `<b>${esc(r.name)}</b>`}</td>
     <td><span class="tag tag-green">${arFixed(r.overall)}</span></td>
     ${r.per_criterion.map((pc) => `<td>${pc.avg != null ? `<button class="btn-ghost btn-sm" data-detail="${r.target_id}|${pc.criterion_id}">${arFixed(pc.avg)}</button>` : '—'}</td>`).join('')}
-    <td class="muted">${arNum(r.evaluators)}</td></tr>`).join('');
+    <td class="muted">${arNum(r.evaluators)}</td>
+    ${State.aiEnabled ? `<td>${r.evaluators ? `<button class="btn-ghost btn-sm ai-btn" data-ainotes="${r.target_id}" data-ainame="${esc(r.name)}" title="تحليل الملاحظات">${icon('sparkle', 15)}</button>` : ''}</td>` : ''}</tr>`).join('');
 
   let html = `<div class="row" style="margin-bottom:10px">
       <a class="btn-ghost btn-sm" href="/api/eval/cycles/${cycleId}/results/export?target_type=${tt}">${icon('package', 15)} تصدير النتائج</a>
       ${tt === 'students' ? '<span class="muted" style="font-size:12px">اضغط على اسم الطالب لعرض سجله التاريخي</span>' : ''}
     </div>
-    <table class="tbl"><thead><tr><th>${TARGET_TYPE_AR[tt]}</th><th>النتيجة</th>${critHead}<th>عدد المقيّمين</th></tr></thead>
-    <tbody>${rows || `<tr><td colspan="${d.criteria.length + 3}" class="center muted">لا نتائج</td></tr>`}</tbody></table>`;
+    <table class="tbl"><thead><tr><th>${TARGET_TYPE_AR[tt]}</th><th>النتيجة</th>${critHead}<th>عدد المقيّمين</th>${State.aiEnabled ? '<th>تحليل</th>' : ''}</tr></thead>
+    <tbody>${rows || `<tr><td colspan="${d.criteria.length + (State.aiEnabled ? 4 : 3)}" class="center muted">لا نتائج</td></tr>`}</tbody></table>`;
 
   if (mine.my_inputs && mine.my_inputs.length) {
     html += `<div class="card mt"><div class="card-head"><h3>مدخلاتي (منفصلة عن المتوسط العام)</h3></div>
@@ -492,6 +493,10 @@ async function renderResults(cycleId, tt) {
     e.preventDefault();
     if (typeof studentHistory === 'function') studentHistory(a.dataset.hist);
   });
+
+  // تحليل ملاحظات مُقيَّم بالذكاء الاصطناعي
+  box.querySelectorAll('[data-ainotes]').forEach((b) => b.onclick = () =>
+    aiEvalNotesDialog(cycleId, tt, Number(b.dataset.ainotes), b.dataset.ainame));
 
   box.querySelectorAll('[data-detail]').forEach((b) => b.onclick = async () => {
     const [targetId, criterionId] = b.dataset.detail.split('|');
