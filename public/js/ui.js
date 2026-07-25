@@ -24,6 +24,11 @@ const ICON_PATHS = {
   highlight: '<path d="M14.5 4.5 19 9l-7 7H8l-1-3z"/><path d="M4.5 20h7"/><path d="M12 7l4 4"/>',
   image: '<path d="M4 5h16v14H4z"/><circle cx="8.5" cy="9.5" r="1.4"/><path d="M4 16.5l4.5-4.5 4 4 3-3 4.5 4.5"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  calendar2: '<path d="M4.5 6.5h15v13h-15z"/><path d="M4.5 10.5h15M9 4v4M15 4v4"/><path d="M8.5 14h2M13.5 14h2"/>',
+  copy: '<path d="M9 9h10.5v10.5H9z"/><path d="M15 9V4.5H4.5V15H9"/>',
+  paperclip: '<path d="M20 11.5 12 19.5a4.5 4.5 0 0 1-6.4-6.4l8.4-8.4a3 3 0 0 1 4.3 4.3l-8.4 8.4a1.5 1.5 0 0 1-2.1-2.1l7.7-7.7"/>',
+  comment: '<path d="M4.5 5.5h15v10h-9L6 19.5v-4H4.5z"/><path d="M8.5 9.5h7M8.5 12h4.5"/>',
+  share: '<circle cx="17.5" cy="6" r="2.5"/><circle cx="6.5" cy="12" r="2.5"/><circle cx="17.5" cy="18" r="2.5"/><path d="M8.8 10.8 15.2 7.4M8.8 13.2l6.4 3.4"/>',
   logout: '<path d="M14 4H6v16h8"/><path d="M18 12H10"/><path d="M15 9l3 3-3 3"/>',
 };
 function icon(name, size = 20) {

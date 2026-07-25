@@ -183,7 +183,10 @@ async function studentHistory(id) {
         <table class="tbl mt"><thead><tr><th>الدورة</th><th>نتيجته</th><th>متوسط صفه</th><th>متوسط مرحلته</th></tr></thead><tbody>${rows}</tbody></table>`
         : '<p class="muted mt">لا توجد نتائج تقييم منشورة بعد.</p>'}
       ${d.transfers.length ? `<h4 class="mt">سجل النقل</h4><ul style="padding-inline-start:18px">${d.transfers.map((t) => `<li>${esc(STAGE_AR[t.from_stage] || t.from_stage)} ← ${esc(STAGE_AR[t.to_stage] || t.to_stage)} <span class="muted">${fmtDateTime(t.moved_at)}</span></li>`).join('')}</ul>` : ''}`,
-    buttons: [{ label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() }],
+    buttons: [
+      { label: 'بطاقة تقرير (PDF)', class: 'btn-ghost', onClick: () => window.open(`/print/student/${id}?print=1`, '_blank') },
+      { label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() },
+    ],
   });
 }
 

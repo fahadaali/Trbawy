@@ -187,33 +187,7 @@ app.get('/:id/history', async (c) => {
   if (!scope || (scope !== 'all' && scope !== student.stage))
     return c.json({ error: 'لا تملك صلاحية' }, 403);
 
-  // الدورات المنشورة التي قُيّم فيها الطالب (فئة students)
-  const cycles = await c.env.DB.prepare(
-    `SELECT DISTINCT cy.id, cy.name, cy.end_date FROM eval_cycles cy
-       JOIN evaluations e ON e.cycle_id = cy.id
-      WHERE cy.status = 'published' AND e.target_type = 'students' AND e.target_id = ?
-      ORDER BY cy.end_date, cy.id`,
-  ).bind(id).all<any>();
-
-  const timeline: any[] = [];
-  for (const cy of cycles.results) {
-    const criteria = (await c.env.DB.prepare(
-      "SELECT * FROM eval_criteria WHERE cycle_id = ? AND target_type = 'students' AND is_active = 1",
-    ).bind(cy.id).all<any>()).results;
-
-    // نتيجة الطالب
-    const studentScore = await targetOverall(c.env, cy.id, id, criteria);
-    // متوسط الصف ومتوسط المرحلة
-    const classAvg = await groupAverage(c.env, cy.id, criteria, student.stage, student.grade, student.class);
-    const stageAvg = await groupAverage(c.env, cy.id, criteria, student.stage, null, null);
-    timeline.push({ cycle_id: cy.id, name: cy.name, end_date: cy.end_date, score: studentScore, class_avg: classAvg, stage_avg: stageAvg });
-  }
-
-  // تنبيه: تدنٍّ (< 3) أو تراجع عن السابق
-  const scored = timeline.filter((t) => t.score != null);
-  const last = scored[scored.length - 1];
-  const prev = scored[scored.length - 2];
-  const alert = last ? (last.score < 3 ? 'low' : (prev && last.score < prev.score - 0.3 ? 'declining' : null)) : null;
+  const { timeline, alert } = await buildStudentTimeline(c.env, student);
 
   const transfers = (await c.env.DB.prepare('SELECT * FROM student_transfers WHERE student_id = ? ORDER BY moved_at').bind(id).all()).results;
   return c.json({ student, timeline, alert, transfers });
@@ -245,6 +219,33 @@ async function groupAverage(env: Env, cycleId: number, criteria: any[], stage: s
     if (o != null) vals.push(o);
   }
   return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+}
+
+// بناء الخط الزمني لنتائج الطالب وتنبيهه (مشترك بين السجل التاريخي وبطاقة التقرير)
+export async function buildStudentTimeline(env: Env, student: any) {
+  const cycles = await env.DB.prepare(
+    `SELECT DISTINCT cy.id, cy.name, cy.end_date FROM eval_cycles cy
+       JOIN evaluations e ON e.cycle_id = cy.id
+      WHERE cy.status = 'published' AND e.target_type = 'students' AND e.target_id = ?
+      ORDER BY cy.end_date, cy.id`,
+  ).bind(student.id).all<any>();
+
+  const timeline: any[] = [];
+  for (const cy of cycles.results) {
+    const criteria = (await env.DB.prepare(
+      "SELECT * FROM eval_criteria WHERE cycle_id = ? AND target_type = 'students' AND is_active = 1",
+    ).bind(cy.id).all<any>()).results;
+    const studentScore = await targetOverall(env, cy.id, student.id, criteria);
+    const classAvg = await groupAverage(env, cy.id, criteria, student.stage, student.grade, student.class);
+    const stageAvg = await groupAverage(env, cy.id, criteria, student.stage, null, null);
+    timeline.push({ cycle_id: cy.id, name: cy.name, end_date: cy.end_date, score: studentScore, class_avg: classAvg, stage_avg: stageAvg });
+  }
+
+  const scored = timeline.filter((t) => t.score != null);
+  const last = scored[scored.length - 1];
+  const prev = scored[scored.length - 2];
+  const alert = last ? (last.score < 3 ? 'low' : (prev && last.score < prev.score - 0.3 ? 'declining' : null)) : null;
+  return { timeline, alert };
 }
 
 export default app;

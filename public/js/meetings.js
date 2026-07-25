@@ -270,6 +270,8 @@ async function meetingDetail(id) {
   if (p.can_revert) btns.push(`<button class="btn-ghost btn-sm" id="btnRevert">إرجاع إلى المسودة</button>`);
   if (p.can_archive) btns.push(`<button class="btn-ghost btn-sm" id="btnArchive">أرشفة</button>`);
   if (p.can_print) btns.push(`<button class="btn-ghost btn-sm" id="btnPrint">${icon('print', 16)} طباعة / تصدير PDF</button>`);
+  btns.push(`<button class="btn-ghost btn-sm" id="btnIcs">${icon('calendar2', 16)} إضافة للتقويم</button>`);
+  if (canCreateForCouncil(d.council)) btns.push(`<button class="btn-ghost btn-sm" id="btnDup">${icon('copy', 16)} نسخ كمحضر جديد</button>`);
   if (p.can_amend) btns.push(`<button class="btn-ghost btn-sm" id="btnAmend">${icon('meetings', 16)} محضر تصويب/ملحق</button>`);
   if (p.can_cancel) btns.push(`<button class="btn-danger btn-sm" id="btnCancel">إلغاء المحضر</button>`);
 
@@ -314,6 +316,19 @@ async function meetingDetail(id) {
     ${linksHtml}
     ${signPanel}
 
+    <div class="row-2 mt">
+      <div class="card"><div class="card-head"><h3>${icon('paperclip', 16)} مرفقات المحضر</h3></div>
+        <div class="card-body"><div id="mAtt"><div class="spinner"></div></div>
+          ${p.can_edit ? `<div class="row mt"><input type="file" id="mAttFile" style="flex:1" /><button class="btn-ghost btn-sm" id="mAttUp">رفع</button></div>` : ''}
+        </div></div>
+      <div class="card"><div class="card-head"><h3>${icon('comment', 16)} المناقشة</h3></div>
+        <div class="card-body"><div id="mCom"><div class="spinner"></div></div>
+          ${['approved', 'archived', 'cancelled'].includes(m.status) ? '<p class="muted mt">المحضر مقفل — لا تُقبل تعليقات جديدة.</p>'
+            : `<div class="row mt"><input id="mComTxt" placeholder="اكتب تعليقًا…" style="flex:1;padding:9px 12px;border:1px solid var(--border);border-radius:8px" />
+                 <button class="btn btn-sm" id="mComAdd">إضافة</button></div>`}
+        </div></div>
+    </div>
+
     <div class="card mt"><div class="card-head"><h3>الحضور</h3></div>
       <table class="tbl"><thead><tr><th>الاسم</th><th>الصفة</th><th>الحالة</th><th>التوقيع</th></tr></thead><tbody>${attRows}</tbody></table></div>
 
@@ -338,6 +353,69 @@ async function meetingDetail(id) {
     try { await API.post(`/meetings/${id}/sign`); toast('تم التوقيع', 'ok'); reload(); } catch (err) { toast(err.message, 'err'); }
   }));
   bind('btnPrint', () => window.open(`/print/meeting/${id}?print=1`, '_blank'));
+  bind('btnIcs', () => { window.location.href = `/ics/meeting/${id}`; });
+  bind('btnDup', () => confirmModal('نسخ كمحضر جديد',
+    'سيُنشأ محضر جديد (دعوة) بنفس البنود والحضور والترويسة، برقم جديد. متابعة؟', async () => {
+      try { const r = await API.post(`/meetings/${id}/duplicate`, {}); toast('تم إنشاء نسخة: ' + r.display_number, 'ok'); nav('meetings/' + r.id); }
+      catch (err) { toast(err.message, 'err'); }
+    }));
+
+  // مرفقات المحضر
+  const loadAtt = async () => {
+    const box = document.getElementById('mAtt');
+    if (!box) return;
+    try {
+      const { attachments } = await API.get(`/meetings/${id}/attachments`);
+      box.innerHTML = attachments.length ? `<ul style="padding-inline-start:18px;line-height:2">${attachments.map((a) => `
+        <li><a href="/api/meetings/${id}/attachments/${a.id}" target="_blank">${esc(a.file_name)}</a>
+          <span class="muted" style="font-size:12px">${esc(a.uploaded_by_name || '')} · ${fmtDateTime(a.uploaded_at)}</span>
+          ${p.can_edit ? `<button class="btn-ghost btn-sm" data-delatt="${a.id}">حذف</button>` : ''}</li>`).join('')}</ul>`
+        : '<p class="muted">لا مرفقات</p>';
+      box.querySelectorAll('[data-delatt]').forEach((b) => b.onclick = async () => {
+        try { await API.del(`/meetings/${id}/attachments/${b.dataset.delatt}`); loadAtt(); } catch (err) { toast(err.message, 'err'); }
+      });
+    } catch (err) { box.innerHTML = `<p class="muted">${esc(err.message)}</p>`; }
+  };
+  loadAtt();
+  bind('mAttUp', async () => {
+    const f = document.getElementById('mAttFile').files[0];
+    if (!f) return toast('اختر ملفًا', 'err');
+    try {
+      const res = await fetch(`/api/meetings/${id}/attachments?name=${encodeURIComponent(f.name)}`,
+        { method: 'PUT', body: f, credentials: 'same-origin', headers: { 'content-type': f.type || 'application/octet-stream' } });
+      if (!res.ok) throw new Error('فشل الرفع');
+      toast('تم رفع المرفق', 'ok'); document.getElementById('mAttFile').value = ''; loadAtt();
+    } catch (err) { toast(err.message, 'err'); }
+  });
+
+  // المناقشة
+  const loadCom = async () => {
+    const box = document.getElementById('mCom');
+    if (!box) return;
+    try {
+      const { comments } = await API.get(`/meetings/${id}/comments`);
+      box.innerHTML = comments.length ? comments.map((cm) => `
+        <div style="padding:9px 0;border-bottom:1px solid #f0f2f1">
+          <div class="row"><b style="flex:1;font-size:13.5px">${esc(cm.user_name)}</b>
+            <span class="muted" style="font-size:11.5px">${fmtDateTime(cm.created_at)}</span>
+            ${(cm.user_id === State.user.id || State.user.role === 'president') ? `<button class="btn-ghost btn-sm" data-delcom="${cm.id}">حذف</button>` : ''}</div>
+          <div style="font-size:14px">${esc(cm.body)}</div></div>`).join('')
+        : '<p class="muted">لا تعليقات بعد</p>';
+      box.querySelectorAll('[data-delcom]').forEach((b) => b.onclick = async () => {
+        try { await API.del(`/meetings/${id}/comments/${b.dataset.delcom}`); loadCom(); } catch (err) { toast(err.message, 'err'); }
+      });
+    } catch (err) { box.innerHTML = `<p class="muted">${esc(err.message)}</p>`; }
+  };
+  loadCom();
+  const addCom = async () => {
+    const inp = document.getElementById('mComTxt');
+    const body = inp.value.trim();
+    if (!body) return;
+    try { await API.post(`/meetings/${id}/comments`, { body }); inp.value = ''; loadCom(); }
+    catch (err) { toast(err.message, 'err'); }
+  };
+  bind('mComAdd', addCom);
+  onEnter('mComTxt', addCom);
   bind('btnAmend', () => confirmModal('محضر تصويب/ملحق', 'سيُنشأ محضر جديد (مسودة) مرتبط بهذا المحضر لإجراء التصحيح. متابعة؟', async () => {
     try { const r = await API.post(`/meetings/${id}/amend`); toast('تم إنشاء محضر التصويب', 'ok'); nav('meetings/' + r.id); } catch (err) { toast(err.message, 'err'); }
   }));

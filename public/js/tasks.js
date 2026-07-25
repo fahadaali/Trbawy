@@ -102,6 +102,37 @@ function completeTask(id, onDone) {
   });
 }
 
+// تفويض/إعادة إسناد بند إلى عضو آخر في المجلس
+async function delegateTask(id, onDone) {
+  let cands = [];
+  try { cands = (await API.get(`/actions/${id}/delegate-candidates`)).candidates; }
+  catch (err) { return toast(err.message, 'err'); }
+  openModal({
+    title: 'تفويض البند',
+    body: `<div id="dgErr"></div>
+      <div class="field"><label>المفوَّض إليه</label>
+        <select id="dg_to"><option value="">— اختر عضوًا —</option>
+          ${cands.filter((x) => x.user_id !== State.user.id).map((x) => `<option value="${x.user_id}">${esc(x.name)} (${esc(ROLE_AR[x.role] || x.role)})</option>`).join('')}
+        </select></div>
+      <label class="check-row"><input type="checkbox" id="dg_keep" /> أبقني مسؤولًا أيضًا</label>
+      <div class="field mt"><label>ملاحظة (اختياري)</label><input id="dg_note" /></div>`,
+    buttons: [
+      { label: 'تفويض', onClick: async (cl, ov) => {
+        const to = ov.querySelector('#dg_to').value;
+        if (!to) return toast('اختر عضوًا', 'err');
+        try {
+          await API.post(`/actions/${id}/delegate`, {
+            to_user_id: Number(to), keep_me: ov.querySelector('#dg_keep').checked,
+            note: ov.querySelector('#dg_note').value.trim() || null,
+          });
+          cl(); toast('تم التفويض', 'ok'); if (onDone) onDone();
+        } catch (err) { ov.querySelector('#dgErr').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
+      }},
+      { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
+    ],
+  });
+}
+
 // تفاصيل بند (نافذة) — تُستخدم من لوحة المهام ومن تفاصيل المحضر
 async function taskDetail(id, onBack) {
   let d;
@@ -142,6 +173,7 @@ async function taskDetail(id, onBack) {
     buttons: [
       ...(iAmAssignee && a.status !== 'done' ? [{ label: 'تعليم منجزاً', onClick: (cl) => { cl(); completeTask(id, () => { if (onBack) onBack(); }); } }] : []),
       ...(canManage && a.status === 'done' ? [{ label: 'إعادة فتح', class: 'btn-ghost', onClick: async (cl) => { try { await API.post(`/actions/${id}/reopen`); cl(); toast('تمت إعادة الفتح', 'ok'); if (onBack) onBack(); } catch (err) { toast(err.message, 'err'); } } }] : []),
+      ...(canManage && a.status !== 'done' && a.status !== 'cancelled' ? [{ label: 'تفويض', class: 'btn-ghost', onClick: (cl) => { cl(); delegateTask(id, onBack); } }] : []),
       { label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() },
     ],
   });

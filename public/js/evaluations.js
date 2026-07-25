@@ -251,6 +251,12 @@ async function cycleDetail(id) {
     for (const tt of viewable) {
       html += `<div class="card mt"><div class="card-head"><h3>لوحة قيادة ${TARGET_TYPE_AR[tt]}</h3></div><div id="dash_${tt}" class="card-body"><div class="spinner"></div></div></div>`;
     }
+    if (viewable.length) {
+      html += `<div class="card mt"><div class="card-head"><h3>مقارنة الدورات عبر الزمن</h3><div class="spacer"></div>
+        <select id="trendType" style="padding:8px 11px;border:1px solid var(--border);border-radius:8px">
+          ${viewable.map((t) => `<option value="${t}">${TARGET_TYPE_AR[t]}</option>`).join('')}</select></div>
+        <div id="trendBody" class="card-body"><div class="spinner"></div></div></div>`;
+    }
   }
   if (isPres) html += `<div class="card mt"><div class="card-head"><h3>تقدّم الإدخال لكل مقيِّم</h3></div><div id="progBody" class="card-body"><div class="spinner"></div></div></div>`;
   body.innerHTML = html || '<div class="card"><div class="empty"><div class="ico">⏳</div><p>لا يوجد إجراء متاح لك في هذه الحالة.</p></div></div>';
@@ -284,6 +290,7 @@ async function cycleDetail(id) {
       loadRes(viewable[0]);
     }
     for (const tt of viewable) renderDashboard(id, tt);
+    if (viewable.length) renderTrend(viewable[0]);
   }
   if (isPres) {
     try {
@@ -295,6 +302,48 @@ async function cycleDetail(id) {
       }).join('') : '<div class="muted">لا يوجد مقيّمون</div>';
     } catch (err) { document.getElementById('progBody').innerHTML = `<div class="muted">${esc(err.message)}</div>`; }
   }
+}
+
+// مقارنة الدورات عبر الزمن (اتجاه المتوسط)
+async function renderTrend(defaultTt) {
+  const sel = document.getElementById('trendType');
+  const box = document.getElementById('trendBody');
+  if (!box) return;
+  const load = async () => {
+    const tt = sel ? sel.value : defaultTt;
+    box.innerHTML = '<div class="spinner"></div>';
+    let d;
+    try { d = await API.get('/dashboard/trend?target_type=' + tt); }
+    catch (err) { box.innerHTML = `<div class="empty">${esc(err.message)}</div>`; return; }
+    const pts = (d.points || []).filter((p) => p.avg != null);
+    if (pts.length < 1) { box.innerHTML = '<p class="muted">لا توجد دورات منشورة كافية للمقارنة.</p>'; return; }
+
+    const W = 640, H = 220, pad = 42, n = pts.length;
+    const x = (i) => pad + (n === 1 ? (W - 2 * pad) / 2 : (i * (W - 2 * pad)) / (n - 1));
+    const y = (v) => H - pad - ((v - 1) / 4) * (H - 2 * pad);
+    const grid = [1, 2, 3, 4, 5].map((v) =>
+      `<line x1="${pad}" y1="${y(v)}" x2="${W - pad}" y2="${y(v)}" stroke="#eef1f0"/><text x="12" y="${y(v) + 4}" font-size="11" fill="#889">${arNum(v)}</text>`).join('');
+    const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(i).toFixed(1)},${y(p.avg).toFixed(1)}`).join(' ');
+    const dots = pts.map((p, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(p.avg).toFixed(1)}" r="4" fill="var(--primary)"><title>${esc(p.name)}: ${p.avg.toFixed(2)}</title></circle>`).join('');
+    const labels = pts.map((p, i) => `<text x="${x(i).toFixed(1)}" y="${H - 14}" font-size="10" fill="#667" text-anchor="middle">${esc((p.name || '').slice(0, 12))}</text>`).join('');
+    const first = pts[0].avg, last = pts[pts.length - 1].avg;
+    const delta = last - first;
+
+    box.innerHTML = `
+      <svg viewBox="0 0 ${W} ${H}" style="width:100%;border:1px solid var(--border);border-radius:10px;background:#fff">
+        ${grid}<path d="${path}" fill="none" stroke="var(--primary)" stroke-width="2.4"/>${dots}${labels}</svg>
+      <div class="row mt">
+        <span class="tag tag-gray">عدد الدورات: ${arNum(pts.length)}</span>
+        <span class="tag tag-gray">الأولى: ${arFixed(first)}</span>
+        <span class="tag tag-gray">الأخيرة: ${arFixed(last)}</span>
+        <span class="tag ${delta > 0.05 ? 'tag-green' : delta < -0.05 ? 'tag-red' : 'tag-gold'}">
+          ${delta > 0.05 ? '▲ تحسّن' : delta < -0.05 ? '▼ تراجع' : '= مستقر'} ${arFixed(Math.abs(delta), 2)}</span>
+      </div>
+      <table class="tbl mt"><thead><tr><th>الدورة</th><th>المتوسط</th><th>المقيَّمون</th><th>اكتمال الإدخال</th></tr></thead>
+        <tbody>${d.points.map((p) => `<tr><td>${esc(p.name)}</td><td><b>${arFixed(p.avg)}</b></td><td>${arNum(p.evaluated)}</td><td>${arNum(p.completion)}٪</td></tr>`).join('')}</tbody></table>`;
+  };
+  if (sel) sel.onchange = load;
+  load();
 }
 
 // خلية اسم: قابلة للنقر لفتح السجل التاريخي إن كان طالبًا

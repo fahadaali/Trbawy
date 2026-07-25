@@ -189,6 +189,34 @@ app.get('/staff', async (c) => {
   return c.json({ cycle, target_type: tt, stage, board, previous_avg: prevAvg });
 });
 
+// ---- مقارنة الدورات عبر الزمن (اتجاه المتوسط لكل دورة منشورة) ----
+app.get('/trend', async (c) => {
+  const u = c.get('user');
+  const tt = c.req.query('target_type') || 'students';
+  if (!['students', 'team_members', 'first_supervisors'].includes(tt))
+    return c.json({ error: 'الفئة غير صالحة' }, 400);
+  if (!canViewResults(u, tt)) return c.json({ error: 'لا تملك صلاحية' }, 403);
+
+  // نطاق المرحلة حسب الدور
+  let stage: string | null = null;
+  if (tt === 'students') stage = (isPresident(u) || isVice(u)) ? (c.req.query('stage') || null) : (u.stage || null);
+  else if (tt === 'team_members') stage = isPresident(u) ? (c.req.query('stage') || null) : (u.stage || null);
+
+  const cycles = (await c.env.DB.prepare(
+    "SELECT id, name, end_date FROM eval_cycles WHERE status='published' AND target_types LIKE ? ORDER BY end_date, id LIMIT 12",
+  ).bind('%' + tt + '%').all<any>()).results;
+
+  const points = [];
+  for (const cy of cycles) {
+    const b = await boardFor(c.env, cy.id, tt, stage);
+    points.push({
+      cycle_id: cy.id, name: cy.name, end_date: cy.end_date,
+      avg: b.overall_avg, evaluated: b.evaluated, completion: b.completion,
+    });
+  }
+  return c.json({ target_type: tt, stage, points });
+});
+
 async function previousCycleAvg(env: Env, cycleId: number, tt: string, stage: string | null): Promise<number | null> {
   const prev = await env.DB.prepare(
     "SELECT id FROM eval_cycles WHERE status='published' AND id < ? AND target_types LIKE ? ORDER BY id DESC LIMIT 1",

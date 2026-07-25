@@ -6,7 +6,7 @@ import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import {
   canViewCouncil, canCreateMeeting, canApproveMeeting, canEditDraft, canCancelMeeting, canAssignWriter, isPresident,
 } from '../permissions';
-import { getCouncil, nextMeetingNumber, formatDisplayNumber } from '../lib/meetings';
+import { getCouncil, nextMeetingNumber, formatDisplayNumber, currentAcademicYear } from '../lib/meetings';
 import { hijriYear } from '../lib/hijri';
 import { shortCode } from '../lib/crypto';
 import { notifyMany } from '../lib/notify';
@@ -201,16 +201,17 @@ app.post('/', async (c) => {
     if (!mem) return c.json({ error: 'كاتب المحضر يجب أن يكون عضوًا في المجلس' }, 400);
   }
 
+  const academicYear = await currentAcademicYear(c.env);
   const res = await c.env.DB.prepare(
     `INSERT INTO meetings
        (council_id, number, hijri_year, display_number, hijri_date, greg_date,
-        start_time, end_time, location_type, location, title, status, created_by, writer_id)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'invitation', ?, ?)`,
+        start_time, end_time, location_type, location, title, status, created_by, writer_id, academic_year)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'invitation', ?, ?, ?)`,
   ).bind(
     council.id, number, hy, display, hijri, greg,
     b.start_time || null, b.end_time || null,
     b.location_type === 'remote' ? 'remote' : 'in_person', b.location || null,
-    b.title || null, u.id, writerId,
+    b.title || null, u.id, writerId, academicYear,
   ).run();
 
   const meetingId = res.meta.last_row_id as number;
@@ -490,6 +491,161 @@ app.post('/:id/amend', async (c) => {
 
   await audit(c.env, { userId: u.id, action: 'create_amendment', entityType: 'meeting', entityId: newId, newValue: { parent: id, display } });
   return c.json({ id: newId, display_number: display }, 201);
+});
+
+// ---- نسخ محضر سابق كقالب لمحضر جديد ----
+app.post('/:id/duplicate', async (c) => {
+  const srcId = Number(c.req.param('id'));
+  const src = await c.env.DB.prepare('SELECT * FROM meetings WHERE id = ?').bind(srcId).first<any>();
+  if (!src) return c.json({ error: 'المحضر المصدر غير موجود' }, 404);
+  const council = await getCouncil(c.env, src.council_id);
+  const u = c.get('user');
+  if (!canCreateMeeting(u, council!)) return c.json({ error: 'لا تملك صلاحية إنشاء محضر لهذا المجلس' }, 403);
+
+  const b = await c.req.json().catch(() => ({}));
+  const now = new Date();
+  const greg = b.greg_date || now.toISOString().slice(0, 10);
+  const hy = hijriYear(new Date(greg));
+  const number = await nextMeetingNumber(c.env, council!.id, hy);
+  const display = formatDisplayNumber(council!.number_prefix, hy, number);
+  const year = await currentAcademicYear(c.env);
+
+  const res = await c.env.DB.prepare(
+    `INSERT INTO meetings (council_id, number, hijri_year, display_number, hijri_date, greg_date,
+        start_time, end_time, location_type, location, title, status, created_by, writer_id, academic_year)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'invitation', ?, ?, ?)`,
+  ).bind(council!.id, number, hy, display, b.hijri_date || '', greg,
+    src.start_time, src.end_time, src.location_type, src.location,
+    b.title || src.title, u.id, src.writer_id || council!.default_writer_id, year).run();
+  const newId = res.meta.last_row_id as number;
+
+  // نسخ الحضور (أعضاء المجلس الحاليون) والبنود
+  const members = await c.env.DB.prepare('SELECT user_id FROM council_members WHERE council_id = ?')
+    .bind(council!.id).all<{ user_id: number }>();
+  if (members.results.length) await c.env.DB.batch(members.results.map((mm) =>
+    c.env.DB.prepare('INSERT INTO meeting_attendees (meeting_id, user_id, attendance_status) VALUES (?, ?, ?)')
+      .bind(newId, mm.user_id, 'present')));
+
+  const items = await c.env.DB.prepare(
+    'SELECT title, body, item_type, sort_order FROM agenda_items WHERE meeting_id = ? ORDER BY sort_order',
+  ).bind(srcId).all<any>();
+  if (items.results.length) await c.env.DB.batch(items.results.map((it: any, i: number) =>
+    c.env.DB.prepare('INSERT INTO agenda_items (meeting_id, sort_order, title, body, item_type) VALUES (?, ?, ?, ?, ?)')
+      .bind(newId, i, it.title, it.body, it.item_type === 'followup' ? 'new' : it.item_type)));
+
+  await audit(c.env, { userId: u.id, action: 'duplicate_meeting', entityType: 'meeting', entityId: newId, newValue: { from: srcId, display } });
+  return c.json({ id: newId, display_number: display }, 201);
+});
+
+// ---- مرفقات المحضر ----
+app.get('/:id/attachments', async (c) => {
+  const id = Number(c.req.param('id'));
+  const m = await c.env.DB.prepare('SELECT council_id FROM meetings WHERE id = ?').bind(id).first<any>();
+  if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
+  const council = await getCouncil(c.env, m.council_id);
+  if (!(await canViewCouncil(c.env, c.get('user'), council!))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  const rows = await c.env.DB.prepare(
+    `SELECT a.id, a.file_name, a.uploaded_at, u.name AS uploaded_by_name FROM meeting_attachments a
+       LEFT JOIN users u ON u.id = a.uploaded_by WHERE a.meeting_id = ? ORDER BY a.id`,
+  ).bind(id).all();
+  return c.json({ attachments: rows.results });
+});
+
+app.put('/:id/attachments', async (c) => {
+  const id = Number(c.req.param('id'));
+  const m = await c.env.DB.prepare('SELECT * FROM meetings WHERE id = ?').bind(id).first<any>();
+  if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
+  const council = await getCouncil(c.env, m.council_id);
+  if (!canEditDraft(c.get('user'), council!, m.writer_id)) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!EDITABLE.includes(m.status)) return c.json({ error: 'المحضر مقفل' }, 409);
+  const fileName = c.req.query('name') || 'attachment';
+  const body = await c.req.arrayBuffer();
+  if (!body.byteLength) return c.json({ error: 'الملف فارغ' }, 400);
+  const key = `meetings/${id}/${Date.now()}_${fileName}`;
+  await c.env.FILES.put(key, body, { httpMetadata: { contentType: c.req.header('content-type') || 'application/octet-stream' } });
+  const res = await c.env.DB.prepare(
+    'INSERT INTO meeting_attachments (meeting_id, r2_key, file_name, uploaded_by) VALUES (?, ?, ?, ?)',
+  ).bind(id, key, fileName, c.get('user').id).run();
+  return c.json({ id: res.meta.last_row_id }, 201);
+});
+
+app.get('/:id/attachments/:attId', async (c) => {
+  const id = Number(c.req.param('id'));
+  const m = await c.env.DB.prepare('SELECT council_id FROM meetings WHERE id = ?').bind(id).first<any>();
+  if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
+  const council = await getCouncil(c.env, m.council_id);
+  if (!(await canViewCouncil(c.env, c.get('user'), council!))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  const row = await c.env.DB.prepare('SELECT r2_key, file_name FROM meeting_attachments WHERE id = ? AND meeting_id = ?')
+    .bind(Number(c.req.param('attId')), id).first<any>();
+  if (!row) return c.json({ error: 'المرفق غير موجود' }, 404);
+  const obj = await c.env.FILES.get(row.r2_key);
+  if (!obj) return c.json({ error: 'الملف غير موجود' }, 404);
+  return new Response(obj.body, {
+    headers: { 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(row.file_name)}` },
+  });
+});
+
+app.delete('/:id/attachments/:attId', async (c) => {
+  const id = Number(c.req.param('id'));
+  const m = await c.env.DB.prepare('SELECT * FROM meetings WHERE id = ?').bind(id).first<any>();
+  if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
+  const council = await getCouncil(c.env, m.council_id);
+  if (!canEditDraft(c.get('user'), council!, m.writer_id)) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  const row = await c.env.DB.prepare('SELECT r2_key FROM meeting_attachments WHERE id = ? AND meeting_id = ?')
+    .bind(Number(c.req.param('attId')), id).first<any>();
+  if (row) { try { await c.env.FILES.delete(row.r2_key); } catch { /* قد يكون محذوفًا */ } }
+  await c.env.DB.prepare('DELETE FROM meeting_attachments WHERE id = ? AND meeting_id = ?')
+    .bind(Number(c.req.param('attId')), id).run();
+  return c.json({ ok: true });
+});
+
+// ---- تعليقات المسودة (مناقشة قبل الاعتماد) ----
+app.get('/:id/comments', async (c) => {
+  const id = Number(c.req.param('id'));
+  const m = await c.env.DB.prepare('SELECT council_id FROM meetings WHERE id = ?').bind(id).first<any>();
+  if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
+  const council = await getCouncil(c.env, m.council_id);
+  if (!(await canViewCouncil(c.env, c.get('user'), council!))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  const rows = await c.env.DB.prepare(
+    `SELECT cm.id, cm.body, cm.created_at, cm.user_id, u.name AS user_name FROM meeting_comments cm
+       JOIN users u ON u.id = cm.user_id WHERE cm.meeting_id = ? ORDER BY cm.id`,
+  ).bind(id).all();
+  return c.json({ comments: rows.results });
+});
+
+app.post('/:id/comments', async (c) => {
+  const id = Number(c.req.param('id'));
+  const m = await c.env.DB.prepare('SELECT * FROM meetings WHERE id = ?').bind(id).first<any>();
+  if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
+  const council = await getCouncil(c.env, m.council_id);
+  const u = c.get('user');
+  if (!(await canViewCouncil(c.env, u, council!))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (['approved', 'archived', 'cancelled'].includes(m.status))
+    return c.json({ error: 'المحضر مقفل — لا تُقبل تعليقات جديدة' }, 409);
+  const { body } = await c.req.json().catch(() => ({}));
+  if (!body || !String(body).trim()) return c.json({ error: 'نص التعليق مطلوب' }, 400);
+  const res = await c.env.DB.prepare('INSERT INTO meeting_comments (meeting_id, user_id, body) VALUES (?, ?, ?)')
+    .bind(id, u.id, String(body).trim()).run();
+
+  // إشعار كاتب المحضر ومنشئه (عدا صاحب التعليق)
+  const targets = [m.writer_id, m.created_by].filter((x) => x && x !== u.id) as number[];
+  await notifyMany(c.env, [...new Set(targets)], {
+    type: 'meeting_comment', title: 'تعليق جديد على محضر',
+    body: `${m.display_number}: ${String(body).slice(0, 120)}`, link: `#/meetings/${id}`,
+  });
+  return c.json({ id: res.meta.last_row_id }, 201);
+});
+
+app.delete('/:id/comments/:cid', async (c) => {
+  const id = Number(c.req.param('id'));
+  const cid = Number(c.req.param('cid'));
+  const u = c.get('user');
+  const row = await c.env.DB.prepare('SELECT user_id FROM meeting_comments WHERE id = ? AND meeting_id = ?')
+    .bind(cid, id).first<any>();
+  if (!row) return c.json({ error: 'التعليق غير موجود' }, 404);
+  if (row.user_id !== u.id && !isPresident(u)) return c.json({ error: 'يمكن حذف تعليقك فقط' }, 403);
+  await c.env.DB.prepare('DELETE FROM meeting_comments WHERE id = ?').bind(cid).run();
+  return c.json({ ok: true });
 });
 
 // ---- التوقيع الإلكتروني (الحاضرون فقط) ----

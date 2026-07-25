@@ -188,6 +188,72 @@ export async function renderBundleHtml(
   return shell(settings, primary, `حزمة ${council?.name || ''}`, blocks.join('\n'), logoUri, wmUri);
 }
 
+// بطاقة تقرير الطالب (قابلة للطباعة/التصدير PDF)
+export async function renderStudentReportHtml(
+  env: Env, student: any, timeline: any[], alert: string | null,
+): Promise<string> {
+  const settings = await getSettings(env);
+  const primary = esc(settings.primary_color || '#1f6f54');
+  const [logoUri, wmUri] = await Promise.all([
+    assetDataUri(env, settings.logo_key), assetDataUri(env, settings.watermark_key),
+  ]);
+  const STAGE_AR: Record<string, string> = { secondary: 'الثانوية', middle: 'المتوسطة' };
+  const STU_STATUS: Record<string, string> = { active: 'نشط', transferred: 'منقول', withdrawn: 'منسحب', graduated: 'متخرج' };
+
+  const rows = timeline.map((t) => `<tr>
+    <td>${esc(t.name)}</td>
+    <td><b>${t.score != null ? t.score.toFixed(2) : '—'}</b></td>
+    <td>${t.class_avg != null ? t.class_avg.toFixed(2) : '—'}</td>
+    <td>${t.stage_avg != null ? t.stage_avg.toFixed(2) : '—'}</td></tr>`).join('');
+
+  // مخطط تطوّر بسيط (SVG)
+  const pts = timeline.filter((t) => t.score != null);
+  let chart = '<p class="muted">لا بيانات كافية للمخطط.</p>';
+  if (pts.length) {
+    const W = 520, H = 180, pad = 34, n = pts.length;
+    const x = (i: number) => pad + (n === 1 ? (W - 2 * pad) / 2 : (i * (W - 2 * pad)) / (n - 1));
+    const y = (v: number) => H - pad - ((v - 1) / 4) * (H - 2 * pad);
+    const line = (key: string, color: string) => {
+      const seg = timeline.map((t, i) => ({ t, i })).filter((o: any) => o.t[key] != null);
+      if (!seg.length) return '';
+      const path = seg.map((o: any, k: number) => `${k === 0 ? 'M' : 'L'}${x(o.i).toFixed(1)},${y(o.t[key]).toFixed(1)}`).join(' ');
+      const dots = seg.map((o: any) => `<circle cx="${x(o.i).toFixed(1)}" cy="${y(o.t[key]).toFixed(1)}" r="3.2" fill="${color}"/>`).join('');
+      return `<path d="${path}" fill="none" stroke="${color}" stroke-width="2.2"/>${dots}`;
+    };
+    const grid = [1, 2, 3, 4, 5].map((v) =>
+      `<line x1="${pad}" y1="${y(v)}" x2="${W - pad}" y2="${y(v)}" stroke="#e6ebe9"/><text x="8" y="${y(v) + 4}" font-size="10" fill="#889">${v}</text>`).join('');
+    chart = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;border:1px solid #e0e6e3;border-radius:8px;background:#fff">
+      ${grid}${line('stage_avg', '#c9a24b')}${line('score', primary)}
+      <text x="${W - pad}" y="14" font-size="11" fill="${primary}" text-anchor="end">■ الطالب</text>
+      <text x="${W - pad - 70}" y="14" font-size="11" fill="#c9a24b" text-anchor="end">■ المرحلة</text></svg>`;
+  }
+
+  const alertHtml = alert === 'low'
+    ? `<div class="alert bad">تنبيه: أداء متدنٍّ (أقل من ٣)</div>`
+    : alert === 'declining' ? `<div class="alert warn">تنبيه: تراجع عن الدورة السابقة</div>` : '';
+
+  const body = `<div class="content">
+    <h1>بطاقة تقرير الطالب</h1>
+    <div class="subnum">${esc(student.name)}</div>
+    ${alertHtml}
+    <table class="meta"><tbody>
+      <tr><th>رقم الهوية</th><td class="code">${esc(student.national_id)}</td><th>المرحلة</th><td>${esc(STAGE_AR[student.stage] || student.stage)}</td></tr>
+      <tr><th>الصف</th><td>${esc(student.grade || '—')}</td><th>الفصل</th><td>${esc(student.class || '—')}</td></tr>
+      <tr><th>الحالة</th><td>${esc(STU_STATUS[student.status] || student.status)}</td><th>عدد الدورات</th><td>${timeline.length}</td></tr>
+    </tbody></table>
+    <h2>مخطط التطوّر</h2>${chart}
+    <h2>نتائج دورات التقييم</h2>
+    <table><thead><tr><th>الدورة</th><th>نتيجته</th><th>متوسط صفه</th><th>متوسط مرحلته</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="4">لا توجد نتائج منشورة</td></tr>'}</tbody></table>
+    ${student.notes ? `<h2>ملاحظات</h2><p>${esc(student.notes)}</p>` : ''}
+  </div>`;
+
+  const extraCss = `.alert{padding:8px 12px;border-radius:8px;margin:10px 0;text-align:center;font-weight:700}
+    .alert.bad{background:#fdecea;color:#c0392b}.alert.warn{background:#f8f0da;color:#b9770e}`;
+  const html = shell(settings, primary, `تقرير: ${student.name}`, body, logoUri, wmUri);
+  return html.replace('</style>', extraCss + '</style>');
+}
+
 // صفحة التحقق العامة (بلا مصادقة)
 export async function renderVerifyHtml(env: Env, code: string): Promise<string> {
   const m = await env.DB.prepare('SELECT * FROM meetings WHERE verify_code = ?').bind(code).first<any>();

@@ -8,6 +8,13 @@ export interface FullCouncil extends CouncilRow {
   number_prefix: string;
 }
 
+// السنة الدراسية الحالية من الإعدادات (تُستخدم كسياق للمحاضر والدورات)
+export async function currentAcademicYear(env: Env): Promise<string | null> {
+  const s = await env.DB.prepare('SELECT current_academic_year FROM settings WHERE id = 1')
+    .first<{ current_academic_year: string | null }>();
+  return s?.current_academic_year || null;
+}
+
 export async function getCouncil(env: Env, id: number): Promise<FullCouncil | null> {
   return await env.DB.prepare(
     'SELECT id, name, type, number_prefix, default_writer_id FROM councils WHERE id = ?',

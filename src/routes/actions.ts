@@ -5,7 +5,7 @@ import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import { canViewCouncil, canEditDraft, isPresident } from '../permissions';
 import { getCouncil, nextActionNumber, formatActionNumber } from '../lib/meetings';
-import { notifyMany } from '../lib/notify';
+import { notify, notifyMany } from '../lib/notify';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -199,6 +199,59 @@ app.post('/:id/complete', async (c) => {
   ).bind(u.id, note || null, id).run();
   await audit(c.env, { userId: u.id, action: 'complete_action', entityType: 'action_item', entityId: id });
   return c.json({ ok: true });
+});
+
+// ---- تفويض/إعادة إسناد المهمة إلى شخص آخر ----
+app.post('/:id/delegate', async (c) => {
+  const id = Number(c.req.param('id'));
+  const a = await loadAction(c.env, id);
+  if (!a) return c.json({ error: 'البند غير موجود' }, 404);
+  const u = c.get('user');
+  const council = await getCouncil(c.env, a.council_id);
+  const writerId = await meetingWriterOf(c.env, a.source_meeting_id);
+  // يفوّض: المسؤول الحالي، أو المدير (رئيس/مشرف/كاتب)
+  const mine = await isAssignee(c.env, id, u.id);
+  if (!mine && !isPresident(u) && !canEditDraft(u, council!, writerId))
+    return c.json({ error: 'التفويض متاح للمسؤول عن البند أو مدير المجلس' }, 403);
+  if (a.status === 'done' || a.status === 'cancelled')
+    return c.json({ error: 'لا يمكن تفويض بند منتهٍ' }, 409);
+
+  const { to_user_id, keep_me, note } = await c.req.json().catch(() => ({}));
+  const target = Number(to_user_id);
+  if (!target) return c.json({ error: 'حدد الشخص المفوَّض إليه' }, 400);
+  // يجب أن يكون عضوًا في نفس المجلس
+  const isMember = await c.env.DB.prepare('SELECT 1 FROM council_members WHERE council_id = ? AND user_id = ?')
+    .bind(a.council_id, target).first();
+  if (!isMember) return c.json({ error: 'المفوَّض إليه يجب أن يكون عضوًا في المجلس' }, 400);
+
+  await c.env.DB.prepare('INSERT OR IGNORE INTO action_assignees (action_item_id, user_id) VALUES (?, ?)')
+    .bind(id, target).run();
+  // إزالة المفوِّض ما لم يطلب البقاء
+  if (mine && !keep_me) {
+    await c.env.DB.prepare('DELETE FROM action_assignees WHERE action_item_id = ? AND user_id = ?')
+      .bind(id, u.id).run();
+  }
+  await notify(c.env, {
+    userId: target, type: 'action_delegated', title: 'تفويض مهمة إليك',
+    body: `${a.display_number} — ${a.text}${note ? ' | ' + note : ''}`, link: `#/tasks/${id}`,
+  });
+  await audit(c.env, {
+    userId: u.id, action: 'delegate_action', entityType: 'action_item', entityId: id,
+    newValue: { to: target, keep_me: !!keep_me, note: note || null },
+  });
+  return c.json({ ok: true });
+});
+
+// أعضاء المجلس المرشّحون للتفويض
+app.get('/:id/delegate-candidates', async (c) => {
+  const id = Number(c.req.param('id'));
+  const a = await loadAction(c.env, id);
+  if (!a) return c.json({ error: 'البند غير موجود' }, 404);
+  const rows = await c.env.DB.prepare(
+    `SELECT cm.user_id, u.name, u.role FROM council_members cm JOIN users u ON u.id = cm.user_id
+      WHERE cm.council_id = ? AND u.is_active = 1 ORDER BY u.name`,
+  ).bind(a.council_id).all();
+  return c.json({ candidates: rows.results });
 });
 
 // ---- إعادة فتح ----
