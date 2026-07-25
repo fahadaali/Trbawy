@@ -12,8 +12,48 @@ async function boot() {
   } catch {
     State.user = null;
   }
+  if (State.user) await applyBranding();
   window.addEventListener('hashchange', route);
   route();
+}
+
+// تطبيق الهوية البصرية (اللون الأساسي والخط) على الواجهة
+async function applyBranding(settings) {
+  try {
+    const s = settings || (await API.get('/settings')).settings;
+    if (!s) return;
+    State.settings = s;
+    const root = document.documentElement;
+    if (s.primary_color) {
+      root.style.setProperty('--primary', s.primary_color);
+      root.style.setProperty('--primary-dark', shadeColor(s.primary_color, -18));
+      root.style.setProperty('--primary-light', shadeColor(s.primary_color, 88));
+    }
+    if (s.font_family) {
+      root.style.setProperty('--font', `'${s.font_family}', 'Segoe UI', Tahoma, system-ui, sans-serif`);
+      loadWebFont(s.font_family);
+    }
+  } catch { /* الهوية البصرية غير حرجة — نتجاهل الفشل */ }
+}
+
+// تفتيح/تغميق لون hex بنسبة مئوية (موجب = أفتح)
+function shadeColor(hex, pct) {
+  const m = /^#?([0-9a-f]{6})$/i.exec(String(hex).trim());
+  if (!m) return hex;
+  const n = parseInt(m[1], 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) =>
+    Math.max(0, Math.min(255, Math.round(pct >= 0 ? v + (255 - v) * (pct / 100) : v * (1 + pct / 100)))));
+  return '#' + ch.map((v) => v.toString(16).padStart(2, '0')).join('');
+}
+
+// تحميل خط الويب المطلوب مرة واحدة
+function loadWebFont(family) {
+  const id = 'font-' + family.replace(/\s+/g, '-');
+  if (document.getElementById(id)) return;
+  const link = document.createElement('link');
+  link.id = id; link.rel = 'stylesheet';
+  link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family)}:wght@400;500;700;800&display=swap`;
+  document.head.appendChild(link);
 }
 
 // ============ التوجيه ============
@@ -61,6 +101,7 @@ function renderLogin() {
       });
       State.user = user;
       State.pendingShown = false;
+      if (!user.must_change_password) await applyBranding();
       location.hash = '#/dashboard';
       route();
     } catch (err) {
@@ -124,7 +165,7 @@ const NAV = [
     { key: 'meetings', label: 'المحاضر', ico: 'meetings', roles: ['president','vice_president','first_supervisor','team_member'] },
     { key: 'tasks', label: 'المهام', ico: 'tasks', roles: ['president','vice_president','first_supervisor','team_member'] },
     { key: 'evaluations', label: 'التقييم', ico: 'evaluations', roles: ['president','vice_president','first_supervisor','team_member'] },
-    { key: 'students', label: 'سجل الطلاب', ico: 'students', roles: ['president','first_supervisor'] },
+    { key: 'students', label: 'سجل الطلاب', ico: 'students', roles: ['president','vice_president','first_supervisor','team_member'] },
   ]},
   { group: 'الإدارة', items: [
     { key: 'users', label: 'المستخدمون', ico: 'users', roles: ['president','system_admin'] },
@@ -626,13 +667,15 @@ VIEWS.branding = async () => {
 
   document.getElementById('br_save').onclick = async () => {
     try {
-      await API.patch('/settings', {
+      const payload = {
         org_name: document.getElementById('br_org').value,
         header_text: document.getElementById('br_header').value,
         footer_text: document.getElementById('br_footer').value,
         primary_color: document.getElementById('br_color').value,
         font_family: document.getElementById('br_font').value,
-      });
+      };
+      await API.patch('/settings', payload);
+      await applyBranding({ ...State.settings, ...payload }); // تطبيق فوري على الواجهة
       toast('تم الحفظ', 'ok');
     } catch (err) { document.getElementById('brErr').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
   };

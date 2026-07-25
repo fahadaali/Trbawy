@@ -259,6 +259,7 @@ async function meetingDetail(id) {
   if (p.can_sign) btns.push(`<button class="btn btn-sm" id="btnSign">${icon('pen', 16)} توقيع المحضر</button>`);
   if (p.can_submit) btns.push(`<button class="btn btn-sm" id="btnSubmit">إرسال للتوقيعات</button>`);
   if (p.can_approve) btns.push(`<button class="btn btn-sm" id="btnApprove">اعتماد وإقفال</button>`);
+  if (p.can_revert) btns.push(`<button class="btn-ghost btn-sm" id="btnRevert">إرجاع إلى المسودة</button>`);
   if (p.can_archive) btns.push(`<button class="btn-ghost btn-sm" id="btnArchive">أرشفة</button>`);
   if (p.can_print) btns.push(`<button class="btn-ghost btn-sm" id="btnPrint">${icon('print', 16)} طباعة / تصدير PDF</button>`);
   if (p.can_amend) btns.push(`<button class="btn-ghost btn-sm" id="btnAmend">${icon('meetings', 16)} محضر تصويب/ملحق</button>`);
@@ -322,6 +323,9 @@ async function meetingDetail(id) {
     catch (err) { if (err.data && err.data.pending) toast('بانتظار توقيع: ' + err.data.pending.join('، '), 'err'); else toast(err.message, 'err'); }
   }));
   bind('btnArchive', () => doStatus('archive'));
+  bind('btnRevert', () => confirmModal('إرجاع إلى المسودة',
+    'سيعود المحضر قابلًا للتحرير، وتُلغى كل التوقيعات المسجّلة (يلزم إعادة التوقيع). متابعة؟',
+    () => doStatus('revert'), { danger: true }));
   bind('btnSign', () => confirmModal('توقيع المحضر', 'بالتوقيع تقرّ بمحتوى المحضر. سيُسجَّل وقت التوقيع ورمز تحقق فريد. متابعة؟', async () => {
     try { await API.post(`/meetings/${id}/sign`); toast('تم التوقيع', 'ok'); reload(); } catch (err) { toast(err.message, 'err'); }
   }));

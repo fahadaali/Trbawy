@@ -118,11 +118,13 @@ function importStudents(onDone) {
     title: 'استيراد الطلاب',
     body: `<p class="muted">حمّل القالب، عبّئه، ثم ارفعه للمعاينة قبل الحفظ.</p>
       <div class="row"><a class="btn-ghost btn-sm" href="/api/students/template">تنزيل القالب</a>
-        <input type="file" id="imp_file" accept=".csv,text/csv" /></div>
+        <input type="file" id="imp_file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" /></div>
+      <p class="hint">يقبل ملفات Excel ‎(.xlsx)‎ وCSV.</p>
       <div id="imp_preview" class="mt"></div>`,
     buttons: [
       { label: 'حفظ الصفوف الصحيحة', class: '', onClick: async (cl, ov) => {
         if (!ov._csv) return toast('اختر ملفاً وعايِنه أولاً', 'err');
+        if (!ov._valid) return toast('لا توجد صفوف صحيحة للحفظ', 'err');
         try { const r = await API.post('/students/import?commit=1', { csv: ov._csv }); cl(); toast(`تم استيراد ${r.inserted} — تم تخطي ${r.skipped}`, 'ok'); onDone(); }
         catch (err) { toast(err.message, 'err'); }
       }},
@@ -131,10 +133,13 @@ function importStudents(onDone) {
   });
   overlay.querySelector('#imp_file').onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
-    const text = await f.text();
+    let text;
+    try { text = await fileToCsv(f); }
+    catch (err) { overlay.querySelector('#imp_preview').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; overlay._csv = null; return; }
     overlay._csv = text;
     try {
       const p = await API.post('/students/import', { csv: text });
+      overlay._valid = p.valid;
       overlay.querySelector('#imp_preview').innerHTML = `
         <div class="row"><span class="tag tag-green">صحيح: ${arNum(p.valid)}</span><span class="tag tag-red">خطأ: ${arNum(p.invalid)}</span><span class="tag tag-gray">الإجمالي: ${arNum(p.total)}</span></div>
         <table class="tbl mt"><thead><tr><th>الصف</th><th>الهوية</th><th>الاسم</th><th>المرحلة</th><th>الأخطاء</th></tr></thead>

@@ -152,6 +152,8 @@ app.get('/:id', async (c) => {
     can_override: isPresident(u) && m.status === 'awaiting_signatures',
     can_print: ['approved', 'archived', 'awaiting_signatures'].includes(m.status),
     can_amend: canCreateMeeting(u, council) && ['approved', 'archived'].includes(m.status),
+    can_revert: m.status === 'awaiting_signatures' &&
+      (canEditDraft(u, council, m.writer_id) || canApproveMeeting(u, council)),
   };
 
   // روابط محاضر التصويب/الملحق
@@ -357,6 +359,15 @@ app.post('/:id/status', async (c) => {
   } else if (action === 'submit' && m.status === 'draft') {
     if (!canEditDraft(u, council!, m.writer_id)) return c.json({ error: 'لا تملك صلاحية' }, 403);
     newStatus = 'awaiting_signatures';
+  } else if (action === 'revert' && m.status === 'awaiting_signatures') {
+    // إرجاع إلى المسودة لتصحيح خطأ قبل الاعتماد — تُلغى التوقيعات والتجاوزات.
+    if (!canEditDraft(u, council!, m.writer_id) && !canApproveMeeting(u, council!))
+      return c.json({ error: 'لا تملك صلاحية إرجاع المحضر للمسودة' }, 403);
+    await c.env.DB.prepare(
+      `UPDATE meeting_attendees SET signed_at = NULL, signature_hash = NULL,
+         signature_override = 0, override_reason = NULL WHERE meeting_id = ?`,
+    ).bind(id).run();
+    newStatus = 'draft';
   } else if (action === 'approve' && m.status === 'awaiting_signatures') {
     if (!canApproveMeeting(u, council!)) return c.json({ error: 'لا تملك صلاحية الاعتماد' }, 403);
     // لا يُعتمد المحضر إلا بعد اكتمال توقيعات الحاضرين (أو تجاوزها بتسجيل السبب).

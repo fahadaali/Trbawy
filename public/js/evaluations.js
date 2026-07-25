@@ -64,6 +64,36 @@ function newCycleForm() {
   });
 }
 
+// تعديل بيانات دورة قائمة (الفئات تُعدَّل قبل الفتح فقط)
+function editCycleForm(cy, currentTypes, onDone) {
+  const isDraft = cy.status === 'draft';
+  openModal({
+    title: 'تعديل بيانات الدورة',
+    body: `<div id="ecErr"></div>
+      <div class="field"><label>اسم الدورة</label><input id="ec_name" value="${esc(cy.name)}" /></div>
+      <div class="row-2">
+        <div class="field"><label>من تاريخ</label><input type="date" id="ec_start" value="${esc(cy.start_date)}" /></div>
+        <div class="field"><label>إلى تاريخ</label><input type="date" id="ec_end" value="${esc(cy.end_date)}" /></div>
+      </div>
+      <div class="field"><label>الفئات المشمولة ${isDraft ? '' : '<span class="muted">(لا تُعدَّل بعد فتح الدورة)</span>'}</label>
+        ${Object.entries(TARGET_TYPE_AR).map(([v, l]) => `<label class="check-row"><input type="checkbox" value="${v}" ${currentTypes.includes(v) ? 'checked' : ''} ${isDraft ? '' : 'disabled'} /> ${l}</label>`).join('')}
+      </div>`,
+    buttons: [
+      { label: 'حفظ', onClick: async (cl, ov) => {
+        const payload = {
+          name: ov.querySelector('#ec_name').value.trim(),
+          start_date: ov.querySelector('#ec_start').value,
+          end_date: ov.querySelector('#ec_end').value,
+        };
+        if (isDraft) payload.target_types = Array.from(ov.querySelectorAll('input[type=checkbox]:checked')).map((i) => i.value);
+        try { await API.patch('/eval/cycles/' + cy.id, payload); cl(); toast('تم الحفظ', 'ok'); onDone(); }
+        catch (err) { ov.querySelector('#ecErr').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
+      }},
+      { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
+    ],
+  });
+}
+
 // ---- إدارة المعايير ----
 async function criteriaManager() {
   setTitle('المعايير والأوزان');
@@ -86,7 +116,7 @@ async function criteriaManager() {
 
   content().innerHTML = `<div class="row"><button class="btn-ghost btn-sm" onclick="nav('evaluations')">رجوع للدورات</button>
     <a class="btn-ghost btn-sm" href="/api/eval/criteria/export">تصدير CSV</a>
-    <button class="btn-ghost btn-sm" id="critImport">استيراد CSV</button></div>` + sections;
+    <button class="btn-ghost btn-sm" id="critImport">استيراد Excel/CSV</button></div>` + sections;
 
   const reload = criteriaManager;
   document.getElementById('critImport').onclick = () => importCriteria(reload);
@@ -99,13 +129,15 @@ async function criteriaManager() {
 
 function importCriteria(onDone) {
   const { overlay } = openModal({
-    title: 'استيراد المعايير (CSV)',
+    title: 'استيراد المعايير',
     body: `<p class="muted">الأعمدة: <code dir="ltr">target_type,name,description,weight</code>. يستبدل معايير الفئات الواردة. صدّر أولًا للاطلاع على الصيغة.</p>
-      <input type="file" id="ci_file" accept=".csv,text/csv" />
+      <input type="file" id="ci_file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+      <p class="hint">يقبل ملفات Excel ‎(.xlsx)‎ وCSV.</p>
       <div id="ci_preview" class="mt"></div>`,
     buttons: [
       { label: 'حفظ', onClick: async (cl, ov) => {
         if (!ov._csv) return toast('اختر ملفًا وعايِنه أولًا', 'err');
+        if (!ov._valid) return toast('لا توجد صفوف صحيحة للحفظ', 'err');
         try { const r = await API.post('/eval/criteria/import?commit=1', { csv: ov._csv }); cl(); toast(`تم استيراد ${r.inserted} معيارًا`, 'ok'); onDone(); }
         catch (err) { toast(err.message, 'err'); }
       }},
@@ -114,9 +146,13 @@ function importCriteria(onDone) {
   });
   overlay.querySelector('#ci_file').onchange = async (e) => {
     const f = e.target.files[0]; if (!f) return;
-    const text = await f.text(); overlay._csv = text;
+    let text;
+    try { text = await fileToCsv(f); }
+    catch (err) { overlay.querySelector('#ci_preview').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; overlay._csv = null; return; }
+    overlay._csv = text;
     try {
       const p = await API.post('/eval/criteria/import', { csv: text });
+      overlay._valid = p.valid;
       overlay.querySelector('#ci_preview').innerHTML = `<div class="row"><span class="tag tag-green">صحيح: ${arNum(p.valid)}</span><span class="tag tag-red">خطأ: ${arNum(p.invalid)}</span></div>
         <table class="tbl mt"><thead><tr><th>الصف</th><th>الفئة</th><th>المعيار</th><th>الوزن</th><th>الأخطاء</th></tr></thead>
         <tbody>${p.report.map((r) => `<tr style="${r.errors.length ? 'background:#fdecea' : ''}"><td>${arNum(r.row)}</td><td>${esc(TARGET_TYPE_AR[r.target_type] || r.target_type)}</td><td>${esc(r.name)}</td><td>${arNum(r.weight)}</td><td class="tag-red">${r.errors.map(esc).join('، ') || '✓'}</td></tr>`).join('')}</tbody></table>`;
@@ -166,6 +202,8 @@ async function cycleDetail(id) {
     if (cy.status === 'draft') statusBtns.push(`<button class="btn btn-sm" data-st="open">فتح الدورة</button>`);
     if (cy.status === 'open') statusBtns.push(`<button class="btn btn-sm" data-st="close">إغلاق الإدخال</button>`);
     if (cy.status === 'closed') statusBtns.push(`<button class="btn btn-sm" data-st="publish">نشر النتائج</button>`);
+    statusBtns.push(`<button class="btn-ghost btn-sm" id="cyEdit">تعديل بيانات الدورة</button>`);
+    if (cy.status === 'draft') statusBtns.push(`<button class="btn-danger btn-sm" id="cyDel">حذف الدورة</button>`);
   }
 
   content().innerHTML = `
@@ -187,6 +225,15 @@ async function cycleDetail(id) {
       catch (err) { toast(err.message, 'err'); }
     });
   });
+
+  const cyEdit = document.getElementById('cyEdit');
+  if (cyEdit) cyEdit.onclick = () => editCycleForm(cy, d.target_types, () => cycleDetail(id));
+  const cyDel = document.getElementById('cyDel');
+  if (cyDel) cyDel.onclick = () => confirmModal('حذف الدورة',
+    'سيُحذف كل ما يخص هذه الدورة (مسودة بلا تقييمات). متابعة؟', async () => {
+      try { await API.del('/eval/cycles/' + id); toast('تم حذف الدورة', 'ok'); nav('evaluations'); }
+      catch (err) { toast(err.message, 'err'); }
+    }, { danger: true });
 
   const body = document.getElementById('cyBody');
   // أقسام: للتقييم (open) — النتائج (published) — التقدّم (president)
@@ -250,6 +297,12 @@ async function cycleDetail(id) {
   }
 }
 
+// خلية اسم: قابلة للنقر لفتح السجل التاريخي إن كان طالبًا
+function nameCell(t, tt) {
+  return tt === 'students' && t.id
+    ? `<a href="#" data-hist="${t.id}">${esc(t.name)}</a>` : esc(t.name);
+}
+
 async function renderDashboard(cycleId, tt) {
   const box = document.getElementById('dash_' + tt);
   if (!box) return;
@@ -290,9 +343,14 @@ async function renderDashboard(cycleId, tt) {
           ${b.weakest_criteria.map((w) => `<div class="row"><span style="flex:1">${esc(w.name)}</span><b>${arFixed(w.avg)}</b></div>`).join('') || '<span class="muted">—</span>'}</div></div>
       </div>
       <div class="row-2 mt">
-        <div class="card"><div class="card-head"><h3>أعلى ١٠</h3></div><table class="tbl"><tbody>${b.top.map((t) => `<tr><td>${esc(t.name)}</td><td><b>${arFixed(t.score)}</b></td></tr>`).join('') || '<tr><td class="muted">—</td></tr>'}</tbody></table></div>
-        <div class="card"><div class="card-head"><h3>أدنى ١٠</h3></div><table class="tbl"><tbody>${b.bottom.map((t) => `<tr><td>${esc(t.name)}</td><td><b>${arFixed(t.score)}</b></td></tr>`).join('') || '<tr><td class="muted">—</td></tr>'}</tbody></table></div>
+        <div class="card"><div class="card-head"><h3>أعلى ١٠</h3></div><table class="tbl"><tbody>${b.top.map((t) => `<tr><td>${nameCell(t, tt)}</td><td><b>${arFixed(t.score)}</b></td></tr>`).join('') || '<tr><td class="muted">—</td></tr>'}</tbody></table></div>
+        <div class="card"><div class="card-head"><h3>أدنى ١٠</h3></div><table class="tbl"><tbody>${b.bottom.map((t) => `<tr><td>${nameCell(t, tt)}</td><td><b>${arFixed(t.score)}</b></td></tr>`).join('') || '<tr><td class="muted">—</td></tr>'}</tbody></table></div>
       </div>`;
+    // فتح السجل التاريخي من أسماء الطلاب في اللوحة
+    inner.querySelectorAll('[data-hist]').forEach((a) => a.onclick = (e) => {
+      e.preventDefault();
+      if (typeof studentHistory === 'function') studentHistory(a.dataset.hist);
+    });
   };
   if (stageFilter) document.getElementById('stage_' + tt).onchange = load;
   load();
@@ -361,12 +419,16 @@ async function renderResults(cycleId, tt) {
 
   const critHead = d.criteria.map((c) => `<th title="${esc(c.name)}">${esc(c.name)}</th>`).join('');
   const rows = d.results.map((r) => `<tr>
-    <td><b>${esc(r.name)}</b></td>
+    <td>${tt === 'students' ? `<a href="#" data-hist="${r.target_id}"><b>${esc(r.name)}</b></a>` : `<b>${esc(r.name)}</b>`}</td>
     <td><span class="tag tag-green">${arFixed(r.overall)}</span></td>
     ${r.per_criterion.map((pc) => `<td>${pc.avg != null ? `<button class="btn-ghost btn-sm" data-detail="${r.target_id}|${pc.criterion_id}">${arFixed(pc.avg)}</button>` : '—'}</td>`).join('')}
     <td class="muted">${arNum(r.evaluators)}</td></tr>`).join('');
 
-  let html = `<table class="tbl"><thead><tr><th>${TARGET_TYPE_AR[tt]}</th><th>النتيجة</th>${critHead}<th>عدد المقيّمين</th></tr></thead>
+  let html = `<div class="row" style="margin-bottom:10px">
+      <a class="btn-ghost btn-sm" href="/api/eval/cycles/${cycleId}/results/export?target_type=${tt}">${icon('package', 15)} تصدير النتائج</a>
+      ${tt === 'students' ? '<span class="muted" style="font-size:12px">اضغط على اسم الطالب لعرض سجله التاريخي</span>' : ''}
+    </div>
+    <table class="tbl"><thead><tr><th>${TARGET_TYPE_AR[tt]}</th><th>النتيجة</th>${critHead}<th>عدد المقيّمين</th></tr></thead>
     <tbody>${rows || `<tr><td colspan="${d.criteria.length + 3}" class="center muted">لا نتائج</td></tr>`}</tbody></table>`;
 
   if (mine.my_inputs && mine.my_inputs.length) {
@@ -375,6 +437,12 @@ async function renderResults(cycleId, tt) {
       <tbody>${mine.my_inputs.map((m) => `<tr><td>${esc(m.name)}</td><td>${arFixed(m.weighted)}</td></tr>`).join('')}</tbody></table></div>`;
   }
   box.innerHTML = html;
+
+  // فتح السجل التاريخي للطالب من شاشة النتائج (§٥٫٥)
+  box.querySelectorAll('[data-hist]').forEach((a) => a.onclick = (e) => {
+    e.preventDefault();
+    if (typeof studentHistory === 'function') studentHistory(a.dataset.hist);
+  });
 
   box.querySelectorAll('[data-detail]').forEach((b) => b.onclick = async () => {
     const [targetId, criterionId] = b.dataset.detail.split('|');

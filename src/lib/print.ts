@@ -32,10 +32,10 @@ function roleAr(role: string): string {
   return ({ president: 'رئيس المجلس التربوي', vice_president: 'نائب الرئيس', first_supervisor: 'مشرف أول', team_member: 'عضو فريق', system_admin: 'مدير النظام' } as any)[role] || '';
 }
 
-function printStyles(primary: string): string {
+function printStyles(primary: string, font: string): string {
   return `
   * { box-sizing: border-box; }
-  body { font-family: 'Tajawal', Tahoma, sans-serif; color: #1c2a26; margin: 0; }
+  body { font-family: '${font}', Tahoma, sans-serif; color: #1c2a26; margin: 0; }
   @page { size: A4; margin: 22mm 16mm 22mm 16mm; }
   .page-head { position: fixed; top: 0; left: 0; right: 0; height: 18mm; display: flex; align-items: center;
     justify-content: space-between; border-bottom: 2px solid ${primary}; padding: 4px 0; }
@@ -61,7 +61,7 @@ function printStyles(primary: string): string {
   ol.agenda { padding-inline-start: 20px; }
   ol.agenda li { margin-bottom: 6px; }
   .body-rich img { max-width: 100%; } .body-rich mark { background: #fff3b0; }
-  .sig { height: 12mm; } .stamp { font-family: 'Tajawal'; font-style: italic; border: 1px dashed ${primary}; padding: 2px 8px; border-radius: 6px; color: ${primary}; }
+  .sig { height: 12mm; } .stamp { font-family: '${font}'; font-style: italic; border: 1px dashed ${primary}; padding: 2px 8px; border-radius: 6px; color: ${primary}; }
   .code { direction: ltr; font-family: monospace; font-size: 11px; }
   .ov { color: #b9770e; } .muted { color: #889; }
   .verify { margin-top: 20px; display: flex; align-items: center; gap: 14px; border: 1px solid #e0e6e3; border-radius: 10px; padding: 12px; }
@@ -141,12 +141,14 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
 }
 
 function shell(settings: any, primary: string, footerRight: string, bodies: string, logoUri: string, wmUri: string): string {
+  // الخط من إعدادات الهوية البصرية (Tajawal افتراضيًا)
+  const font = String(settings.font_family || 'Tajawal').replace(/[^\w\s-]/g, '') || 'Tajawal';
   const logoImg = logoUri ? `<img class="logo" src="${logoUri}" />` : '';
   const watermark = wmUri ? `<div class="watermark"><img src="${wmUri}" /></div>` : '';
   return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8" />
 <title>${esc(footerRight)}</title>
-<link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet" />
-<style>${printStyles(primary)}</style></head><body>
+<link href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(font)}:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>${printStyles(primary, font)}</style></head><body>
 ${watermark}
 <div class="page-head"><span class="org">${esc(settings.header_text || settings.org_name || '')}</span>${logoImg}</div>
 <div class="page-foot"><span>${esc(settings.footer_text || '')}</span><span class="pgno">صفحة </span><span dir="ltr">${esc(footerRight)}</span></div>

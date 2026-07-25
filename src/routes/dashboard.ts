@@ -172,7 +172,7 @@ async function boardFor(env: Env, cycleId: number, targetType: string, stage: st
   const scoresByEval: Record<number, any[]> = {};
   allScores.forEach((s: any) => { (scoresByEval[s.evaluation_id] ||= []).push(s); });
 
-  const results: { name: string; score: number | null }[] = [];
+  const results: { id: number; name: string; score: number | null }[] = [];
   const critSum: Record<number, { sum: number; n: number; name: string }> = {};
   criteria.forEach((cr: any) => { critSum[cr.id] = { sum: 0, n: 0, name: cr.name }; });
 
@@ -180,13 +180,13 @@ async function boardFor(env: Env, cycleId: number, targetType: string, stage: st
     const evForT = evals.filter((e: any) => e.target_id === t.id);
     const perEval = evForT.map((e: any) => weightedForEvaluation(scoresByEval[e.id] || [], criteria)).filter((x: any): x is number => x != null);
     const overall = perEval.length ? perEval.reduce((a, b) => a + b, 0) / perEval.length : null;
-    results.push({ name: t.name, score: overall });
+    results.push({ id: t.id, name: t.name, score: overall });
     for (const e of evForT) for (const s of (scoresByEval[e.id] || [])) {
       if (!s.is_na && s.score != null && critSum[s.criterion_id]) { critSum[s.criterion_id].sum += s.score; critSum[s.criterion_id].n++; }
     }
   }
 
-  const scored = results.filter((r) => r.score != null) as { name: string; score: number }[];
+  const scored = results.filter((r) => r.score != null) as { id: number; name: string; score: number }[];
   const overallAvg = scored.length ? scored.reduce((a, b) => a + b.score, 0) / scored.length : null;
 
   const dist = { '1-2': 0, '2-3': 0, '3-4': 0, '4-5': 0 };
@@ -204,8 +204,8 @@ async function boardFor(env: Env, cycleId: number, targetType: string, stage: st
     completion: targets.length ? Math.round((scored.length / targets.length) * 100) : 0,
     overall_avg: overallAvg,
     distribution: dist,
-    top: sorted.slice(0, 10).map((r) => ({ name: r.name, score: r.score })),
-    bottom: sorted.slice(-10).reverse().map((r) => ({ name: r.name, score: r.score })),
+    top: sorted.slice(0, 10).map((r) => ({ id: r.id, name: r.name, score: r.score })),
+    bottom: sorted.slice(-10).reverse().map((r) => ({ id: r.id, name: r.name, score: r.score })),
     weakest_criteria: weakest,
   };
 }

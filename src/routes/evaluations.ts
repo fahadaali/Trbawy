@@ -132,6 +132,49 @@ app.post('/cycles', async (c) => {
   return c.json({ id: res.meta.last_row_id }, 201);
 });
 
+// تعديل بيانات الدورة (الاسم/الفترة/الفئات) — الفئات تُعدَّل قبل الفتح فقط
+app.patch('/cycles/:id', async (c) => {
+  if (!canCreateEvalCycle(c.get('user'))) return c.json({ error: 'للرئيس حصراً' }, 403);
+  const id = Number(c.req.param('id'));
+  const cur = await c.env.DB.prepare('SELECT * FROM eval_cycles WHERE id = ?').bind(id).first<any>();
+  if (!cur) return c.json({ error: 'الدورة غير موجودة' }, 404);
+  const b = await c.req.json().catch(() => ({}));
+
+  let types = cur.target_types;
+  if (Array.isArray(b.target_types)) {
+    if (cur.status !== 'draft') return c.json({ error: 'لا يمكن تغيير الفئات بعد فتح الدورة' }, 409);
+    const t = b.target_types.filter((x: string) => TARGET_TYPES.includes(x));
+    if (!t.length) return c.json({ error: 'حدد فئة واحدة على الأقل' }, 400);
+    types = t.join(',');
+  }
+  await c.env.DB.prepare(
+    'UPDATE eval_cycles SET name = ?, start_date = ?, end_date = ?, target_types = ? WHERE id = ?',
+  ).bind(b.name ?? cur.name, b.start_date ?? cur.start_date, b.end_date ?? cur.end_date, types, id).run();
+  await audit(c.env, {
+    userId: c.get('user').id, action: 'update_cycle', entityType: 'eval_cycle', entityId: id,
+    oldValue: { name: cur.name, start: cur.start_date, end: cur.end_date, types: cur.target_types },
+    newValue: { name: b.name ?? cur.name, types },
+  });
+  return c.json({ ok: true });
+});
+
+// حذف دورة — مسموح فقط وهي مسودة وبلا أي تقييمات مُدخلة
+app.delete('/cycles/:id', async (c) => {
+  if (!canCreateEvalCycle(c.get('user'))) return c.json({ error: 'للرئيس حصراً' }, 403);
+  const id = Number(c.req.param('id'));
+  const cur = await c.env.DB.prepare('SELECT * FROM eval_cycles WHERE id = ?').bind(id).first<any>();
+  if (!cur) return c.json({ error: 'الدورة غير موجودة' }, 404);
+  if (cur.status !== 'draft') return c.json({ error: 'يمكن حذف الدورة وهي مسودة فقط' }, 409);
+  const used = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM evaluations WHERE cycle_id = ?')
+    .bind(id).first<{ n: number }>();
+  if ((used?.n ?? 0) > 0) return c.json({ error: 'لا يمكن الحذف — توجد تقييمات مُدخلة' }, 409);
+
+  await c.env.DB.prepare('DELETE FROM eval_criteria WHERE cycle_id = ?').bind(id).run();
+  await c.env.DB.prepare('DELETE FROM eval_cycles WHERE id = ?').bind(id).run();
+  await audit(c.env, { userId: c.get('user').id, action: 'delete_cycle', entityType: 'eval_cycle', entityId: id, oldValue: { name: cur.name } });
+  return c.json({ ok: true });
+});
+
 app.get('/cycles', async (c) => {
   const rows = await c.env.DB.prepare('SELECT * FROM eval_cycles ORDER BY id DESC').all<any>();
   return c.json({ cycles: rows.results });
@@ -388,6 +431,51 @@ async function resultTargets(env: Env, u: User, tt: string): Promise<{ id: numbe
 }
 
 // النافذة التفصيلية: تقييم كل مقيّم لبند معيّن لهدف معيّن
+// تصدير نتائج دورة إلى CSV (§٥٫٤) — ضمن نطاق اطلاع المستخدم
+app.get('/cycles/:id/results/export', async (c) => {
+  const id = Number(c.req.param('id'));
+  const tt = c.req.query('target_type') || '';
+  const cycle = await c.env.DB.prepare('SELECT * FROM eval_cycles WHERE id = ?').bind(id).first<any>();
+  if (!cycle) return c.json({ error: 'الدورة غير موجودة' }, 404);
+  const u = c.get('user');
+  if (!canViewResults(u, tt)) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (cycle.status !== 'published') return c.json({ error: 'النتائج غير منشورة بعد' }, 409);
+
+  const criteria = await cycleCriteria(c.env, id, tt, cycle.status);
+  const targets = await resultTargets(c.env, u, tt);
+  const evals = (await c.env.DB.prepare(
+    'SELECT id, target_id FROM evaluations WHERE cycle_id = ? AND target_type = ? AND submitted_at IS NOT NULL',
+  ).bind(id, tt).all<any>()).results;
+  const allScores = (await c.env.DB.prepare(
+    `SELECT es.* FROM evaluation_scores es JOIN evaluations e ON e.id = es.evaluation_id
+      WHERE e.cycle_id = ? AND e.target_type = ?`,
+  ).bind(id, tt).all<any>()).results;
+  const byEval: Record<number, any[]> = {};
+  allScores.forEach((s: any) => { (byEval[s.evaluation_id] ||= []).push(s); });
+
+  const header = ['الاسم', 'النتيجة النهائية', 'عدد المقيّمين', ...criteria.map((cr: any) => cr.name)];
+  const lines = [header.map(csvCell).join(',')];
+  for (const t of targets) {
+    const evForT = evals.filter((e: any) => e.target_id === t.id);
+    const per = evForT.map((e: any) => weightedForEvaluation(byEval[e.id] || [], criteria))
+      .filter((x: any): x is number => x != null);
+    const overall = per.length ? (per.reduce((a, b) => a + b, 0) / per.length).toFixed(2) : '';
+    const critAvgs = criteria.map((cr: any) => {
+      const vals: number[] = [];
+      for (const e of evForT) {
+        const s = (byEval[e.id] || []).find((x: any) => x.criterion_id === cr.id);
+        if (s && !s.is_na && s.score != null) vals.push(s.score);
+      }
+      return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : '';
+    });
+    lines.push([t.name, overall, String(per.length), ...critAvgs].map(csvCell).join(','));
+  }
+  const fname = `results_${tt}_cycle${id}.csv`;
+  return new Response('﻿' + lines.join('\n'), {
+    headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': `attachment; filename="${fname}"` },
+  });
+});
+
 app.get('/cycles/:id/detail', async (c) => {
   const id = Number(c.req.param('id'));
   const tt = c.req.query('target_type') || '';
