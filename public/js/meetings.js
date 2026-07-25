@@ -392,7 +392,7 @@ function actionForm(meetingId, members, existing) {
       </div>
       <div class="field"><label>المسؤولون</label>
         <div id="af_assignees" style="max-height:150px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px">
-          ${members.map((m) => `<label style="display:block;padding:3px"><input type="checkbox" value="${m.user_id}" /> ${esc(m.user_name)}</label>`).join('')}
+          ${members.map((m) => `<label class="check-row"><input type="checkbox" value="${m.user_id}" /> ${esc(m.user_name)}</label>`).join('')}
         </div></div>`,
     buttons: [
       { label: 'حفظ', onClick: async (cl, ov) => {

@@ -97,9 +97,16 @@ input[type="radio"]:checked::after {
 input[type="checkbox"]:focus-visible, input[type="radio"]:focus-visible {
   outline: none; box-shadow: 0 0 0 3px var(--primary-light);
 }
-/* محاذاة الخيار مع نصّه في صف واحد أنيق */
-label:has(> input[type="checkbox"]), label:has(> input[type="radio"]) {
-  display: flex; align-items: center; gap: 4px; cursor: pointer;
+/* صف خيار: المربع مع نصّه في سطر واحد محاذًى (يُستخدم بدل الأنماط المضمّنة) */
+.check-row {
+  display: flex; align-items: center; gap: 2px; cursor: pointer;
+  padding: 5px 3px; border-radius: 8px; user-select: none;
+}
+.check-row:hover { background: var(--primary-light); }
+/* خيارات في سطر واحد (مقياس ١–٥) */
+.check-inline {
+  display: inline-flex; align-items: center; gap: 2px; cursor: pointer;
+  margin-inline-end: 10px; user-select: none;
 }
 
 .btn {

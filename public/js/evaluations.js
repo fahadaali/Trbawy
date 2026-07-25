@@ -44,7 +44,7 @@ function newCycleForm() {
         <div class="field"><label>إلى تاريخ</label><input type="date" id="nc_end" /></div>
       </div>
       <div class="field"><label>الفئات المشمولة</label>
-        ${Object.entries(TARGET_TYPE_AR).map(([v, l]) => `<label style="display:block;padding:3px"><input type="checkbox" value="${v}" /> ${l}</label>`).join('')}
+        ${Object.entries(TARGET_TYPE_AR).map(([v, l]) => `<label class="check-row"><input type="checkbox" value="${v}" /> ${l}</label>`).join('')}
       </div>`,
     buttons: [
       { label: 'إنشاء', onClick: async (cl, ov) => {
@@ -315,12 +315,12 @@ async function evalForm(cycleId, tt, targetId, onDone) {
 
   const rows = f.criteria.map((cr) => {
     const ex = existingScores[cr.id] || {};
-    const scale = [1, 2, 3, 4, 5].map((n) => `<label style="margin-inline-end:8px"><input type="radio" name="sc_${cr.id}" value="${n}" ${ex.score === n ? 'checked' : ''} /> ${arNum(n)}</label>`).join('');
+    const scale = [1, 2, 3, 4, 5].map((n) => `<label class="check-inline"><input type="radio" name="sc_${cr.id}" value="${n}" ${ex.score === n ? 'checked' : ''} /> ${arNum(n)}</label>`).join('');
     return `<div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
       <b>${esc(cr.name)}</b> <span class="muted">(${arNum(cr.weight)}٪)</span>
       ${cr.description ? `<div class="muted" style="font-size:13px">${esc(cr.description)}</div>` : ''}
       <div class="mt">${scale}
-        <label style="margin-inline-start:12px"><input type="checkbox" id="na_${cr.id}" ${ex.is_na ? 'checked' : ''} /> لا ينطبق</label></div>
+        <label class="check-inline" style="margin-inline-start:8px"><input type="checkbox" id="na_${cr.id}" ${ex.is_na ? 'checked' : ''} /> لا ينطبق</label></div>
       <input placeholder="ملاحظة (اختياري)" id="note_${cr.id}" value="${ex.note ? esc(ex.note) : ''}" style="width:100%;margin-top:8px;padding:7px 10px;border:1px solid var(--border);border-radius:8px" />
     </div>`;
   }).join('');

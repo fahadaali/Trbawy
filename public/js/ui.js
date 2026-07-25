@@ -18,7 +18,6 @@ const ICON_PATHS = {
   warning: '<path d="M12 4.5 20.5 19.5H3.5z"/><path d="M12 10v4.2"/><path d="M12 17.4v.2"/>',
   inbox: '<path d="M4 13 6.5 6h11L20 13v5.5H4z"/><path d="M4 13h4.2l1.4 2.4h4.8L15.8 13H20"/>',
   student: '<circle cx="12" cy="8" r="3.4"/><path d="M5.5 20c0-3.4 2.9-5.8 6.5-5.8s6.5 2.4 6.5 5.8"/>',
-  calendar: '<path d="M5 6h14v14H5z"/><path d="M5 10h14M9 4v4M15 4v4"/>',
   check: '<path d="M5 12.5 10 17.5 19 7"/>',
   print: '<path d="M7 9V4h10v5"/><path d="M7 18H5a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2h-2"/><path d="M7 14h10v6H7z"/>',
   package: '<path d="M3.5 7 12 3l8.5 4v9L12 21 3.5 16z"/><path d="M3.5 7 12 11l8.5-4"/><path d="M12 11v10"/>',
