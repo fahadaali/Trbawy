@@ -600,6 +600,19 @@ function renderAgendaSection(meetingId, d, canEdit) {
     return;
   }
 
+  // ---- مسودة محلية لمحتوى البند: تحمي ما كُتب عند انقطاع الاتصال أو إغلاق المتصفح ----
+  const draftKey = (itemId) => `tarbawi_draft_m${meetingId}_i${itemId}`;
+  const readDraft = (itemId) => {
+    try { return JSON.parse(LS.get(draftKey(itemId)) || 'null'); } catch { return null; }
+  };
+  const writeDraft = (itemId, html) => LS.set(draftKey(itemId), JSON.stringify({ html, at: Date.now() }));
+  const clearDraft = (itemId) => LS.del(draftKey(itemId));
+  // مسودة معلّقة = محفوظة محليًا وتختلف عمّا في الخادم
+  const pendingDraft = (it) => {
+    const dr = readDraft(it.id);
+    return dr && dr.html != null && dr.html !== (it.body || '') ? dr : null;
+  };
+
   // حفظ محتوى المحرر المفتوح (إن تغيّر) ثم إغلاقه
   const commitBody = async () => {
     if (!editor || editingId == null) return;
@@ -608,13 +621,35 @@ function renderAgendaSection(meetingId, d, canEdit) {
     editor.destroy();
     const savedId = editingId;
     editor = null; editingId = null;
-    if (!it || html === editorBase) return;
+    if (!it || html === editorBase) { clearDraft(savedId); return; }
     try {
       const res = await API.patch(`/meetings/${meetingId}/agenda/${savedId}`, { body: html });
       it.body = res.body;
+      clearDraft(savedId);
       flash('حُفظ المحتوى ✓');
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err) {
+      // لا نفقد ما كُتب: يبقى محفوظًا محليًا ويُرفع عند عودة الاتصال أو بزر الاستعادة
+      writeDraft(savedId, html);
+      toast(navigator.onLine ? err.message + ' — حُفظت نسخة محلية' : 'لا يوجد اتصال — حُفظت نسخة محلية وستُرفع عند عودته', 'err');
+    }
   };
+
+  // إعادة رفع المسودات المعلّقة عند عودة الاتصال
+  const retryDrafts = async () => {
+    if (!document.body.contains(box)) { window.removeEventListener('online', retryDrafts); return; }
+    let done = 0;
+    for (const it of items) {
+      if (editingId === it.id) continue;
+      const dr = pendingDraft(it);
+      if (!dr) continue;
+      try {
+        const res = await API.patch(`/meetings/${meetingId}/agenda/${it.id}`, { body: dr.html });
+        it.body = res.body; clearDraft(it.id); done++;
+      } catch { return; }                       // ما زال الاتصال متعذّرًا — نحاول لاحقًا
+    }
+    if (done) { render(); flash(`رُفعت ${arNum(done)} مسودة محلية ✓`); }
+  };
+  window.addEventListener('online', retryDrafts);
 
   const saveTitle = async (it, value) => {
     const title = value.trim();
@@ -643,7 +678,9 @@ function renderAgendaSection(meetingId, d, canEdit) {
               ${it.item_type === 'fixed' ? '<span class="tag tag-gray">ثابت</span>' : ''}
               <button class="btn-ghost btn-sm" data-up="${i}" title="أعلى" ${i === 0 ? 'disabled' : ''}>▲</button>
               <button class="btn-ghost btn-sm" data-dn="${i}" title="أسفل" ${i === items.length - 1 ? 'disabled' : ''}>▼</button>
+              ${pendingDraft(it) ? '<span class="tag tag-gold" title="محتوى محفوظ محليًا لم يُرفع بعد">مسودة محلية</span>' : ''}
               <button class="btn-ghost btn-sm" data-body="${i}">${editingId === it.id ? 'إغلاق المحتوى' : (it.body ? 'تعديل المحتوى' : '+ إضافة المحتوى')}</button>
+              <button class="btn-ghost btn-sm" data-toaction="${i}" title="تحويل هذا البند إلى قرار أو توصية أو مهمة">↤ إلى مهمة</button>
               <button class="btn-ghost btn-sm" data-del="${i}" title="حذف البند">حذف</button>
             </div>
             ${editingId === it.id ? '<div class="ag-edit"></div>' : (it.body
@@ -674,12 +711,21 @@ function renderAgendaSection(meetingId, d, canEdit) {
       if (!wasOpen && editor) editor.focus();
     });
 
+    // تحويل البند إلى قرار/توصية/مهمة بضغطة — يفتح النموذج مهيّأً بعنوان البند
+    box.querySelectorAll('[data-toaction]').forEach((el) => el.onclick = async () => {
+      const it = items[el.dataset.toaction];
+      await commitBody();
+      actionForm(meetingId, d.attendees.filter((a) => !a.is_guest), null,
+        { text: it.title, source: it.title });
+    });
+
     box.querySelectorAll('[data-del]').forEach((el) => el.onclick = () => {
       const it = items[el.dataset.del];
       confirmModal('حذف البند', `سيُحذف البند «${it.title}» ومحتواه. متابعة؟`, async () => {
         try {
           await API.del(`/meetings/${meetingId}/agenda/${it.id}`);
           if (editingId === it.id) { if (editor) editor.destroy(); editor = null; editingId = null; }
+          clearDraft(it.id);
           items.splice(items.indexOf(it), 1);
           render(); flash('حُذف البند');
         } catch (err) { toast(err.message, 'err'); }
@@ -724,18 +770,38 @@ function renderAgendaSection(meetingId, d, canEdit) {
               e.preventDefault(); commitBody().then(render);
             }
           });
+          // حفظ محلي أثناء الكتابة — لا يضيع المكتوب عند انقطاع الاتصال أو إغلاق المتصفح
+          let draftTimer = null;
+          editor.el.addEventListener('input', () => {
+            clearTimeout(draftTimer);
+            draftTimer = setTimeout(() => { if (editor) writeDraft(it.id, editor.getHtml()); }, 700);
+          });
+        }
+        // شريط استعادة المسودة المحلية إن وُجدت وتختلف عن المحفوظ في الخادم
+        const dr = pendingDraft(it);
+        if (dr && dr.html !== editor.getHtml()) {
+          const db = document.createElement('div');
+          db.className = 'draft-bar';
+          db.innerHTML = `<span>${icon('warning', 15)} توجد نسخة محلية غير مرفوعة من ${esc(fmtDateTime(new Date(dr.at).toISOString()))}</span>
+            <button class="btn-ghost btn-sm" data-restore>استعادتها</button>
+            <button class="btn-ghost btn-sm" data-discard>تجاهلها</button>`;
+          mount.appendChild(db);
+          db.querySelector('[data-restore]').onclick = () => { editor.setHtml(dr.html); db.remove(); toast('استُعيدت النسخة المحلية — اضغط «حفظ المحتوى»', 'ok'); };
+          db.querySelector('[data-discard]').onclick = () => { clearDraft(it.id); db.remove(); };
         }
         mount.appendChild(editor.el);
         const bar = document.createElement('div');
         bar.className = 'row mt';
         bar.innerHTML = `<button class="btn btn-sm" data-savebody>حفظ المحتوى</button>
           <button class="btn-ghost btn-sm" data-cancelbody>إلغاء</button>
-          <span class="hint">يُحفظ المحتوى تلقائيًا عند الانتقال إلى بند آخر.</span>`;
+          <span class="hint">يُحفظ المحتوى تلقائيًا عند الانتقال إلى بند آخر، وتُحفظ نسخة محلية أثناء الكتابة.</span>`;
         mount.appendChild(bar);
         bar.querySelector('[data-savebody]').onclick = async () => { await commitBody(); render(); };
         bar.querySelector('[data-cancelbody]').onclick = () => {
           if (editor) editor.destroy();
-          editor = null; editingId = null; render();
+          editor = null; editingId = null;
+          clearDraft(it.id);
+          render();
         };
       }
     }
@@ -774,6 +840,8 @@ function renderActionsSection(meetingId, d, canEdit) {
     try { d.actions = (await API.get('/meetings/' + meetingId)).actions; render(); }
     catch (err) { toast(err.message, 'err'); }
   };
+  // يستخدمه نموذج البند لتحديث الجدول وحده بدل إعادة بناء الصفحة كاملة
+  actionsRefresher = { meetingId, fn: refresh };
 
   const render = () => {
     const rows = d.actions || [];
@@ -825,19 +893,24 @@ function renderActionsSection(meetingId, d, canEdit) {
   render();
 }
 
+// آخر جدول قرارات مرسوم — لتحديثه وحده بعد الحفظ ({ meetingId, fn })
+let actionsRefresher = null;
+
 // نموذج إنشاء/تعديل قرار/توصية/مهمة داخل محضر
-function actionForm(meetingId, members, existing) {
+// prefill = { text, source } عند التحويل من بند في جدول الأعمال
+function actionForm(meetingId, members, existing, prefill) {
   const isEdit = !!existing;
   const { overlay } = openModal({
-    title: isEdit ? 'تعديل بند' : 'قرار / توصية / مهمة جديدة',
+    title: isEdit ? 'تعديل بند' : (prefill ? 'تحويل بند إلى قرار / توصية / مهمة' : 'قرار / توصية / مهمة جديدة'),
     body: `
       <div id="afErr"></div>
+      ${prefill && prefill.source ? `<p class="hint" style="margin-bottom:12px">مأخوذ من بند: «${esc(prefill.source)}» — عدّل النص كما تريد.</p>` : ''}
       <div class="field"><label>النوع</label><select id="af_type" ${isEdit ? 'disabled' : ''}>
         <option value="decision" ${existing && existing.type === 'decision' ? 'selected' : ''}>قرار</option>
         <option value="recommendation" ${existing && existing.type === 'recommendation' ? 'selected' : ''}>توصية</option>
         <option value="task" ${!existing || existing.type === 'task' ? 'selected' : ''}>مهمة</option>
       </select></div>
-      <div class="field"><label>النص</label><textarea id="af_text" rows="3">${existing ? esc(existing.text) : ''}</textarea></div>
+      <div class="field"><label>النص</label><textarea id="af_text" rows="3">${esc(existing ? existing.text : (prefill && prefill.text) || '')}</textarea></div>
       <div class="row-2">
         <div class="field"><label>الأولوية</label><select id="af_priority">
           ${['high', 'medium', 'low'].map((p) => `<option value="${p}" ${existing && existing.priority === p ? 'selected' : ''}>${PRIORITY_AR[p]}</option>`).join('')}
@@ -868,7 +941,11 @@ function actionForm(meetingId, members, existing) {
         try {
           if (isEdit) await API.patch('/actions/' + existing.id, payload);
           else await API.post('/actions/meeting/' + meetingId, payload);
-          cl(); toast('تم الحفظ', 'ok'); meetingDetail(meetingId);
+          cl(); toast('تم الحفظ', 'ok');
+          // تحديث جدول القرارات وحده حفاظًا على ما يحرّره المستخدم في بقية الصفحة
+          if (actionsRefresher && actionsRefresher.meetingId === meetingId && document.getElementById('actionsBox'))
+            actionsRefresher.fn();
+          else meetingDetail(meetingId);
         } catch (err) { ov.querySelector('#afErr').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
       }},
       { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },

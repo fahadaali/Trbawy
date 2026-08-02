@@ -238,6 +238,8 @@ function richEditor(initialHtml, opts = {}) {
   const area = wrap.querySelector('.rich-area');
   area.innerHTML = initialHtml || '';
   try { document.execCommand('styleWithCSS', false, false); } catch {}
+  // تغيير المحتوى برمجيًا (صياغة/تفريغ) لا يُطلق input تلقائيًا — نُطلقه ليعلم به الحفظ التلقائي
+  const touched = () => area.dispatchEvent(new Event('input', { bubbles: true }));
 
   const exec = (cmd, val) => { area.focus(); document.execCommand(cmd, false, val); };
   wrap.querySelectorAll('[data-cmd]').forEach((b) => b.onclick = () => exec(b.dataset.cmd));
@@ -292,9 +294,9 @@ function richEditor(initialHtml, opts = {}) {
         try {
           const { html } = await API.post('/ai/agenda-draft', { meeting_id: ai.meetingId, title: titleOf(), points });
           const before = area.innerHTML;
-          area.innerHTML = html;
+          area.innerHTML = html; touched();
           undoBtn.hidden = false;
-          undoBtn.onclick = () => { area.innerHTML = before; undoBtn.hidden = true; setState('أُعيد النص السابق'); };
+          undoBtn.onclick = () => { area.innerHTML = before; touched(); undoBtn.hidden = true; setState('أُعيد النص السابق'); };
           setState('صياغة مقترحة — راجعها وعدّلها قبل الحفظ', 'is-ok');
         } catch (e) { setState(e.message, 'is-err'); }
       });
@@ -307,7 +309,7 @@ function richEditor(initialHtml, opts = {}) {
       doneMessage: 'أُضيف نص التفريغ — اضغط «صياغة المكتوب» لتحويله إلى نص محضر',
       insert: (text) => {
         const paras = text.split(/\n+/).filter((t) => t.trim()).map((t) => `<p>${esc(t.trim())}</p>`).join('');
-        area.innerHTML += paras;
+        area.innerHTML += paras; touched();
       },
     });
   }
@@ -315,7 +317,7 @@ function richEditor(initialHtml, opts = {}) {
   return {
     el: wrap,
     getHtml: () => area.innerHTML.trim(),
-    setHtml: (html) => { area.innerHTML = html || ''; },
+    setHtml: (html) => { area.innerHTML = html || ''; touched(); },
     focus: () => area.focus(),
     // إيقاف أي تسجيل جارٍ عند إزالة المحرر من الصفحة (تحرير الميكروفون)
     destroy: () => { if (dictation) dictation.destroy(); },
