@@ -18,6 +18,49 @@ app.use('*', requireAuth, requirePasswordChanged);
 // حالات يجوز فيها التحرير
 const EDITABLE = ['invitation', 'draft'];
 
+// تحميل محضر قابل للتحرير مع فحص الحالة والصلاحية — يُرجع استجابة الخطأ جاهزة عند التعذّر
+async function loadEditable(c: any, id: number) {
+  const db = c.env.DB as D1Database;
+  const m = await db.prepare('SELECT * FROM meetings WHERE id = ?').bind(id).first<any>();
+  if (!m) return { error: c.json({ error: 'المحضر غير موجود' }, 404) };
+  const council = await getCouncil(c.env, m.council_id);
+  if (!council) return { error: c.json({ error: 'المجلس غير موجود' }, 404) };
+  if (!EDITABLE.includes(m.status)) return { error: c.json({ error: 'المحضر مقفل ولا يقبل التعديل' }, 409) };
+  if (!canEditDraft(c.get('user'), council, m.writer_id))
+    return { error: c.json({ error: 'لا تملك صلاحية تحرير هذا المحضر' }, 403) };
+  return { meeting: m, council };
+}
+
+// تحويل الأرقام العربية-الهندية إلى لاتينية قبل التحليل
+function toEnDigits(s: string): string {
+  return s.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0));
+}
+
+// تطبيع وقت مكتوب يدويًا إلى "HH:MM".
+// يقبل: 09:30 · ٩:٣٠ · 9:30 م · 0930 · 9  — ويُرجع undefined إن تعذّر الفهم، و null للفراغ.
+function parseTime(v: unknown): string | null | undefined {
+  if (v === null) return null;
+  const raw = toEnDigits(String(v ?? '').trim());
+  if (!raw) return null;
+  const pm = /م|مساء|pm/i.test(raw);
+  const am = /ص|صباح|am/i.test(raw);
+  let h: number, mi: number;
+  const colon = /(\d{1,2})\s*[:.]\s*(\d{1,2})/.exec(raw);
+  if (colon) { h = Number(colon[1]); mi = Number(colon[2]); }
+  else {
+    const d = raw.replace(/\D/g, '');
+    if (d.length === 4) { h = Number(d.slice(0, 2)); mi = Number(d.slice(2)); }
+    else if (d.length === 3) { h = Number(d.slice(0, 1)); mi = Number(d.slice(1)); }
+    else if (d.length >= 1 && d.length <= 2) { h = Number(d); mi = 0; }
+    else return undefined;
+  }
+  if (pm && h < 12) h += 12;
+  if (am && h === 12) h = 0;
+  if (h > 23 || mi > 59) return undefined;
+  return `${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+}
+
 // ---- بيانات مساعدة لإنشاء محضر جديد ----
 app.get('/meta/new', async (c) => {
   const councilId = Number(c.req.query('council_id'));
@@ -226,7 +269,7 @@ app.post('/', async (c) => {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'invitation', ?, ?, ?)`,
   ).bind(
     council.id, number, hy, display, hijri, greg,
-    b.start_time || null, b.end_time || null,
+    parseTime(b.start_time) ?? null, parseTime(b.end_time) ?? null,
     b.location_type === 'remote' ? 'remote' : 'in_person', b.location || null,
     b.title || null, u.id, writerId, academicYear,
   ).run();
@@ -279,23 +322,28 @@ app.post('/', async (c) => {
 });
 
 // ---- تعديل ترويسة المحضر ----
+// التعديل جزئي: يُرسَل الحقل المراد تغييره وحده، وتبقى بقية الحقول كما هي.
 app.patch('/:id', async (c) => {
   const id = Number(c.req.param('id'));
-  const m = await c.env.DB.prepare('SELECT * FROM meetings WHERE id = ?').bind(id).first<any>();
-  if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
-  const council = await getCouncil(c.env, m.council_id);
-  if (!council) return c.json({ error: 'المجلس غير موجود' }, 404);
-  if (!EDITABLE.includes(m.status)) return c.json({ error: 'المحضر مقفل ولا يقبل التعديل' }, 409);
-  if (!canEditDraft(c.get('user'), council, m.writer_id))
-    return c.json({ error: 'لا تملك صلاحية تحرير هذا المحضر' }, 403);
+  const { error, meeting: m, council } = await loadEditable(c, id) as any;
+  if (error) return error;
 
   const b = await c.req.json().catch(() => ({}));
+  // الوقت يُقبل بأي صيغة مفهومة (٩:٣٠ ص · 09:30 · 0930) ويُطبَّع قبل الحفظ
+  const times: Record<string, string | null> = {};
+  for (const k of ['start_time', 'end_time'] as const) {
+    if (b[k] === undefined) continue;
+    const t = parseTime(b[k]);
+    if (t === undefined)
+      return c.json({ error: `صيغة ${k === 'start_time' ? 'وقت البداية' : 'وقت النهاية'} غير مفهومة (مثال: ٩:٣٠ ص)` }, 400);
+    times[k] = t;
+  }
   const f = {
     title: b.title !== undefined ? b.title : m.title,
     hijri_date: b.hijri_date !== undefined ? b.hijri_date : m.hijri_date,
     greg_date: b.greg_date !== undefined ? b.greg_date : m.greg_date,
-    start_time: b.start_time !== undefined ? b.start_time : m.start_time,
-    end_time: b.end_time !== undefined ? b.end_time : m.end_time,
+    start_time: times.start_time !== undefined ? times.start_time : m.start_time,
+    end_time: times.end_time !== undefined ? times.end_time : m.end_time,
     location_type: b.location_type !== undefined ? b.location_type : m.location_type,
     location: b.location !== undefined ? b.location : m.location,
     writer_id: b.writer_id !== undefined ? b.writer_id : m.writer_id,
@@ -317,14 +365,11 @@ app.patch('/:id', async (c) => {
   return c.json({ ok: true });
 });
 
-// ---- استبدال بنود جدول الأعمال ----
+// ---- استبدال بنود جدول الأعمال (تحرير جماعي من نافذة «تعديل البنود») ----
 app.put('/:id/agenda', async (c) => {
   const id = Number(c.req.param('id'));
-  const m = await c.env.DB.prepare('SELECT * FROM meetings WHERE id = ?').bind(id).first<any>();
-  if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
-  const council = await getCouncil(c.env, m.council_id);
-  if (!EDITABLE.includes(m.status)) return c.json({ error: 'المحضر مقفل' }, 409);
-  if (!canEditDraft(c.get('user'), council!, m.writer_id)) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  const { error } = await loadEditable(c, id) as any;
+  if (error) return error;
 
   const b = await c.req.json().catch(() => ({}));
   const items = Array.isArray(b.items) ? b.items : [];
@@ -340,14 +385,93 @@ app.put('/:id/agenda', async (c) => {
   return c.json({ ok: true });
 });
 
+// ---- تحرير البنود بندًا بندًا (من داخل صفحة المحضر مباشرة) ----
+const MAX_TITLE = 300;
+
+// إضافة بند جديد في نهاية الجدول
+app.post('/:id/agenda', async (c) => {
+  const id = Number(c.req.param('id'));
+  const { error } = await loadEditable(c, id) as any;
+  if (error) return error;
+
+  const b = await c.req.json().catch(() => ({}));
+  const title = String(b.title ?? '').trim().slice(0, MAX_TITLE);
+  if (!title) return c.json({ error: 'عنوان البند مطلوب' }, 400);
+  const last = await c.env.DB.prepare(
+    'SELECT COALESCE(MAX(sort_order), -1) AS mx FROM agenda_items WHERE meeting_id = ?',
+  ).bind(id).first<{ mx: number }>();
+  const order = (last?.mx ?? -1) + 1;
+  const res = await c.env.DB.prepare(
+    'INSERT INTO agenda_items (meeting_id, sort_order, title, body, item_type) VALUES (?, ?, ?, ?, ?)',
+  ).bind(id, order, title, b.body ? sanitizeHtml(String(b.body)) : null, 'new').run();
+  await audit(c.env, { userId: c.get('user').id, action: 'add_agenda_item', entityType: 'meeting', entityId: id, newValue: { title } });
+  return c.json({ id: res.meta.last_row_id, sort_order: order, item_type: 'new' }, 201);
+});
+
+// تعديل عنوان بند أو محتواه (يُرسَل الحقل المعدَّل وحده)
+app.patch('/:id/agenda/:itemId', async (c) => {
+  const id = Number(c.req.param('id'));
+  const itemId = Number(c.req.param('itemId'));
+  const { error } = await loadEditable(c, id) as any;
+  if (error) return error;
+
+  const item = await c.env.DB.prepare('SELECT * FROM agenda_items WHERE id = ? AND meeting_id = ?')
+    .bind(itemId, id).first<any>();
+  if (!item) return c.json({ error: 'البند غير موجود' }, 404);
+
+  const b = await c.req.json().catch(() => ({}));
+  let title = item.title as string;
+  if (b.title !== undefined) {
+    title = String(b.title).trim().slice(0, MAX_TITLE);
+    if (!title) return c.json({ error: 'عنوان البند مطلوب' }, 400);
+  }
+  const body = b.body !== undefined
+    ? (b.body ? sanitizeHtml(String(b.body)) : null)
+    : item.body;
+
+  await c.env.DB.prepare('UPDATE agenda_items SET title = ?, body = ? WHERE id = ?')
+    .bind(title, body, itemId).run();
+  await audit(c.env, {
+    userId: c.get('user').id, action: 'update_agenda_item', entityType: 'meeting', entityId: id,
+    oldValue: { id: itemId, title: item.title }, newValue: { id: itemId, title },
+  });
+  return c.json({ ok: true, body });
+});
+
+// حذف بند
+app.delete('/:id/agenda/:itemId', async (c) => {
+  const id = Number(c.req.param('id'));
+  const itemId = Number(c.req.param('itemId'));
+  const { error } = await loadEditable(c, id) as any;
+  if (error) return error;
+
+  const res = await c.env.DB.prepare('DELETE FROM agenda_items WHERE id = ? AND meeting_id = ?')
+    .bind(itemId, id).run();
+  if (!res.meta.changes) return c.json({ error: 'البند غير موجود' }, 404);
+  await audit(c.env, { userId: c.get('user').id, action: 'delete_agenda_item', entityType: 'meeting', entityId: id, oldValue: { id: itemId } });
+  return c.json({ ok: true });
+});
+
+// إعادة الترتيب بقائمة المعرّفات بالترتيب الجديد
+app.put('/:id/agenda/order', async (c) => {
+  const id = Number(c.req.param('id'));
+  const { error } = await loadEditable(c, id) as any;
+  if (error) return error;
+
+  const b = await c.req.json().catch(() => ({}));
+  const ids: number[] = Array.isArray(b.ids) ? b.ids.map(Number).filter(Number.isFinite) : [];
+  if (!ids.length) return c.json({ error: 'قائمة الترتيب مطلوبة' }, 400);
+  await c.env.DB.batch(ids.map((itemId, i) =>
+    c.env.DB.prepare('UPDATE agenda_items SET sort_order = ? WHERE id = ? AND meeting_id = ?').bind(i, itemId, id)));
+  await audit(c.env, { userId: c.get('user').id, action: 'reorder_agenda', entityType: 'meeting', entityId: id, newValue: { ids } });
+  return c.json({ ok: true });
+});
+
 // ---- تحديث الحضور والحالات ----
 app.put('/:id/attendees', async (c) => {
   const id = Number(c.req.param('id'));
-  const m = await c.env.DB.prepare('SELECT * FROM meetings WHERE id = ?').bind(id).first<any>();
-  if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
-  const council = await getCouncil(c.env, m.council_id);
-  if (!EDITABLE.includes(m.status)) return c.json({ error: 'المحضر مقفل' }, 409);
-  if (!canEditDraft(c.get('user'), council!, m.writer_id)) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  const { error, meeting: m } = await loadEditable(c, id) as any;
+  if (error) return error;
 
   const b = await c.req.json().catch(() => ({}));
   // تحديث حالات الأعضاء — ومن لم يكن مُدرجًا (عضو أُضيف للمجلس لاحقًا) يُضاف

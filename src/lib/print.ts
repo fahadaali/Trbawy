@@ -32,6 +32,15 @@ function roleAr(role: string): string {
   return ({ president: 'رئيس المجلس التربوي', vice_president: 'نائب الرئيس', first_supervisor: 'مشرف أول', team_member: 'عضو فريق', system_admin: 'مدير النظام' } as any)[role] || '';
 }
 
+// عرض الوقت المخزَّن (HH:MM) بصيغة عربية ١٢ ساعة: ٩:٣٠ ص
+function timeAr(hhmm: string | null): string {
+  const m = /^(\d{1,2}):(\d{2})/.exec(String(hhmm || ''));
+  if (!m) return '';
+  const h = Number(m[1]);
+  const ar = (s: string | number) => String(s).replace(/[0-9]/g, (d) => '٠١٢٣٤٥٦٧٨٩'[+d]);
+  return `${ar(h % 12 === 0 ? 12 : h % 12)}:${ar(m[2])} ${h < 12 ? 'ص' : 'م'}`;
+}
+
 function printStyles(primary: string, font: string): string {
   return `
   * { box-sizing: border-box; }
@@ -115,7 +124,7 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
     ${finalized ? `<div class="approved-badge">✔ محضر معتمد ومقفل — حرّره: ${writer ? esc(writer.name) : '—'} · اعتمده: ${approver ? esc(approver.name) : '—'}</div>` : ''}
     <table class="meta"><tbody>
       <tr><th>المجلس</th><td>${esc(council?.name)}</td><th>التاريخ الهجري</th><td>${esc(m.hijri_date || '')}</td></tr>
-      <tr><th>التاريخ الميلادي</th><td>${esc(m.greg_date || '')}</td><th>الوقت</th><td>${esc(m.start_time || '')} ${m.end_time ? '– ' + esc(m.end_time) : ''}</td></tr>
+      <tr><th>التاريخ الميلادي</th><td>${esc(m.greg_date || '')}</td><th>الوقت</th><td>${esc(timeAr(m.start_time))} ${m.end_time ? '– ' + esc(timeAr(m.end_time)) : ''}</td></tr>
       <tr><th>المكان</th><td>${m.location_type === 'remote' ? 'عن بُعد' : 'حضوري'}${m.location ? ' — ' + esc(m.location) : ''}</td>
           <th>كاتب المحضر</th><td>${writer ? esc(writer.name) : '—'}</td></tr>
     </tbody></table>

@@ -271,7 +271,17 @@ async function showPendingPopup() {
       </button>`).join('')}</div>`;
   document.body.appendChild(pop);
   requestAnimationFrame(() => pop.classList.add('show'));
-  const close = () => { pop.classList.remove('show'); setTimeout(() => pop.remove(), 250); };
+  // يُغلق بالزر، أو بالنقر خارجه، أو تلقائيًا بعد ١٢ ثانية — حتى لا يحجب محتوى الصفحة
+  let autoTimer = null;
+  const close = () => {
+    clearTimeout(autoTimer);
+    document.removeEventListener('mousedown', onOutside, true);
+    pop.classList.remove('show');
+    setTimeout(() => pop.remove(), 250);
+  };
+  function onOutside(e) { if (!pop.contains(e.target)) close(); }
+  autoTimer = setTimeout(close, 12000);
+  setTimeout(() => document.addEventListener('mousedown', onOutside, true), 300);
   pop.querySelector('.x').onclick = close;
   pop.querySelectorAll('.pp-item').forEach((b) => b.onclick = () => { location.hash = items[b.dataset.i].link; close(); });
 }
@@ -388,6 +398,8 @@ VIEWS.dashboard = async () => {
     <div id="dashRecent" class="mt"></div>`;
   let s;
   try { s = await API.get('/dashboard/summary'); } catch (err) { return renderError(err); }
+  // قد يغادر المستخدم الصفحة قبل وصول البيانات
+  if (!document.getElementById('dashCards')) return;
   document.getElementById('dashCards').innerHTML = `
     <div class="stat" style="cursor:pointer" onclick="nav('tasks')"><div class="v">${arNum(s.my_tasks)}</div><div class="l">مهامي المفتوحة</div></div>
     <div class="stat" style="cursor:pointer" onclick="nav('meetings')"><div class="v">${arNum(s.awaiting_signature)}</div><div class="l">محاضر بانتظار توقيعي</div></div>
