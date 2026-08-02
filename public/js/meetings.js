@@ -134,8 +134,9 @@ async function meetingCreate() {
           <div class="field"><label>التاريخ الهجري</label><input id="mc_hijri" value="${hijriFromGreg(today)}" readonly style="background:#f0f2f1" /></div>
         </div>
         <div class="row-2">
-          <div class="field"><label>وقت البداية</label><input type="time" id="mc_start" /></div>
-          <div class="field"><label>وقت النهاية</label><input type="time" id="mc_end" /></div>
+          <div class="field"><label>وقت البداية</label><input id="mc_start" placeholder="٩:٣٠ ص" />
+            <div class="hint">اكتبه بأي صيغة (٩:٣٠ ص · 0930)، أو اتركه واستخدم مؤقّت الاجتماع لاحقًا.</div></div>
+          <div class="field"><label>وقت النهاية</label><input id="mc_end" placeholder="١٠:٤٥ ص" /></div>
         </div>
         <div class="row-2">
           <div class="field"><label>نوع المكان</label><select id="mc_loctype"><option value="in_person">حضوري</option><option value="remote">عن بُعد</option></select></div>
@@ -204,13 +205,17 @@ async function meetingCreate() {
 
   document.getElementById('mc_save').onclick = async () => {
     const attendees = Array.from(document.querySelectorAll('[data-att]')).map((s) => ({ user_id: Number(s.dataset.att), attendance_status: s.value }));
+    const start = parseTimeInput(document.getElementById('mc_start').value);
+    const end = parseTimeInput(document.getElementById('mc_end').value);
+    if (start === undefined || end === undefined)
+      return document.getElementById('mcErr').innerHTML = '<div class="form-error">صيغة الوقت غير مفهومة — مثال: ٩:٣٠ ص</div>';
     const payload = {
       council_id: Number(document.getElementById('mc_council').value),
       title: document.getElementById('mc_title').value.trim() || null,
       greg_date: document.getElementById('mc_greg').value,
       hijri_date: document.getElementById('mc_hijri').value,
-      start_time: document.getElementById('mc_start').value || null,
-      end_time: document.getElementById('mc_end').value || null,
+      start_time: start,
+      end_time: end,
       location_type: document.getElementById('mc_loctype').value,
       location: document.getElementById('mc_loc').value.trim() || null,
       writer_id: document.getElementById('mc_writer').value ? Number(document.getElementById('mc_writer').value) : null,
@@ -241,8 +246,6 @@ async function meetingDetail(id) {
     <td>${a.signed_at ? '<span class="tag tag-green">وقّع</span>' : (a.is_guest || a.attendance_status !== 'present' ? '—' : '<span class="tag tag-gold">بانتظار التوقيع</span>')}</td>
   </tr>`).join('');
 
-  const agendaHtml = d.agenda.map((it) => `<li><b>${esc(it.title)}</b>${it.item_type === 'fixed' ? ' <span class="tag tag-gray">ثابت</span>' : ''}${it.body ? `<div class="body-rich" style="font-size:14px">${it.body}</div>` : ''}</li>`).join('');
-
   const linksHtml = (d.parent || (d.amendments && d.amendments.length)) ? `<div class="card mt"><div class="card-body">
     ${d.parent ? `<div>محضر تصويب/ملحق للمحضر: <a href="#/meetings/${d.parent.id}"><b dir="ltr">${esc(d.parent.display_number)}</b></a></div>` : ''}
     ${(d.amendments && d.amendments.length) ? `<div>محاضر التصويب/الملحق: ${d.amendments.map((a) => `<a href="#/meetings/${a.id}" dir="ltr">${esc(a.display_number)}</a>`).join('، ')}</div>` : ''}
@@ -259,12 +262,8 @@ async function meetingDetail(id) {
   const actionsHtml = (d.actions && d.actions.length) || p.can_edit ? `
     <div class="card mt"><div class="card-head"><h3>القرارات والتوصيات والمهام</h3><div class="spacer"></div>
       ${p.can_edit && State.aiEnabled ? aiBtn('btnAiExtract', 'استخراج بالذكاء الاصطناعي') : ''}
-      ${p.can_edit ? '<button class="btn btn-sm" id="btnAddAction">+ إضافة بند</button>' : ''}</div>
-      ${(d.actions && d.actions.length) ? `<table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الاستحقاق</th><th>الحالة</th><th></th></tr></thead>
-      <tbody>${d.actions.map((a) => `<tr><td>${esc(ACTION_TYPE_AR[a.type] || a.type)}</td><td dir="ltr" style="text-align:right">${esc(a.display_number)}</td><td>${esc(a.text)}</td>
-        <td>${esc(a.assignees || '—')}</td><td>${a.due_date ? esc(a.due_date) : '—'}</td><td>${statusTag(a.status, ACTION_STATUS_AR)}</td>
-        <td><button class="btn-ghost btn-sm" data-openaction="${a.id}">عرض</button>${p.can_edit ? `<button class="btn-ghost btn-sm" data-editaction="${a.id}">تعديل</button>` : ''}</td></tr>`).join('')}</tbody></table>`
-      : '<div class="card-body muted">لا توجد بنود بعد.</div>'}</div>` : '';
+      ${p.can_edit ? '<button class="btn-ghost btn-sm" id="btnAddAction">إضافة بتفاصيل كاملة</button>' : ''}</div>
+      <div id="actionsBox"></div></div>` : '';
 
   const btns = [];
   if (m.status === 'invitation' && p.can_edit) btns.push(`<button class="btn btn-sm" id="btnStart">بدء تحرير المسودة</button>`);
@@ -316,9 +315,9 @@ async function meetingDetail(id) {
           <div><span class="muted">المجلس:</span> ${esc(COUNCIL_TYPE_AR[d.council.type] || d.council.name)}</div>
           <div><span class="muted">التاريخ الهجري:</span> ${esc(m.hijri_date || '—')}</div>
           <div><span class="muted">التاريخ الميلادي:</span> ${esc(m.greg_date || '—')}</div>
-          <div><span class="muted">الوقت:</span> ${m.start_time ? esc(m.start_time) : '—'} ${m.end_time ? '– ' + esc(m.end_time) : ''}</div>
           <div><span class="muted">المكان:</span> ${m.location_type === 'remote' ? 'عن بُعد' : 'حضوري'} ${m.location ? '— ' + esc(m.location) : ''}</div>
         </div>
+        <div id="timePanel" class="time-panel mt"></div>
         <div class="row mt">${btns.join('')}</div>
       </div>
     </div>
@@ -342,12 +341,16 @@ async function meetingDetail(id) {
     <div class="card mt"><div class="card-head"><h3>الحضور</h3></div>
       <table class="tbl"><thead><tr><th>الاسم</th><th>الصفة</th><th>الحالة</th><th>التوقيع</th></tr></thead><tbody>${attRows}</tbody></table></div>
 
-    <div class="card mt"><div class="card-head"><h3>جدول الأعمال والبنود</h3></div>
-      <div class="card-body"><ul style="padding-inline-start:18px;line-height:2.2">${agendaHtml || '<li class="muted">لا توجد بنود</li>'}</ul></div></div>
+    <div class="card mt"><div class="card-head"><h3>جدول الأعمال والبنود</h3>
+      <div class="spacer"></div>
+      ${p.can_edit ? '<span class="save-state" id="agSaveState"></span>' : ''}</div>
+      <div class="card-body" id="agendaBox"><div class="spinner"></div></div></div>
     ${followupHtml}
     ${actionsHtml}`;
 
   const reload = () => meetingDetail(id);
+  renderTimePanel(id, m, p.can_edit);
+  renderAgendaSection(id, d, p.can_edit);
   const doStatus = async (action) => { try { await API.post(`/meetings/${id}/status`, { action }); toast('تم', 'ok'); reload(); } catch (err) { toast(err.message, 'err'); } };
   bind('btnStart', () => doStatus('start_draft'));
   bind('btnSubmit', () => confirmModal('إرسال للتوقيعات', 'سينتقل المحضر إلى حالة «بانتظار التوقيعات». متابعة؟', () => doStatus('submit')));
@@ -455,6 +458,7 @@ async function meetingDetail(id) {
 
   // إدارة القرارات/المهام
   const members = d.attendees.filter((a) => !a.is_guest);
+  renderActionsSection(id, d, p.can_edit);
   bind('btnAddAction', () => actionForm(id, members, null));
   bind('btnAiSummary', () => aiSummaryDialog(id));
   // نص المناقشة المبدئي = محتوى بنود جدول الأعمال بعد تجريد الوسوم
@@ -464,18 +468,367 @@ async function meetingDetail(id) {
       .join('\n');
     aiExtractDialog(id, seed, reload);
   });
-  content().querySelectorAll('[data-editaction]').forEach((b) =>
-    b.onclick = () => actionForm(id, members, d.actions.find((x) => x.id == b.dataset.editaction)));
-  content().querySelectorAll('[data-openaction]').forEach((b) =>
-    b.onclick = () => (typeof taskDetail === 'function' ? taskDetail(b.dataset.openaction, reload) : nav('tasks')));
   content().querySelectorAll('[data-fixdate]').forEach((b) =>
     b.onclick = () => adjustCompletionDate(b.dataset.fixdate, reload));
+}
+
+// ============================================================
+// لوح توقيت الاجتماع — مؤقّت حي بالتوقيت المحلي + تعديل يدوي للوقت وحده
+// ============================================================
+function renderTimePanel(meetingId, m, canEdit) {
+  const box = document.getElementById('timePanel');
+  if (!box) return;
+  const LKEY = 'tarbawi_timer_' + meetingId;
+  let manual = false;
+  let tick = null;
+
+  // لحظة البدء الحقيقية: من المؤقّت المحلي إن كان يعمل، وإلا من تاريخ المحضر ووقت بدايته
+  const startedAtMs = () => {
+    const saved = Number(LS.get(LKEY));
+    if (saved) return saved;
+    if (!m.greg_date || !m.start_time) return null;
+    const dt = new Date(`${m.greg_date}T${m.start_time}:00`);
+    return isNaN(dt.getTime()) ? null : dt.getTime();
+  };
+  // المؤقّت "حي" إذا بدأ ولم ينتهِ ومضى عليه أقل من ١٢ ساعة (وإلا فهو وقت مسجّل قديم)
+  const liveSeconds = () => {
+    if (!m.start_time || m.end_time) return null;
+    const t0 = startedAtMs();
+    if (t0 == null) return null;
+    const s = (Date.now() - t0) / 1000;
+    return s >= 0 && s < 12 * 3600 ? s : null;
+  };
+
+  const stopTick = () => { if (tick) { clearInterval(tick); tick = null; } };
+  const patch = async (payload, okMsg) => {
+    try {
+      await API.patch('/meetings/' + meetingId, payload);
+      Object.assign(m, payload);
+      if (okMsg) toast(okMsg, 'ok');
+      render();
+    } catch (err) { toast(err.message, 'err'); }
+  };
+
+  const render = () => {
+    stopTick();
+    const live = liveSeconds();
+    const mins = m.start_time && m.end_time ? timeDiffMinutes(m.start_time, m.end_time) : null;
+    const display = m.start_time
+      ? `${fmtTime(m.start_time)}${m.end_time ? ' – ' + fmtTime(m.end_time) : ''}${mins != null ? ` <span class="muted">· ${fmtDuration(mins)}</span>` : ''}`
+      : '<span class="muted">لم يُسجَّل بعد</span>';
+
+    box.innerHTML = `
+      <div class="row">
+        <span class="muted">${icon('calendar2', 15)} الوقت:</span>
+        <b id="tmDisplay">${display}</b>
+        ${live != null ? `<span class="tm-live"><span class="tm-dot"></span> جارٍ الاحتساب <b id="tmElapsed" dir="ltr">${fmtStopwatch(live)}</b></span>` : ''}
+        <div class="spacer" style="flex:1"></div>
+        ${canEdit ? `
+          ${!m.start_time ? `<button class="btn btn-sm" id="tmStart">▶ بدء التوقيت الآن</button>` : ''}
+          ${m.start_time && !m.end_time ? `<button class="btn btn-sm" id="tmStop">■ إنهاء وتسجيل وقت النهاية</button>` : ''}
+          ${m.start_time && m.end_time ? `<button class="btn-ghost btn-sm" id="tmRestart">إعادة بدء التوقيت</button>` : ''}
+          <button class="btn-ghost btn-sm" id="tmManual">${manual ? 'إخفاء الإدخال اليدوي' : 'إدخال الوقت يدويًا'}</button>` : ''}
+      </div>
+      ${canEdit && manual ? `
+        <div class="tm-manual mt">
+          <div class="row">
+            <label class="tm-lbl">من</label>
+            <input id="tm_s" class="tm-inp" value="${m.start_time ? esc(fmtTime(m.start_time)) : ''}" placeholder="٩:٣٠ ص" />
+            <button class="btn-ghost btn-sm" data-now="tm_s">الآن</button>
+            <label class="tm-lbl">إلى</label>
+            <input id="tm_e" class="tm-inp" value="${m.end_time ? esc(fmtTime(m.end_time)) : ''}" placeholder="١٠:٤٥ ص" />
+            <button class="btn-ghost btn-sm" data-now="tm_e">الآن</button>
+            <button class="btn btn-sm" id="tmSave">حفظ الوقت</button>
+          </div>
+          <p class="hint">اكتب الوقت بأي صيغة: ٩:٣٠ ص · 9:30 م · 0930 — ويُحفظ وحده دون الحاجة لتعبئة بقية بيانات الاجتماع.</p>
+        </div>` : ''}`;
+
+    if (live != null) {
+      tick = setInterval(() => {
+        const el = document.getElementById('tmElapsed');
+        if (!el) return stopTick();          // غادر المستخدم الصفحة
+        const s = liveSeconds();
+        if (s == null) return render();
+        el.textContent = fmtStopwatch(s);
+      }, 1000);
+    }
+    if (!canEdit) return;
+
+    bind('tmStart', () => { LS.set(LKEY, String(Date.now())); patch({ start_time: nowTime() }, 'بدأ التوقيت'); });
+    bind('tmStop', () => { LS.del(LKEY); patch({ end_time: nowTime() }, 'سُجّل وقت النهاية'); });
+    bind('tmRestart', () => { LS.set(LKEY, String(Date.now())); patch({ start_time: nowTime(), end_time: null }, 'أُعيد بدء التوقيت'); });
+    bind('tmManual', () => { manual = !manual; render(); });
+    box.querySelectorAll('[data-now]').forEach((b) => b.onclick = () => {
+      const el = document.getElementById(b.dataset.now);
+      if (el) { el.value = fmtTime(nowTime()); el.focus(); }
+    });
+    bind('tmSave', () => {
+      const s = parseTimeInput(document.getElementById('tm_s').value);
+      const e = parseTimeInput(document.getElementById('tm_e').value);
+      if (s === undefined) return toast('صيغة وقت البداية غير مفهومة — مثال: ٩:٣٠ ص', 'err');
+      if (e === undefined) return toast('صيغة وقت النهاية غير مفهومة — مثال: ١٠:٤٥ ص', 'err');
+      if (s && e && timeDiffMinutes(s, e) > 12 * 60) return toast('وقت النهاية يسبق وقت البداية', 'err');
+      LS.del(LKEY);
+      manual = false;
+      patch({ start_time: s, end_time: e }, 'حُفظ الوقت');
+    });
+  };
+  render();
+}
+
+// ============================================================
+// جدول الأعمال — تحرير البنود وإضافة محتواها في مكانها داخل المحضر
+// ============================================================
+function renderAgendaSection(meetingId, d, canEdit) {
+  const box = document.getElementById('agendaBox');
+  if (!box) return;
+  const items = d.agenda;              // مرجع حيّ — يستفيد منه استخراج القرارات بالذكاء الاصطناعي
+  let editingId = null, editor = null, editorBase = '';
+
+  const flash = (msg) => {
+    const el = document.getElementById('agSaveState');
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'save-state show';
+    setTimeout(() => { if (el.textContent === msg) el.className = 'save-state'; }, 2200);
+  };
+
+  if (!canEdit) {
+    box.innerHTML = items.length
+      ? `<ul style="padding-inline-start:18px;line-height:2.2">${items.map((it) => `<li><b>${esc(it.title)}</b>${it.item_type === 'fixed' ? ' <span class="tag tag-gray">ثابت</span>' : ''}${it.body ? `<div class="body-rich" style="font-size:14px">${it.body}</div>` : ''}</li>`).join('')}</ul>`
+      : '<p class="muted">لا توجد بنود</p>';
+    return;
+  }
+
+  // حفظ محتوى المحرر المفتوح (إن تغيّر) ثم إغلاقه
+  const commitBody = async () => {
+    if (!editor || editingId == null) return;
+    const it = items.find((x) => x.id === editingId);
+    const html = editor.getHtml();
+    editor.destroy();
+    const savedId = editingId;
+    editor = null; editingId = null;
+    if (!it || html === editorBase) return;
+    try {
+      const res = await API.patch(`/meetings/${meetingId}/agenda/${savedId}`, { body: html });
+      it.body = res.body;
+      flash('حُفظ المحتوى ✓');
+    } catch (err) { toast(err.message, 'err'); }
+  };
+
+  const saveTitle = async (it, value) => {
+    const title = value.trim();
+    if (!title || title === it.title) return;
+    try {
+      await API.patch(`/meetings/${meetingId}/agenda/${it.id}`, { title });
+      it.title = title;
+      flash('حُفظ العنوان ✓');
+    } catch (err) { toast(err.message, 'err'); }
+  };
+
+  const saveOrder = async () => {
+    try { await API.put(`/meetings/${meetingId}/agenda/order`, { ids: items.map((x) => x.id) }); flash('حُفظ الترتيب ✓'); }
+    catch (err) { toast(err.message, 'err'); }
+  };
+
+  const render = () => {
+    box.innerHTML = `
+      <div class="ag-list">
+        ${items.map((it, i) => `
+          <div class="ag-item${editingId === it.id ? ' is-editing' : ''}" data-idx="${i}" draggable="true">
+            <div class="ag-row">
+              <span class="drag-handle" title="اسحب لإعادة الترتيب">⠿</span>
+              <span class="ag-num">${arNum(i + 1)}</span>
+              <input class="ag-title" data-title="${i}" value="${esc(it.title)}" placeholder="عنوان البند" />
+              ${it.item_type === 'fixed' ? '<span class="tag tag-gray">ثابت</span>' : ''}
+              <button class="btn-ghost btn-sm" data-up="${i}" title="أعلى" ${i === 0 ? 'disabled' : ''}>▲</button>
+              <button class="btn-ghost btn-sm" data-dn="${i}" title="أسفل" ${i === items.length - 1 ? 'disabled' : ''}>▼</button>
+              <button class="btn-ghost btn-sm" data-body="${i}">${editingId === it.id ? 'إغلاق المحتوى' : (it.body ? 'تعديل المحتوى' : '+ إضافة المحتوى')}</button>
+              <button class="btn-ghost btn-sm" data-del="${i}" title="حذف البند">حذف</button>
+            </div>
+            ${editingId === it.id ? '<div class="ag-edit"></div>' : (it.body
+              ? `<div class="ag-body body-rich">${it.body}</div>`
+              : '<div class="ag-body muted ag-empty">لا محتوى بعد — اضغط «إضافة المحتوى» للكتابة هنا مباشرة.</div>')}
+          </div>`).join('')}
+      </div>
+      ${items.length ? '' : '<p class="muted">لا توجد بنود بعد.</p>'}
+      <div class="ag-add row mt">
+        <input id="agNewTitle" placeholder="عنوان بند جديد… ثم Enter" />
+        <button class="btn btn-sm" id="agAdd">+ إضافة بند</button>
+        <span class="hint">تُضاف البنود هنا مباشرة، ولإعادة ترتيب الكل دفعة واحدة استخدم «تعديل البنود» في الأعلى.</span>
+      </div>`;
+
+    // العنوان يُحفظ عند الخروج من الحقل أو بالضغط على Enter
+    box.querySelectorAll('[data-title]').forEach((el) => {
+      const it = items[el.dataset.title];
+      el.onchange = () => saveTitle(it, el.value);
+      el.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); el.blur(); } };
+    });
+
+    box.querySelectorAll('[data-body]').forEach((el) => el.onclick = async () => {
+      const it = items[el.dataset.body];
+      const wasOpen = editingId === it.id;
+      await commitBody();
+      if (!wasOpen) { editingId = it.id; editorBase = it.body || ''; }
+      render();
+      if (!wasOpen && editor) editor.focus();
+    });
+
+    box.querySelectorAll('[data-del]').forEach((el) => el.onclick = () => {
+      const it = items[el.dataset.del];
+      confirmModal('حذف البند', `سيُحذف البند «${it.title}» ومحتواه. متابعة؟`, async () => {
+        try {
+          await API.del(`/meetings/${meetingId}/agenda/${it.id}`);
+          if (editingId === it.id) { if (editor) editor.destroy(); editor = null; editingId = null; }
+          items.splice(items.indexOf(it), 1);
+          render(); flash('حُذف البند');
+        } catch (err) { toast(err.message, 'err'); }
+      }, { danger: true });
+    });
+
+    const move = async (from, to) => {
+      if (to < 0 || to >= items.length) return;
+      await commitBody();
+      items.splice(to, 0, items.splice(from, 1)[0]);
+      render();
+      await saveOrder();
+    };
+    box.querySelectorAll('[data-up]').forEach((el) => el.onclick = () => move(+el.dataset.up, +el.dataset.up - 1));
+    box.querySelectorAll('[data-dn]').forEach((el) => el.onclick = () => move(+el.dataset.dn, +el.dataset.dn + 1));
+
+    // السحب والإفلات لإعادة الترتيب
+    let dragIdx = null;
+    box.querySelectorAll('.ag-item').forEach((row) => {
+      row.ondragstart = (e) => { dragIdx = +row.dataset.idx; row.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; };
+      row.ondragend = () => row.classList.remove('dragging');
+      row.ondragover = (e) => { e.preventDefault(); row.classList.add('drag-over'); };
+      row.ondragleave = () => row.classList.remove('drag-over');
+      row.ondrop = (e) => {
+        e.preventDefault(); row.classList.remove('drag-over');
+        const to = +row.dataset.idx;
+        if (dragIdx != null && dragIdx !== to) move(dragIdx, to);
+        dragIdx = null;
+      };
+    });
+
+    // محرر المحتوى في مكان البند نفسه
+    if (editingId != null) {
+      const it = items.find((x) => x.id === editingId);
+      const mount = box.querySelector('.ag-item.is-editing .ag-edit');
+      if (it && mount) {
+        if (!editor) {
+          editor = richEditor(it.body || '', { ai: { meetingId, title: () => it.title } });
+          // Ctrl/⌘ + Enter أو S لحفظ المحتوى دون مغادرة لوحة المفاتيح
+          editor.el.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'Enter' || e.key === 's')) {
+              e.preventDefault(); commitBody().then(render);
+            }
+          });
+        }
+        mount.appendChild(editor.el);
+        const bar = document.createElement('div');
+        bar.className = 'row mt';
+        bar.innerHTML = `<button class="btn btn-sm" data-savebody>حفظ المحتوى</button>
+          <button class="btn-ghost btn-sm" data-cancelbody>إلغاء</button>
+          <span class="hint">يُحفظ المحتوى تلقائيًا عند الانتقال إلى بند آخر.</span>`;
+        mount.appendChild(bar);
+        bar.querySelector('[data-savebody]').onclick = async () => { await commitBody(); render(); };
+        bar.querySelector('[data-cancelbody]').onclick = () => {
+          if (editor) editor.destroy();
+          editor = null; editingId = null; render();
+        };
+      }
+    }
+
+    const add = async (openBody) => {
+      const inp = document.getElementById('agNewTitle');
+      const title = inp.value.trim();
+      if (!title) { inp.focus(); return; }
+      try {
+        const r = await API.post(`/meetings/${meetingId}/agenda`, { title });
+        items.push({ id: r.id, title, body: null, item_type: r.item_type, sort_order: r.sort_order });
+        inp.value = '';
+        await commitBody();
+        if (openBody) { editingId = r.id; editorBase = ''; }
+        render();
+        if (openBody && editor) editor.focus();
+        else document.getElementById('agNewTitle').focus();
+        flash('أُضيف البند ✓');
+      } catch (err) { toast(err.message, 'err'); }
+    };
+    document.getElementById('agAdd').onclick = () => add(true);
+    onEnter('agNewTitle', () => add(false));
+  };
+  render();
+}
+
+// ============================================================
+// القرارات والتوصيات والمهام داخل المحضر — جدول + إضافة سريعة في سطر واحد
+// ============================================================
+function renderActionsSection(meetingId, d, canEdit) {
+  const box = document.getElementById('actionsBox');
+  if (!box) return;
+  const members = d.attendees.filter((a) => !a.is_guest);
+
+  const refresh = async () => {
+    try { d.actions = (await API.get('/meetings/' + meetingId)).actions; render(); }
+    catch (err) { toast(err.message, 'err'); }
+  };
+
+  const render = () => {
+    const rows = d.actions || [];
+    box.innerHTML = `
+      ${rows.length ? `<table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الاستحقاق</th><th>الحالة</th><th></th></tr></thead>
+        <tbody>${rows.map((a) => `<tr><td>${esc(ACTION_TYPE_AR[a.type] || a.type)}</td><td dir="ltr" style="text-align:right">${esc(a.display_number)}</td><td>${esc(a.text)}</td>
+          <td>${esc(a.assignees || '—')}</td><td>${a.due_date ? esc(a.due_date) : '—'}</td><td>${statusTag(a.status, ACTION_STATUS_AR)}</td>
+          <td><button class="btn-ghost btn-sm" data-openaction="${a.id}">عرض</button>${canEdit ? `<button class="btn-ghost btn-sm" data-editaction="${a.id}">تعديل</button>` : ''}</td></tr>`).join('')}</tbody></table>`
+        : '<div class="card-body muted">لا توجد بنود بعد.</div>'}
+      ${canEdit ? `<div class="card-body quick-add">
+        <div class="row">
+          <select id="qaType">${['decision', 'recommendation', 'task'].map((t) => `<option value="${t}">${ACTION_TYPE_AR[t]}</option>`).join('')}</select>
+          <input id="qaText" placeholder="نص القرار أو التوصية أو المهمة… ثم Enter" style="flex:1;min-width:200px" />
+          <input type="date" id="qaDue" title="تاريخ الاستحقاق" />
+          <button class="btn btn-sm" id="qaAdd">إضافة</button>
+        </div>
+        <p class="hint">إضافة سريعة — لتحديد الأولوية والمسؤولين استخدم «إضافة بتفاصيل كاملة» أو زر «تعديل».</p>
+      </div>` : ''}`;
+
+    box.querySelectorAll('[data-editaction]').forEach((b) =>
+      b.onclick = () => actionForm(meetingId, members, (d.actions || []).find((x) => x.id == b.dataset.editaction)));
+    box.querySelectorAll('[data-openaction]').forEach((b) =>
+      b.onclick = () => (typeof taskDetail === 'function' ? taskDetail(b.dataset.openaction, refresh) : nav('tasks')));
+    if (!canEdit) return;
+
+    // المهمة تتطلب تاريخ استحقاق — يُقترح تلقائيًا بعد أسبوع ويبقى قابلًا للتغيير
+    const typeSel = document.getElementById('qaType');
+    const dueInp = document.getElementById('qaDue');
+    typeSel.onchange = () => {
+      if (typeSel.value === 'task' && !dueInp.value) dueInp.value = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+    };
+    const quickAdd = async () => {
+      const text = document.getElementById('qaText').value.trim();
+      if (!text) return;
+      const type = typeSel.value;
+      let due = dueInp.value || null;
+      if (type === 'task' && !due) due = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+      try {
+        await API.post('/actions/meeting/' + meetingId, { type, text, priority: 'medium', due_date: due, assignees: [] });
+        await refresh();
+        const t = document.getElementById('qaText');
+        if (t) t.focus();
+        toast('أُضيف البند', 'ok');
+      } catch (err) { toast(err.message, 'err'); }
+    };
+    bind('qaAdd', quickAdd);
+    onEnter('qaText', quickAdd);
+  };
+  render();
 }
 
 // نموذج إنشاء/تعديل قرار/توصية/مهمة داخل محضر
 function actionForm(meetingId, members, existing) {
   const isEdit = !!existing;
-  openModal({
+  const { overlay } = openModal({
     title: isEdit ? 'تعديل بند' : 'قرار / توصية / مهمة جديدة',
     body: `
       <div id="afErr"></div>
@@ -489,11 +842,18 @@ function actionForm(meetingId, members, existing) {
         <div class="field"><label>الأولوية</label><select id="af_priority">
           ${['high', 'medium', 'low'].map((p) => `<option value="${p}" ${existing && existing.priority === p ? 'selected' : ''}>${PRIORITY_AR[p]}</option>`).join('')}
         </select></div>
-        <div class="field"><label>تاريخ الاستحقاق <span class="muted" id="af_dueHint"></span></label><input type="date" id="af_due" value="${existing && existing.due_date ? esc(existing.due_date) : ''}" /></div>
+        <div class="field"><label>تاريخ الاستحقاق <span class="muted" id="af_dueHint"></span></label>
+          <input type="date" id="af_due" value="${existing && existing.due_date ? esc(existing.due_date) : ''}" />
+          <div class="row chips">
+            ${[['اليوم', 0], ['بعد ٣ أيام', 3], ['بعد أسبوع', 7], ['بعد أسبوعين', 14]]
+              .map(([label, days]) => `<button type="button" class="chip" data-due="${days}">${label}</button>`).join('')}
+          </div></div>
       </div>
-      <div class="field"><label>المسؤولون</label>
+      <div class="field"><label>المسؤولون
+          <button type="button" class="chip" id="af_all" style="margin-inline-start:8px">تحديد الحاضرين</button>
+          <button type="button" class="chip" id="af_none">مسح التحديد</button></label>
         <div id="af_assignees" style="max-height:150px;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:8px">
-          ${members.map((m) => `<label class="check-row"><input type="checkbox" value="${m.user_id}" /> ${esc(m.user_name)}</label>`).join('')}
+          ${members.map((m) => `<label class="check-row"><input type="checkbox" value="${m.user_id}" data-present="${m.attendance_status === 'present' ? 1 : 0}" /> ${esc(m.user_name)}${m.attendance_status && m.attendance_status !== 'present' ? ` <span class="muted" style="font-size:12px">(${esc(ATT_STATUS_AR[m.attendance_status] || '')})</span>` : ''}</label>`).join('')}
         </div></div>`,
     buttons: [
       { label: 'حفظ', onClick: async (cl, ov) => {
@@ -514,9 +874,32 @@ function actionForm(meetingId, members, existing) {
       { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
     ],
   });
-  // إبراز أن الاستحقاق إلزامي للمهمة
-  const upd = () => { document.getElementById('af_dueHint').textContent = document.getElementById('af_type').value === 'task' ? '(إلزامي)' : '(اختياري)'; };
-  document.getElementById('af_type').onchange = upd; upd();
+  // إبراز أن الاستحقاق إلزامي للمهمة، واقتراح تاريخ مبدئي عند اختيارها
+  const typeSel = overlay.querySelector('#af_type');
+  const dueInp = overlay.querySelector('#af_due');
+  const upd = () => {
+    overlay.querySelector('#af_dueHint').textContent = typeSel.value === 'task' ? '(إلزامي)' : '(اختياري)';
+    if (typeSel.value === 'task' && !dueInp.value) dueInp.value = new Date(Date.now() + 7 * 864e5).toISOString().slice(0, 10);
+  };
+  typeSel.onchange = upd; upd();
+
+  // اختصارات تاريخ الاستحقاق
+  overlay.querySelectorAll('[data-due]').forEach((b) => b.onclick = () => {
+    dueInp.value = new Date(Date.now() + Number(b.dataset.due) * 864e5).toISOString().slice(0, 10);
+  });
+  const boxes = () => Array.from(overlay.querySelectorAll('#af_assignees input'));
+  overlay.querySelector('#af_all').onclick = () => boxes().forEach((i) => { if (i.dataset.present === '1') i.checked = true; });
+  overlay.querySelector('#af_none').onclick = () => boxes().forEach((i) => i.checked = false);
+
+  // عند التعديل: تحديد المسؤولين الحاليين حتى لا يُمسحوا بالحفظ
+  if (isEdit) {
+    API.get('/actions/' + existing.id)
+      .then(({ assignees }) => {
+        const ids = new Set((assignees || []).map((a) => String(a.user_id)));
+        boxes().forEach((i) => { if (ids.has(i.value)) i.checked = true; });
+      })
+      .catch(() => { /* التحديد المبدئي غير حرج */ });
+  }
 }
 
 function adjustCompletionDate(actionId, onDone) {
@@ -539,18 +922,29 @@ function bind(elId, fn) { const el = document.getElementById(elId); if (el) el.o
 
 function editHeader(id, m, d) {
   const members = d.attendees.filter((a) => !a.is_guest);
-  openModal({
+  const { overlay } = openModal({
     title: 'تعديل ترويسة المحضر',
     body: `
+      <p class="hint" style="margin-bottom:12px">عدّل ما تريد فقط — تُحفظ الحقول المتغيّرة وحدها وتبقى البقية كما هي.</p>
+      <div id="ehErr"></div>
       <div class="field"><label>عنوان الاجتماع</label><input id="eh_title" value="${esc(m.title || '')}" /></div>
       <div class="row-2">
         <div class="field"><label>التاريخ الميلادي</label><input type="date" id="eh_greg" value="${esc(m.greg_date || '')}" /></div>
         <div class="field"><label>التاريخ الهجري</label><input id="eh_hijri" value="${esc(m.hijri_date || '')}" readonly style="background:#f0f2f1" /></div>
       </div>
       <div class="row-2">
-        <div class="field"><label>وقت البداية</label><input type="time" id="eh_start" value="${esc(m.start_time || '')}" /></div>
-        <div class="field"><label>وقت النهاية</label><input type="time" id="eh_end" value="${esc(m.end_time || '')}" /></div>
+        <div class="field"><label>وقت البداية</label>
+          <div class="row" style="gap:6px;flex-wrap:nowrap">
+            <input id="eh_start" value="${m.start_time ? esc(fmtTime(m.start_time)) : ''}" placeholder="٩:٣٠ ص" style="flex:1" />
+            <button class="btn-ghost btn-sm" type="button" data-now="eh_start">الآن</button>
+          </div></div>
+        <div class="field"><label>وقت النهاية</label>
+          <div class="row" style="gap:6px;flex-wrap:nowrap">
+            <input id="eh_end" value="${m.end_time ? esc(fmtTime(m.end_time)) : ''}" placeholder="١٠:٤٥ ص" style="flex:1" />
+            <button class="btn-ghost btn-sm" type="button" data-now="eh_end">الآن</button>
+          </div></div>
       </div>
+      <p class="hint" style="margin:-8px 0 16px">صيغ الوقت المقبولة: ٩:٣٠ ص · 9:30 م · 0930 — واتركه فارغًا لمسحه.</p>
       <div class="row-2">
         <div class="field"><label>نوع المكان</label><select id="eh_loctype"><option value="in_person" ${m.location_type !== 'remote' ? 'selected' : ''}>حضوري</option><option value="remote" ${m.location_type === 'remote' ? 'selected' : ''}>عن بُعد</option></select></div>
         <div class="field"><label>المكان / الرابط</label><input id="eh_loc" value="${esc(m.location || '')}" /></div>
@@ -558,23 +952,35 @@ function editHeader(id, m, d) {
       <div class="field"><label>كاتب المحضر</label><select id="eh_writer"><option value="">— الافتراضي —</option>${members.map((mm) => `<option value="${mm.user_id}" ${m.writer_id === mm.user_id ? 'selected' : ''}>${esc(mm.user_name)}</option>`).join('')}</select></div>`,
     buttons: [
       { label: 'حفظ', onClick: async (cl, ov) => {
-        const payload = {
-          title: ov.querySelector('#eh_title').value.trim() || null,
-          greg_date: ov.querySelector('#eh_greg').value,
-          hijri_date: ov.querySelector('#eh_hijri').value,
-          start_time: ov.querySelector('#eh_start').value || null,
-          end_time: ov.querySelector('#eh_end').value || null,
-          location_type: ov.querySelector('#eh_loctype').value,
-          location: ov.querySelector('#eh_loc').value.trim() || null,
-          writer_id: ov.querySelector('#eh_writer').value ? Number(ov.querySelector('#eh_writer').value) : null,
-        };
-        try { await API.patch('/meetings/' + id, payload); cl(); toast('تم الحفظ', 'ok'); meetingDetail(id); } catch (err) { toast(err.message, 'err'); }
+        const err = (msg) => ov.querySelector('#ehErr').innerHTML = `<div class="form-error">${esc(msg)}</div>`;
+        const start = parseTimeInput(ov.querySelector('#eh_start').value);
+        const end = parseTimeInput(ov.querySelector('#eh_end').value);
+        if (start === undefined) return err('صيغة وقت البداية غير مفهومة — مثال: ٩:٣٠ ص');
+        if (end === undefined) return err('صيغة وقت النهاية غير مفهومة — مثال: ١٠:٤٥ ص');
+
+        // إرسال الحقول المتغيّرة وحدها
+        const payload = {};
+        const put = (key, val, cur) => { if (val !== (cur ?? null)) payload[key] = val; };
+        put('title', ov.querySelector('#eh_title').value.trim() || null, m.title);
+        put('greg_date', ov.querySelector('#eh_greg').value, m.greg_date);
+        put('hijri_date', ov.querySelector('#eh_hijri').value, m.hijri_date);
+        put('start_time', start, m.start_time);
+        put('end_time', end, m.end_time);
+        put('location_type', ov.querySelector('#eh_loctype').value, m.location_type);
+        put('location', ov.querySelector('#eh_loc').value.trim() || null, m.location);
+        put('writer_id', ov.querySelector('#eh_writer').value ? Number(ov.querySelector('#eh_writer').value) : null, m.writer_id);
+        if (!Object.keys(payload).length) { cl(); return toast('لا توجد تغييرات'); }
+        try { await API.patch('/meetings/' + id, payload); cl(); toast('تم الحفظ', 'ok'); meetingDetail(id); } catch (ex) { err(ex.message); }
       }},
       { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
     ],
   });
-  const g = document.getElementById('eh_greg');
-  g.onchange = () => { document.getElementById('eh_hijri').value = hijriFromGreg(g.value); };
+  const g = overlay.querySelector('#eh_greg');
+  g.onchange = () => { overlay.querySelector('#eh_hijri').value = hijriFromGreg(g.value); };
+  overlay.querySelectorAll('[data-now]').forEach((b) => b.onclick = () => {
+    const el = overlay.querySelector('#' + b.dataset.now);
+    if (el) el.value = fmtTime(nowTime());
+  });
 }
 
 function editAgenda(id, d) {
@@ -630,23 +1036,23 @@ function editAgenda(id, d) {
   overlay.querySelector('#ea_add').onclick = () => { items.push({ title: '', body: null, item_type: 'new' }); render(overlay); };
 }
 
-// تحرير محتوى بند بالمحرر الغني (مع مساعد الصياغة عند تهيئة الذكاء الاصطناعي)
+// تحرير محتوى بند بالمحرر الغني — الصياغة والإملاء الصوتي داخل المحرر نفسه
 function editItemBody(items, i, onDone, meetingId) {
-  const ed = richEditor(items[i].body || '');
-  const showAi = State.aiEnabled && meetingId;
+  const ed = richEditor(items[i].body || '', {
+    ai: meetingId ? { meetingId, title: () => items[i].title || '' } : null,
+  });
   const { overlay, close } = openModal({
     title: 'محتوى البند (محرر غني)',
-    body: `${showAi ? `<div class="row" style="margin-bottom:10px">${aiBtn('ib_ai', 'صياغة بالذكاء الاصطناعي')}</div>` : ''}<div id="rich_mount"></div>`,
+    body: '<div id="rich_mount"></div>',
     buttons: [
-      { label: 'حفظ المحتوى', onClick: () => { items[i].body = ed.getHtml(); close(); if (onDone) onDone(); } },
-      { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
+      { label: 'حفظ المحتوى', onClick: () => { items[i].body = ed.getHtml(); ed.destroy(); close(); if (onDone) onDone(); } },
+      { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => { ed.destroy(); cl(); } },
     ],
   });
   overlay.querySelector('#rich_mount').appendChild(ed.el);
-  if (showAi) {
-    overlay.querySelector('#ib_ai').onclick = () =>
-      aiComposeDialog(meetingId, items[i].title || '', (html) => { ed.setHtml(html); toast('أُدرجت الصياغة — راجعها قبل الحفظ', 'ok'); });
-  }
+  // إغلاق النافذة بأي طريقة أخرى يوقف أي تسجيل صوتي جارٍ
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) ed.destroy(); });
+  overlay.querySelector('.x').addEventListener('click', () => ed.destroy());
 }
 
 function editAttendees(id, d) {

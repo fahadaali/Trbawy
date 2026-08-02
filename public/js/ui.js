@@ -102,9 +102,110 @@ function openModal({ title, body, buttons }) {
   return { overlay, close };
 }
 
+// ---------- التسجيل الصوتي المباشر ----------
+// هل يدعم المتصفح التسجيل من الميكروفون؟ (يتطلب HTTPS أو localhost)
+function canRecordAudio() {
+  return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.MediaRecorder);
+}
+
+// رسالة عربية مفهومة لأخطاء الميكروفون
+function micErrorMessage(e) {
+  const n = e && e.name;
+  if (n === 'NotAllowedError' || n === 'SecurityError') return 'لم يُسمح باستخدام الميكروفون — فعّل الإذن من إعدادات المتصفح';
+  if (n === 'NotFoundError' || n === 'DevicesNotFoundError') return 'لا يوجد ميكروفون متاح على هذا الجهاز';
+  if (n === 'NotReadableError') return 'الميكروفون مشغول بتطبيق آخر';
+  return (e && e.message) || 'تعذّر بدء التسجيل';
+}
+
+// يبدأ التسجيل ويُرجع مقبضًا: { startedAt, stop(): Promise<File>, cancel() }
+async function startAudioRecording() {
+  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const mime = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg']
+    .find((t) => window.MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t));
+  const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+  const chunks = [];
+  rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+  rec.start(1000);
+  const release = () => stream.getTracks().forEach((t) => t.stop());
+  return {
+    startedAt: Date.now(),
+    cancel() { try { if (rec.state !== 'inactive') rec.stop(); } catch { /* أُوقف مسبقًا */ } release(); },
+    stop() {
+      return new Promise((resolve, reject) => {
+        rec.onstop = () => {
+          release();
+          const blob = new Blob(chunks, { type: rec.mimeType || 'audio/webm' });
+          if (!blob.size) return reject(new Error('لم يُلتقط أي صوت — تحقق من الميكروفون'));
+          const ext = (blob.type.split('/')[1] || 'webm').split(';')[0];
+          resolve(new File([blob], `تسجيل.${ext}`, { type: blob.type }));
+        };
+        try { rec.stop(); } catch (e) { release(); reject(e); }
+      });
+    },
+  };
+}
+
+const MAX_AUDIO_BYTES = 20 * 1024 * 1024;
+
+// ربط أزرار الإملاء الصوتي: تسجيل مباشر من الميكروفون أو تفريغ ملف صوتي محفوظ.
+// opts: { meetingId, recBtn, fileBtn, fileInput, setState(msg,kind), busy(flag), insert(text), doneMessage }
+// يُرجع { destroy } لإيقاف أي تسجيل جارٍ عند إغلاق الشاشة.
+function wireDictation(opts) {
+  const { meetingId, recBtn, fileBtn, fileInput } = opts;
+  const setState = opts.setState || (() => {});
+  const busy = opts.busy || (() => {});
+  let handle = null, tick = null;
+  const stopTick = () => { if (tick) { clearInterval(tick); tick = null; } };
+
+  const transcribe = async (file) => {
+    if (!file) return;
+    if (file.size > MAX_AUDIO_BYTES) { setState('حجم التسجيل يتجاوز ٢٠ ميجابايت', 'is-err'); return; }
+    busy(true);
+    setState('جارٍ تفريغ الصوت…');
+    try {
+      const fd = new FormData();
+      fd.append('meeting_id', String(meetingId));
+      fd.append('audio', file);
+      const { text } = await aiUpload('/transcribe', fd);
+      opts.insert(String(text).trim());
+      setState(opts.doneMessage || 'أُضيف نص التفريغ — راجعه وعدّله', 'is-ok');
+    } catch (e) { setState(e.message, 'is-err'); }
+    finally { busy(false); }
+  };
+
+  if (recBtn) {
+    const idleLabel = recBtn.innerHTML;
+    recBtn.onclick = async () => {
+      if (handle) {                                  // إيقاف التسجيل ثم التفريغ
+        const h = handle; handle = null; stopTick();
+        recBtn.classList.remove('rec-on'); recBtn.innerHTML = idleLabel;
+        try { await transcribe(await h.stop()); } catch (e) { setState(e.message, 'is-err'); }
+        return;
+      }
+      try { handle = await startAudioRecording(); }
+      catch (e) { setState(micErrorMessage(e), 'is-err'); return; }
+      recBtn.classList.add('rec-on');
+      const upd = () => {
+        const s = Math.max(0, Math.floor((Date.now() - handle.startedAt) / 1000));
+        recBtn.innerHTML = `■ إيقاف التسجيل · ${arNum(String(Math.floor(s / 60)).padStart(2, '0'))}:${arNum(String(s % 60).padStart(2, '0'))}`;
+      };
+      upd(); tick = setInterval(upd, 1000);
+      setState('جارٍ التسجيل… تحدّث ثم اضغط «إيقاف التسجيل» ليُفرَّغ نصًا', 'is-ok');
+    };
+  }
+  if (fileBtn && fileInput) {
+    fileBtn.onclick = () => fileInput.click();
+    fileInput.onchange = () => { const f = fileInput.files[0]; fileInput.value = ''; transcribe(f); };
+  }
+  return { destroy() { stopTick(); if (handle) { handle.cancel(); handle = null; } } };
+}
+
 // محرر نصوص غني عربي RTL (عناوين، قوائم، جداول، تظليل، صور).
-// يُرجع { el, getHtml, setHtml } — يعتمد contenteditable وأوامر التحرير القياسية.
-function richEditor(initialHtml) {
+// يُرجع { el, getHtml, setHtml, destroy } — يعتمد contenteditable وأوامر التحرير القياسية.
+// opts.ai = { meetingId, title() } يفعّل شريط المساعد داخل المحرر نفسه:
+// صياغة محتوى المربع كما هو، وإملاء صوتي (تسجيل مباشر أو رفع ملف) — بلا مربع نص إضافي.
+function richEditor(initialHtml, opts = {}) {
+  const ai = opts.ai && State.aiEnabled ? opts.ai : null;
   const wrap = document.createElement('div');
   wrap.className = 'rich';
   wrap.innerHTML = `
@@ -125,6 +226,14 @@ function richEditor(initialHtml) {
       <button type="button" data-img title="صورة">${icon('image', 16)}</button>
       <button type="button" data-clear title="إزالة التنسيق">⨯</button>
     </div>
+    ${ai ? `<div class="rich-ai">
+      <button type="button" class="btn-ghost btn-sm ai-btn" data-ai-draft>${icon('sparkle', 15)} صياغة المكتوب</button>
+      ${canRecordAudio() ? `<button type="button" class="btn-ghost btn-sm" data-ai-rec>${icon('mic', 15)} تسجيل صوتي</button>` : ''}
+      <button type="button" class="btn-ghost btn-sm" data-ai-file title="تفريغ ملف صوتي محفوظ">${icon('paperclip', 15)} ملف صوتي</button>
+      <input type="file" accept="audio/*" data-ai-input hidden />
+      <button type="button" class="btn-ghost btn-sm" data-ai-undo hidden>تراجع عن الصياغة</button>
+      <span class="rich-ai-state"></span>
+    </div>` : ''}
     <div class="rich-area body-rich" contenteditable="true" dir="rtl"></div>`;
   const area = wrap.querySelector('.rich-area');
   area.innerHTML = initialHtml || '';
@@ -160,10 +269,56 @@ function richEditor(initialHtml) {
     };
     inp.click();
   };
+
+  // ---- شريط المساعد داخل المحرر: صياغة المكتوب + إملاء صوتي ----
+  let dictation = null;
+  if (ai) {
+    const stateEl = wrap.querySelector('.rich-ai-state');
+    const draftBtn = wrap.querySelector('[data-ai-draft]');
+    const recBtn = wrap.querySelector('[data-ai-rec]');
+    const fileBtn = wrap.querySelector('[data-ai-file]');
+    const fileInp = wrap.querySelector('[data-ai-input]');
+    const undoBtn = wrap.querySelector('[data-ai-undo]');
+    const aiButtons = [draftBtn, recBtn, fileBtn].filter(Boolean);
+    const setState = (msg, kind) => { stateEl.textContent = msg || ''; stateEl.className = 'rich-ai-state' + (kind ? ' ' + kind : ''); };
+    const titleOf = () => (typeof ai.title === 'function' ? ai.title() : ai.title) || '';
+
+    // صياغة ما هو مكتوب في المربع نفسه — بلا مربع نقاط منفصل
+    draftBtn.onclick = () => {
+      const points = (area.innerText || '').replace(/\s+\n/g, '\n').trim();
+      if (!points) { setState('اكتب نقاط المناقشة داخل المربع ثم اضغط «صياغة المكتوب»', 'is-err'); area.focus(); return; }
+      setState('');
+      aiRun(draftBtn, async () => {
+        try {
+          const { html } = await API.post('/ai/agenda-draft', { meeting_id: ai.meetingId, title: titleOf(), points });
+          const before = area.innerHTML;
+          area.innerHTML = html;
+          undoBtn.hidden = false;
+          undoBtn.onclick = () => { area.innerHTML = before; undoBtn.hidden = true; setState('أُعيد النص السابق'); };
+          setState('صياغة مقترحة — راجعها وعدّلها قبل الحفظ', 'is-ok');
+        } catch (e) { setState(e.message, 'is-err'); }
+      });
+    };
+
+    // الإملاء الصوتي: تسجيل مباشر أو ملف — يُدرَج النص في نهاية المحتوى
+    dictation = wireDictation({
+      meetingId: ai.meetingId, recBtn, fileBtn, fileInput: fileInp, setState,
+      busy: (f) => aiButtons.forEach((b) => b.disabled = f),
+      doneMessage: 'أُضيف نص التفريغ — اضغط «صياغة المكتوب» لتحويله إلى نص محضر',
+      insert: (text) => {
+        const paras = text.split(/\n+/).filter((t) => t.trim()).map((t) => `<p>${esc(t.trim())}</p>`).join('');
+        area.innerHTML += paras;
+      },
+    });
+  }
+
   return {
     el: wrap,
     getHtml: () => area.innerHTML.trim(),
     setHtml: (html) => { area.innerHTML = html || ''; },
+    focus: () => area.focus(),
+    // إيقاف أي تسجيل جارٍ عند إزالة المحرر من الصفحة (تحرير الميكروفون)
+    destroy: () => { if (dictation) dictation.destroy(); },
   };
 }
 
@@ -252,6 +407,90 @@ function statusTag(status, map, colorMap) {
   const cls = (colorMap && colorMap[status]) || 'tag-gray';
   return `<span class="tag ${cls}">${esc((map && map[status]) || status)}</span>`;
 }
+
+// ---------- الوقت ----------
+// تحويل الأرقام العربية-الهندية إلى لاتينية
+function toEnDigits(s) {
+  return String(s).replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x0660))
+    .replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x06f0));
+}
+
+// تطبيع وقت مكتوب يدويًا إلى "HH:MM" — يقبل ٩:٣٠ ص · 9:30 م · 09:30 · 0930 · 9
+// يُرجع null إن كان فارغًا، و undefined إن تعذّر فهمه. (يطابق parseTime في الخادم)
+function parseTimeInput(v) {
+  if (v === null || v === undefined) return null;
+  const raw = toEnDigits(String(v).trim());
+  if (!raw) return null;
+  const pm = /م|مساء|pm/i.test(raw);
+  const am = /ص|صباح|am/i.test(raw);
+  let h, mi;
+  const colon = /(\d{1,2})\s*[:.]\s*(\d{1,2})/.exec(raw);
+  if (colon) { h = Number(colon[1]); mi = Number(colon[2]); }
+  else {
+    const d = raw.replace(/\D/g, '');
+    if (d.length === 4) { h = Number(d.slice(0, 2)); mi = Number(d.slice(2)); }
+    else if (d.length === 3) { h = Number(d.slice(0, 1)); mi = Number(d.slice(1)); }
+    else if (d.length >= 1 && d.length <= 2) { h = Number(d); mi = 0; }
+    else return undefined;
+  }
+  if (pm && h < 12) h += 12;
+  if (am && h === 12) h = 0;
+  if (h > 23 || mi > 59) return undefined;
+  return String(h).padStart(2, '0') + ':' + String(mi).padStart(2, '0');
+}
+
+// عرض الوقت بالعربية مع ص/م (مثل: ٩:٣٠ ص)
+function fmtTime(hhmm) {
+  const t = parseTimeInput(hhmm);
+  if (!t) return '—';
+  const [h, m] = t.split(':').map(Number);
+  const suffix = h < 12 ? 'ص' : 'م';
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${arNum(h12)}:${arNum(String(m).padStart(2, '0'))} ${suffix}`;
+}
+
+// وقت الجهاز الآن بالتوقيت المحلي بصيغة HH:MM
+function nowTime() {
+  const d = new Date();
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+
+// فرق الدقائق بين وقتين (يُعالج تجاوز منتصف الليل)
+function timeDiffMinutes(start, end) {
+  const a = parseTimeInput(start), b = parseTimeInput(end);
+  if (!a || !b) return null;
+  const toMin = (t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3));
+  let diff = toMin(b) - toMin(a);
+  if (diff < 0) diff += 24 * 60;
+  return diff;
+}
+
+// مدة بالعربية (ساعة و٢٥ دقيقة)
+function fmtDuration(mins) {
+  if (mins == null) return '';
+  if (mins < 1) return 'أقل من دقيقة';
+  const h = Math.floor(mins / 60), m = mins % 60;
+  // جمع القلّة (٣–١٠) ثم التمييز المفرد (١١ فأكثر)
+  const unit = (n, one, two, few, many) => (n === 1 ? one : n === 2 ? two : n <= 10 ? `${arNum(n)} ${few}` : `${arNum(n)} ${many}`);
+  const parts = [];
+  if (h) parts.push(unit(h, 'ساعة', 'ساعتان', 'ساعات', 'ساعة'));
+  if (m) parts.push(unit(m, 'دقيقة', 'دقيقتان', 'دقائق', 'دقيقة'));
+  return parts.join(' و');
+}
+
+// عدّاد hh:mm:ss بالأرقام العربية
+function fmtStopwatch(totalSec) {
+  const s = Math.max(0, Math.floor(totalSec));
+  const p = (n) => arNum(String(n).padStart(2, '0'));
+  return `${p(Math.floor(s / 3600))}:${p(Math.floor((s % 3600) / 60))}:${p(s % 60)}`;
+}
+
+// تخزين محلي متسامح (قد يكون معطّلًا في وضع التصفح الخاص)
+const LS = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch { /* غير حرج */ } },
+  del(k) { try { localStorage.removeItem(k); } catch { /* غير حرج */ } },
+};
 
 // تنسيق تاريخ ووقت من نص ISO
 function fmtDateTime(iso) {

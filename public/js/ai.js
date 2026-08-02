@@ -26,85 +26,50 @@ async function aiRun(btn, fn) {
   finally { btn.disabled = false; btn.innerHTML = html; }
 }
 
-// ============================================================
-// ١) صياغة نص بند من نقاط + تفريغ صوتي
-// ============================================================
-// onAccept(html) — يُستدعى عند قبول المستخدم للصياغة.
-function aiComposeDialog(meetingId, title, onAccept) {
-  const { overlay, close } = openModal({
-    title: 'صياغة نص البند بالذكاء الاصطناعي',
-    body: `
-      <p class="hint">اكتب النقاط التي دارت في المناقشة (أو ارفع تسجيلاً صوتياً لتفريغه)، ثم اطلب الصياغة.
-        النتيجة <b>مقترح</b> يمكنك تعديله قبل اعتماده.</p>
-      <div id="aicErr"></div>
-      <div class="field"><label>النقاط</label>
-        <textarea id="aic_points" rows="6" placeholder="- نوقشت نتائج الفصل الأول&#10;- اقترح المشرف زيادة الحصص العلاجية"></textarea></div>
-      <div class="field"><label>تفريغ تسجيل صوتي (اختياري)</label>
-        <div class="row"><input type="file" id="aic_audio" accept="audio/*" style="flex:1" />
-          <button class="btn-ghost btn-sm" id="aic_tr">${icon('mic', 15)} تفريغ</button></div>
-        <p class="hint">حتى ٢٠ ميجابايت. يُضاف النص الناتج إلى النقاط أعلاه.</p></div>
-      <div class="row"><button class="btn btn-sm" id="aic_gen">${icon('sparkle', 15)} صُغ النص</button></div>
-      <div id="aic_out" class="mt"></div>`,
-    buttons: [{ label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() }],
-  });
-
-  const err = (m) => overlay.querySelector('#aicErr').innerHTML = m ? `<div class="form-error">${esc(m)}</div>` : '';
-
-  overlay.querySelector('#aic_tr').onclick = (e) => {
-    const f = overlay.querySelector('#aic_audio').files[0];
-    if (!f) { err('اختر ملفاً صوتياً أولاً'); return; }
-    err('');
-    aiRun(e.currentTarget, async () => {
-      try {
-        const fd = new FormData();
-        fd.append('meeting_id', String(meetingId));
-        fd.append('audio', f);
-        const { text } = await aiUpload('/transcribe', fd);
-        const ta = overlay.querySelector('#aic_points');
-        ta.value = (ta.value ? ta.value + '\n' : '') + text;
-        toast('تم التفريغ', 'ok');
-      } catch (ex) { err(ex.message); }
-    });
-  };
-
-  overlay.querySelector('#aic_gen').onclick = (e) => {
-    const points = overlay.querySelector('#aic_points').value.trim();
-    if (!points) { err('أدخل النقاط أولاً'); return; }
-    err('');
-    aiRun(e.currentTarget, async () => {
-      try {
-        const { html } = await API.post('/ai/agenda-draft', { meeting_id: meetingId, title, points });
-        overlay.querySelector('#aic_out').innerHTML = `
-          <div class="card"><div class="card-head"><h3>الصياغة المقترحة</h3></div>
-            <div class="card-body"><div class="body-rich" id="aic_html">${html}</div>
-              <div class="row mt"><button class="btn btn-sm" id="aic_use">اعتماد هذه الصياغة</button></div></div></div>`;
-        overlay.querySelector('#aic_use').onclick = () => {
-          onAccept(overlay.querySelector('#aic_html').innerHTML);
-          close();
-        };
-      } catch (ex) { err(ex.message); }
-    });
-  };
-}
+// ملاحظة: صياغة نص البند تتم داخل محرر المحتوى نفسه (شريط المساعد في richEditor)
+// بلا مربع نقاط منفصل — راجع ui.js.
 
 // ============================================================
-// ٢) استخراج القرارات والتوصيات والمهام من نص المناقشة
+// ١) استخراج القرارات والتوصيات والمهام من نص المناقشة
 // ============================================================
 function aiExtractDialog(meetingId, seedText, onDone) {
   let items = [];
   const { overlay, close } = openModal({
     title: 'استخراج القرارات والمهام',
     body: `
-      <p class="hint">الصق نص المناقشة أو استخدم محتوى البنود، وسيقترح المساعد القرارات والتوصيات والمهام.
-        راجعها واختر ما تريد إضافته — المهام تحتاج تاريخ استحقاق يُضبط لاحقاً.</p>
+      <p class="hint">الصق نص المناقشة أو استخدم محتوى البنود أو سجّل الصوت مباشرة،
+        وسيقترح المساعد القرارات والتوصيات والمهام. راجعها واختر ما تريد إضافته.</p>
       <div id="aixErr"></div>
-      <div class="field"><label>نص المناقشة</label><textarea id="aix_text" rows="7">${esc(seedText || '')}</textarea></div>
+      <div class="field"><label>نص المناقشة</label><textarea id="aix_text" rows="7">${esc(seedText || '')}</textarea>
+        <div class="row mt">
+          ${canRecordAudio() ? '<button type="button" class="btn-ghost btn-sm" id="aix_rec">' + icon('mic', 15) + ' تسجيل صوتي</button>' : ''}
+          <button type="button" class="btn-ghost btn-sm" id="aix_file">${icon('paperclip', 15)} ملف صوتي</button>
+          <input type="file" accept="audio/*" id="aix_audio" hidden />
+          <span class="rich-ai-state" id="aix_state"></span>
+        </div></div>
       <div class="row"><button class="btn btn-sm" id="aix_go">${icon('sparkle', 15)} استخرج</button></div>
       <div id="aix_out" class="mt"></div>`,
-    buttons: [{ label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() }],
+    buttons: [{ label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => { dictation.destroy(); cl(); } }],
   });
 
   const err = (m) => overlay.querySelector('#aixErr').innerHTML = m ? `<div class="form-error">${esc(m)}</div>` : '';
+
+  // إملاء صوتي مباشر داخل مربع النص نفسه
+  const stateEl = overlay.querySelector('#aix_state');
+  const dictation = wireDictation({
+    meetingId,
+    recBtn: overlay.querySelector('#aix_rec'),
+    fileBtn: overlay.querySelector('#aix_file'),
+    fileInput: overlay.querySelector('#aix_audio'),
+    setState: (msg, kind) => { stateEl.textContent = msg || ''; stateEl.className = 'rich-ai-state' + (kind ? ' ' + kind : ''); },
+    insert: (text) => {
+      const ta = overlay.querySelector('#aix_text');
+      ta.value = (ta.value.trim() ? ta.value.trim() + '\n' : '') + text;
+    },
+    doneMessage: 'أُضيف نص التفريغ — اضغط «استخرج»',
+  });
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) dictation.destroy(); });
+  overlay.querySelector('.x').addEventListener('click', () => dictation.destroy());
 
   const renderItems = () => {
     overlay.querySelector('#aix_out').innerHTML = !items.length
@@ -122,7 +87,7 @@ function aiExtractDialog(meetingId, seedText, onDone) {
                 </select>
                 <textarea data-tx="${i}" rows="2" style="flex:1;padding:8px 11px;border:1px solid var(--border);border-radius:8px">${esc(it.text)}</textarea>
               </div>`).join('')}
-            <p class="hint">المهام المضافة تُنشأ بتاريخ استحقاق فارغ — عدّلها من بطاقة البند بعد الإضافة.</p>
+            <p class="hint">تُنشأ المهام بتاريخ استحقاق مبدئي بعد أسبوع — عدّله من زر «تعديل» في جدول البنود.</p>
             <div class="row mt"><button class="btn btn-sm" id="aix_add">إضافة المحدَّد للمحضر</button></div>
           </div></div>`;
     overlay.querySelectorAll('[data-tx]').forEach((el) => el.oninput = () => items[el.dataset.tx].text = el.value);
@@ -146,7 +111,7 @@ function aiExtractDialog(meetingId, seedText, onDone) {
       }
       if (ok) toast(`أُضيف ${arNum(ok)} بند`, 'ok');
       if (failures.length) err(failures[0]);
-      else { close(); if (onDone) onDone(); }
+      else { dictation.destroy(); close(); if (onDone) onDone(); }
     });
   };
 
@@ -165,7 +130,7 @@ function aiExtractDialog(meetingId, seedText, onDone) {
 }
 
 // ============================================================
-// ٣) الملخّص التنفيذي للمحضر
+// ٢) الملخّص التنفيذي للمحضر
 // ============================================================
 function aiSummaryDialog(meetingId) {
   const { overlay } = openModal({
@@ -190,7 +155,7 @@ function aiSummaryDialog(meetingId) {
 }
 
 // ============================================================
-// ٤) تحليل ملاحظات التقييم
+// ٣) تحليل ملاحظات التقييم
 // ============================================================
 function aiEvalNotesDialog(cycleId, targetType, targetId, targetName) {
   const { overlay } = openModal({

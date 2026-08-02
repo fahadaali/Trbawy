@@ -1,10 +1,10 @@
 // وحدة التقييم: الدورات، المعايير، النماذج، آلية المتوسط المرجّح، والنافذة التفصيلية.
 import { Hono } from 'hono';
-import type { Env, Variables, User } from '../types';
+import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import {
-  canCreateEvalCycle, canManageCriteria, canEvaluate, canViewResults, isPresident, isVice,
+  canCreateEvalCycle, canManageCriteria, canEvaluate, canViewResults, isPresident,
 } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
 import { evaluationTargets, resultTargets } from '../lib/evaltargets';
