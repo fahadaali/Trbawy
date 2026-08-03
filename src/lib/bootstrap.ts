@@ -3,7 +3,7 @@
 import type { Env } from '../types';
 import { hashPassword } from './crypto';
 import { SCHEMA_STATEMENTS } from './schema';
-import { runColumnMigrations } from './migrate';
+import { addMissingColumns, backfillRolePeriods } from './migrate';
 
 let checkedThisIsolate = false;
 
@@ -11,34 +11,37 @@ export const DEFAULT_PASSWORD = '1234';
 
 // إنشاء الجداول والفهارس ذاتيًا (CREATE ... IF NOT EXISTS) — تُغني عن تطبيق المخطط يدويًا.
 // تنفيذ تسلسلي (لا batch): D1 البعيد لا يقبل عدّة عبارات DDL داخل معاملة واحدة.
+// وكل عبارة معزولة بحارسها: العبارات كلها idempotent، فإخفاق واحدة يُسجَّل ولا يُسقط
+// الإقلاع كله — وإلا عطّل خطأ ترقية واحد كل نقاط النهاية على القاعدة القائمة.
 async function ensureSchema(env: Env): Promise<void> {
   for (const stmt of SCHEMA_STATEMENTS) {
-    await env.DB.prepare(stmt).run();
+    try { await env.DB.prepare(stmt).run(); }
+    catch (e) { console.error('schema statement failed:', stmt.slice(0, 80), e); }
   }
 }
 
 export async function ensureBootstrap(env: Env): Promise<void> {
   if (checkedThisIsolate) return;
 
-  // فحص سريع: إن كانت القاعدة مهيّأة ومزروعة، نخرج فورًا بلا أي تكلفة مخطط.
+  // هل القاعدة مزروعة أصلًا؟ (الجدول قد لا يكون موجودًا في التشغيل الأول)
+  let seeded = false;
   try {
     const row = await env.DB.prepare('SELECT COUNT(*) AS c FROM councils').first<{ c: number }>();
-    if ((row?.c ?? 0) > 0) {
-      // القاعدة قائمة — نطبّق ترقيات الأعمدة والجداول الجديدة مرة واحدة لكل isolate.
-      await ensureSchema(env);
-      await runColumnMigrations(env);
-      checkedThisIsolate = true;
-      return;
-    }
+    seeded = (row?.c ?? 0) > 0;
   } catch {
-    // جدول المجالس غير موجود بعد — ننشئ المخطط أولًا.
+    // جدول المجالس غير موجود بعد — قاعدة جديدة تمامًا.
   }
 
+  // الترتيب مقصود ولا يجوز عكسه:
+  // ١) أعمدة الجداول القائمة — لأن CREATE TABLE IF NOT EXISTS لا يعدّل جدولًا موجودًا،
+  //    فأي فهرس جديد على عمود جديد سيفشل ما لم يُضَف العمود أولًا.
+  // ٢) الجداول والفهارس (الجديد منها فقط يُنشأ).
+  // ٣) تعبئة فترات الأدوار — تحتاج جدولها الذي أُنشئ في الخطوة السابقة.
+  await addMissingColumns(env);
   await ensureSchema(env);
-  await runColumnMigrations(env);
+  await backfillRolePeriods(env);
 
-  const seeded = await env.DB.prepare('SELECT COUNT(*) AS c FROM councils').first<{ c: number }>();
-  if ((seeded?.c ?? 0) === 0) await seed(env);
+  if (!seeded) await seed(env);
   checkedThisIsolate = true;
 }
 

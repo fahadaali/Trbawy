@@ -1,4 +1,4 @@
-// ترقيات تدريجية للقواعد القائمة (الأعمدة الجديدة). آمنة للتكرار: نتجاهل خطأ العمود الموجود.
+// ترقيات تدريجية للقواعد القائمة. آمنة للتكرار: نتجاهل خطأ العمود الموجود.
 import type { Env } from '../types';
 
 const COLUMN_ADDS = [
@@ -13,13 +13,24 @@ const COLUMN_ADDS = [
   "ALTER TABLE users ADD COLUMN deleted_email TEXT",
 ];
 
-export async function runColumnMigrations(env: Env): Promise<void> {
+/**
+ * إضافة الأعمدة الناقصة للجداول القائمة.
+ * تُنفَّذ **قبل** إنشاء المخطط: فـ CREATE TABLE IF NOT EXISTS لا يعدّل جدولًا قائمًا،
+ * وأي فهرس جديد على عمود جديد سيفشل ما لم يُضَف العمود أولًا.
+ */
+export async function addMissingColumns(env: Env): Promise<void> {
   for (const sql of COLUMN_ADDS) {
     try { await env.DB.prepare(sql).run(); }
-    catch { /* العمود موجود مسبقًا — تجاهُل مقصود */ }
+    catch { /* العمود موجود مسبقًا أو الجدول لم يُنشأ بعد — تجاهُل مقصود */ }
   }
-  // تعبئة فترة الدور الجارية لكل مستخدم قديم (أساس الاطلاع التاريخي).
-  // تبدأ الفترة من تاريخ إنشاء الحساب حتى لا يُحرم أحد من أرشيفه الحالي.
+}
+
+/**
+ * تعبئة فترة الدور الجارية لكل مستخدم بلا فترة (أساس الاطلاع التاريخي).
+ * تبدأ من تاريخ إنشاء الحساب حتى لا يُحرم أحد من أرشيفه القائم.
+ * تُنفَّذ **بعد** إنشاء المخطط لأنها تحتاج جدول user_role_periods.
+ */
+export async function backfillRolePeriods(env: Env): Promise<void> {
   try {
     await env.DB.prepare(
       `INSERT INTO user_role_periods (user_id, role, stage, from_at, note)
@@ -27,5 +38,7 @@ export async function runColumnMigrations(env: Env): Promise<void> {
          FROM users u
         WHERE NOT EXISTS (SELECT 1 FROM user_role_periods p WHERE p.user_id = u.id)`,
     ).run();
-  } catch { /* الجدول غير جاهز بعد — يُنشأ في ensureSchema ثم يُعاد المحاولة في الطلب التالي */ }
+  } catch (e) {
+    console.error('backfill role periods failed', e);
+  }
 }
