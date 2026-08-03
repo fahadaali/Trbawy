@@ -4,7 +4,7 @@ import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import {
-  canViewMeeting, councilScope, withinServedArchive, hasFullCouncilAccess, canCreateMeeting, canApproveMeeting,
+  canViewMeeting, councilScope, withinAccessWindow, isLiveMeeting, hasFullCouncilAccess, canCreateMeeting, canApproveMeeting,
   canEditDraft, canCancelMeeting, canAssignWriter, isPresident,
   type CouncilScope,
 } from '../permissions';
@@ -160,8 +160,8 @@ app.get('/', async (c) => {
       scope = await councilScope(c.env, u, { id: m.council_id, type: m.council_type, default_writer_id: null });
       scopes.set(m.council_id, scope);
     }
-    const visible = scope.level === 'full'
-      || (scope.level === 'legacy' && withinServedArchive(m.created_at, scope.periods))
+    const visible = withinAccessWindow(m.created_at, scope.windows)
+      || (scope.level === 'full' && isLiveMeeting(m.status))
       || attended.has(m.id);
     if (visible) out.push({ ...m, read_only: scope.level !== 'full' });
   }

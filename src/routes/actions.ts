@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { councilScope, withinServedArchive, canEditDraft, isPresident, type CouncilRow } from '../permissions';
+import { councilScope, withinAccessWindow, isOpenAction, canEditDraft, isPresident, type CouncilRow } from '../permissions';
 import { getCouncil, nextActionNumber, formatActionNumber } from '../lib/meetings';
 import { notify, notifyMany } from '../lib/notify';
 
@@ -35,15 +35,19 @@ async function isAssignee(env: Env, actionId: number, userId: number): Promise<b
   return !!r;
 }
 
-// الاطلاع على بند: اطلاع كامل على مجلسه، أو اطلاع تاريخي ومحضره ضمن أرشيف فترة خدمته،
-// أو كونه مسؤولًا عنه (فالمسؤول يرى بنده دائمًا ولو انتقل عن المرحلة).
-async function canViewAction(env: Env, u: any, action: { id: number; council_id: number; source_meeting_id: number }, council: CouncilRow): Promise<boolean> {
+// الاطلاع على بند: محضره أُنشئ داخل نافذة اطلاعه، أو بند مفتوح في مجلس يملك اطلاعًا
+// كاملًا عليه الآن (عمل جارٍ لا أرشيف)، أو كونه مسؤولًا عنه — فالمسؤول يرى بنده دائمًا.
+async function canViewAction(
+  env: Env, u: any,
+  action: { id: number; council_id: number; source_meeting_id: number; status?: string },
+  council: CouncilRow,
+): Promise<boolean> {
   const scope = await councilScope(env, u, council);
-  if (scope.level === 'full') return true;
-  if (scope.level === 'legacy') {
+  if (scope.level !== 'none') {
     const m = await env.DB.prepare('SELECT created_at FROM meetings WHERE id = ?')
       .bind(action.source_meeting_id).first<any>();
-    if (withinServedArchive(m?.created_at, scope.periods)) return true;
+    if (withinAccessWindow(m?.created_at, scope.windows)) return true;
+    if (scope.level === 'full' && isOpenAction(action.status)) return true;
   }
   return await isAssignee(env, action.id, u.id);
 }
@@ -133,8 +137,8 @@ app.get('/', async (c) => {
       scope = await councilScope(c.env, u, { id: a.council_id, type: a.council_type, default_writer_id: null });
       scopes.set(a.council_id, scope);
     }
-    const visible = scope.level === 'full'
-      || (scope.level === 'legacy' && withinServedArchive(a.meeting_created_at, scope.periods))
+    const visible = withinAccessWindow(a.meeting_created_at, scope.windows)
+      || (scope.level === 'full' && isOpenAction(a.status))
       || assigned.has(a.id);
     if (visible) out.push({ ...a, read_only: scope.level !== 'full' });
   }

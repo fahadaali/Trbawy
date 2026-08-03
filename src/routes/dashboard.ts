@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { canViewResults, councilScope, withinServedArchive, canEvaluate, isPresident, isVice } from '../permissions';
+import { canViewResults, councilScope, withinAccessWindow, isLiveMeeting, isOpenAction, canEvaluate, isPresident, isVice } from '../permissions';
 import type { CouncilScope } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
 import { evaluationTargets } from '../lib/evaltargets';
@@ -84,7 +84,7 @@ app.get('/search', async (c) => {
   const meetings = [];
   for (const m of mRows) {
     const sc = await scopeOf(m.council_id, m.council_type);
-    const ok = sc.level === 'full' || (sc.level === 'legacy' && withinServedArchive(m.created_at, sc.periods)) || attended.has(m.id);
+    const ok = withinAccessWindow(m.created_at, sc.windows) || (sc.level === 'full' && isLiveMeeting(m.status)) || attended.has(m.id);
     if (ok) {
       meetings.push({ id: m.id, title: m.display_number, sub: m.title || m.council_name, link: `#/meetings/${m.id}` });
       if (meetings.length >= 8) break;
@@ -93,7 +93,7 @@ app.get('/search', async (c) => {
 
   // القرارات والمهام
   const aRows = (await c.env.DB.prepare(
-    `SELECT a.id, a.type, a.display_number, a.text, a.council_id, co.type AS council_type, m.created_at AS meeting_created_at
+    `SELECT a.id, a.type, a.display_number, a.text, a.council_id, a.status, co.type AS council_type, m.created_at AS meeting_created_at
        FROM action_items a JOIN councils co ON co.id = a.council_id
        LEFT JOIN meetings m ON m.id = a.source_meeting_id
       WHERE a.text LIKE ? OR a.display_number LIKE ? ORDER BY a.id DESC LIMIT 30`,
@@ -105,7 +105,7 @@ app.get('/search', async (c) => {
   const actions = [];
   for (const a of aRows) {
     const sc = await scopeOf(a.council_id, a.council_type);
-    const ok = sc.level === 'full' || (sc.level === 'legacy' && withinServedArchive(a.meeting_created_at, sc.periods)) || assigned.has(a.id);
+    const ok = withinAccessWindow(a.meeting_created_at, sc.windows) || (sc.level === 'full' && isOpenAction(a.status)) || assigned.has(a.id);
     if (ok) {
       actions.push({ id: a.id, title: a.text, sub: a.display_number, link: `#/tasks/${a.id}` });
       if (actions.length >= 8) break;
@@ -155,7 +155,7 @@ app.get('/summary', async (c) => {
   for (const m of recent.results) {
     let sc = summaryScopes.get(m.council_id);
     if (!sc) { sc = await councilScope(c.env, u, { id: m.council_id, type: m.council_type, default_writer_id: null }); summaryScopes.set(m.council_id, sc); }
-    if (sc.level === 'full' || (sc.level === 'legacy' && withinServedArchive(m.created_at, sc.periods))) {
+    if (withinAccessWindow(m.created_at, sc.windows) || (sc.level === 'full' && isLiveMeeting(m.status))) {
       visible.push(m);
       if (visible.length >= 5) break;
     }

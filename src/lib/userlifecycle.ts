@@ -5,7 +5,7 @@
 // التشغيلية (العضوية، الكتابة، المهام المفتوحة). ولكل عملية تقرير أثر يُعرض قبل التنفيذ.
 import type { Env, User, Role, Stage } from '../types';
 import {
-  hasFullCouncilAccess, councilStage, withinServedArchive,
+  hasFullCouncilAccess, councilStage, withinAccessWindow, isLiveMeeting,
   type CouncilRow, type ServedPeriod, type RoleStage,
 } from '../permissions';
 import { audit } from './audit';
@@ -95,29 +95,30 @@ async function rolePeriods(env: Env, userId: number): Promise<{ role: string; st
   }));
 }
 
-/** عدد المحاضر المرئية لمالك دور/مرحلة معيّنين مع فترات تاريخية محددة. */
+/** عدد المحاضر المرئية بنوافذ اطلاع معيّنة (+ غير المعتمدة لصاحب الاطلاع الكامل). */
 function visibleCount(
-  meetings: { council_id: number; created_at: string }[],
+  meetings: { council_id: number; created_at: string; status: string }[],
   councilId: number,
   level: 'full' | 'legacy' | 'none',
-  periods: ServedPeriod[],
+  windows: ServedPeriod[],
 ): number {
-  const inCouncil = meetings.filter((m) => m.council_id === councilId);
-  if (level === 'full') return inCouncil.length;
   if (level === 'none') return 0;
-  return inCouncil.filter((m) => withinServedArchive(m.created_at, periods)).length;
+  return meetings.filter((m) => m.council_id === councilId
+    && (withinAccessWindow(m.created_at, windows) || (level === 'full' && isLiveMeeting(m.status)))).length;
 }
 
+// درجة الاطلاع ونوافذه لدور/مرحلة معيّنين — بنفس قاعدة councilScope تمامًا.
 function levelFor(
   who: RoleStage,
   council: CouncilRow,
   periods: { role: string; stage: string | null; from: string; to: string | null }[],
-): { level: 'full' | 'legacy' | 'none'; periods: ServedPeriod[] } {
-  if (hasFullCouncilAccess(who, council)) return { level: 'full', periods: [] };
-  const served = periods
+): { level: 'full' | 'legacy' | 'none'; windows: ServedPeriod[] } {
+  const full = hasFullCouncilAccess(who, council);
+  const windows = periods
     .filter((p) => hasFullCouncilAccess({ role: p.role, stage: p.stage }, council))
     .map((p) => ({ from: p.from, to: p.to }));
-  return served.length ? { level: 'legacy', periods: served } : { level: 'none', periods: [] };
+  if (full && !windows.some((w) => w.to == null)) windows.push({ from: '0000-01-01', to: null });
+  return { level: full ? 'full' : windows.length ? 'legacy' : 'none', windows };
 }
 
 // ============================================================
@@ -141,8 +142,8 @@ export async function computeImpact(
   const allCouncils = await councils(env);
   const periods = await rolePeriods(env, target.id);
   const allMeetings = (await env.DB.prepare(
-    "SELECT council_id, created_at FROM meetings WHERE status != 'cancelled'",
-  ).all<any>()).results as { council_id: number; created_at: string }[];
+    "SELECT council_id, created_at, status FROM meetings WHERE status != 'cancelled'",
+  ).all<any>()).results as { council_id: number; created_at: string; status: string }[];
 
   // العضوية والصفة
   const memberships = (await env.DB.prepare(
@@ -151,10 +152,12 @@ export async function computeImpact(
   ).bind(target.id).all<any>()).results;
   const memberOf = new Map<number, any>(memberships.map((m: any) => [m.council_id, m]));
 
-  // فترات ما بعد التغيير: تُقفل الفترة الجارية اليوم وتُفتح فترة جديدة
+  // فترات ما بعد التغيير: تُقفل الفترة الجارية الآن وتُفتح فترة جديدة تبدأ من الآن —
+  // فما يُنشأ في مجلسه الجديد بعد هذه اللحظة هو وحده ما يدخل نافذة اطلاعه الجديدة.
   const now = (await env.DB.prepare("SELECT datetime('now') AS d").first<{ d: string }>())!.d;
   const periodsAfter = next
-    ? periods.map((p) => (p.to == null ? { ...p, to: now } : p))
+    ? [...periods.map((p) => (p.to == null ? { ...p, to: now } : p)),
+       { role: next.role as string, stage: (next.stage ?? null) as string | null, from: now, to: null as string | null }]
     : periods;
 
   const councilImpacts: CouncilImpact[] = [];
@@ -165,7 +168,7 @@ export async function computeImpact(
     const before = levelFor(target, co, periods);
     // بعد الحذف/التعليق لا اطلاع إطلاقًا (لا دخول أصلًا)
     const after = action === 'delete' || action === 'purge' || action === 'suspend'
-      ? { level: 'none' as const, periods: [] as ServedPeriod[] }
+      ? { level: 'none' as const, windows: [] as ServedPeriod[] }
       : next
         ? levelFor(next, co, periodsAfter)
         : before;
@@ -180,8 +183,8 @@ export async function computeImpact(
       is_default_writer: co.default_writer_id === target.id,
       access_before: before.level, access_after: after.level,
       meetings_total: allMeetings.filter((m) => m.council_id === co.id).length,
-      visible_before: visibleCount(allMeetings, co.id, before.level, before.periods),
-      visible_after: visibleCount(allMeetings, co.id, after.level, after.periods),
+      visible_before: visibleCount(allMeetings, co.id, before.level, before.windows),
+      visible_after: visibleCount(allMeetings, co.id, after.level, after.windows),
     });
   }
 
@@ -303,12 +306,12 @@ export async function computeImpact(
     }
 
     for (const co of lostCouncils) effects.push(`إزالة العضوية من «${co.name}» وسحب الاطلاع الكامل عليه.`);
-    for (const co of gainedCouncils) effects.push(`إضافة العضوية في «${co.name}» ومنح الاطلاع الكامل عليه (بما فيه أرشيفه).`);
+    for (const co of gainedCouncils) effects.push(`إضافة العضوية في «${co.name}» ومنح الاطلاع الكامل عليه — يرى ما يُنشأ فيه من تاريخ انضمامه، ومحاضره غير المعتمدة وبنوده المفتوحة، لا أرشيفه السابق.`);
     if (defaultWriterOf.some((d) => lostCouncils.some((lc) => lc.id === d.id)))
       effects.push('إلغاء تعيينه كاتبًا افتراضيًا للمجالس التي فقد الاطلاع عليها.');
     if (editableAsWriter.length)
       effects.push(`تفريغ خانة الكاتب في ${editableAsWriter.length} محضرًا قيد التحرير في المجالس المفقودة (تُعاد الكتابة لمن يُعيَّن لاحقًا).`);
-    effects.push('إقفال فترة الدور الحالية وفتح فترة جديدة — فيبقى له اطلاع قراءة على أرشيف مرحلته السابقة كما هو لحظة الانتقال، ولا يرى ما يُنشأ فيها بعده.');
+    effects.push('إقفال فترة الدور الحالية وفتح فترة جديدة — فيبقى له اطلاع قراءة على ما رآه في مرحلته السابقة، ولا يرى ما يُنشأ فيها بعده.');
     effects.push('إنهاء جلساته المفتوحة ليُعاد تحميل صلاحياته من جديد.');
 
     if (openActions.length)

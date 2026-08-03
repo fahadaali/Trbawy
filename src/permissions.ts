@@ -25,8 +25,8 @@ export interface ServedPeriod {
   to: string | null;    // طابع زمني كامل، NULL = فترة جارية
 }
 export interface CouncilScope {
-  level: AccessLevel;
-  periods: ServedPeriod[];   // فترات الاطلاع التاريخي (تُملأ مع legacy فقط)
+  level: AccessLevel;        // للصلاحيات — من الدور والمرحلة الحاليّين
+  windows: ServedPeriod[];   // نوافذ الاطلاع على السجلات (تشمل الفترة الجارية)
 }
 
 export const isPresident = (u: RoleStage) => u.role === 'president';
@@ -57,40 +57,59 @@ export function hasFullCouncilAccess(u: RoleStage, council: CouncilRow): boolean
 const tsOf = (ts: string | null | undefined): string | null => (ts ? String(ts) : null);
 
 /**
- * درجة اطلاع المستخدم على مجلس، مع فترات الاطلاع التاريخي إن وُجدت.
- * الفترات تُقرأ من user_role_periods: كل فترة كان دورها/مرحلتها يمنح اطلاعًا كاملًا على هذا المجلس.
+ * نطاق اطلاع المستخدم على مجلس:
+ *   level   — من الدور والمرحلة الحاليّين، ويحكم صلاحيات الكتابة (تحرير/اعتماد/تعليق).
+ *   windows — نوافذ الاطلاع على السجلات، مأخوذة من كل فترة خدمة منحته اطلاعًا على هذا
+ *             المجلس (بما فيها الفترة الجارية). القاعدة الواحدة: **ترى السجل إن أُنشئ
+ *             أثناء فترة كنت تملك فيها الاطلاع** — فلا أرشيف يسبق انضمامك، ولا ينقطع
+ *             عنك ما كنت تراه بعد انتقالك.
  */
 export async function councilScope(env: Env, u: User, council: CouncilRow): Promise<CouncilScope> {
-  if (hasFullCouncilAccess(u, council)) return { level: 'full', periods: [] };
-  if (isAdmin(u)) return { level: 'none', periods: [] };
+  const full = hasFullCouncilAccess(u, council);
+  if (isAdmin(u)) return { level: 'none', windows: [] };
 
   const rows = await env.DB.prepare(
     'SELECT role, stage, from_at, to_at FROM user_role_periods WHERE user_id = ? ORDER BY id',
   ).bind(u.id).all<any>();
 
-  const periods: ServedPeriod[] = [];
+  const windows: ServedPeriod[] = [];
   for (const p of rows.results) {
     if (!hasFullCouncilAccess({ role: p.role, stage: p.stage }, council)) continue;
     const from = tsOf(p.from_at);
     if (!from) continue;
-    periods.push({ from, to: tsOf(p.to_at) });
+    windows.push({ from, to: tsOf(p.to_at) });
   }
-  return periods.length ? { level: 'legacy', periods } : { level: 'none', periods: [] };
+
+  // شبكة أمان: لو منحه دوره الحالي اطلاعًا ولا فترة جارية مسجَّلة (انحراف بيانات)،
+  // نفتح نافذة غير محدودة بدل أن يُحرم من مجلسه.
+  if (full && !windows.some((w) => w.to == null)) windows.push({ from: '0000-01-01', to: null });
+
+  return { level: full ? 'full' : windows.length ? 'legacy' : 'none', windows };
 }
 
 /**
- * الاطلاع التاريخي = الأرشيف كما كان لحظة انتقاله، لا نافذة زمنية ضيّقة.
- * الميزان هو **وقت إنشاء السجل** (created_at) لا تاريخ انعقاد الاجتماع: فكل ما كان
- * موجودًا في المنصة أثناء خدمته يبقى مرئيًا له (لأنه كان يراه فعلًا)، وكل ما أُنشئ
- * بعد انتقاله محجوب عنه ولو كان مؤرَّخًا بتاريخ سابق. ومن شارك في محضر يراه دائمًا
- * بقاعدة السجل الشخصي مهما كان تاريخه.
- * المقارنة نصّية على صيغة 'YYYY-MM-DD HH:MM:SS' وهي مرتّبة معجميًا بنفس ترتيبها الزمني.
+ * هل أُنشئ السجل داخل إحدى نوافذ اطلاع المستخدم؟
+ * الميزان **وقت إنشاء السجل** (created_at) لا تاريخ انعقاد الاجتماع: العبرة بما كان
+ * موجودًا في المنصة أثناء خدمته. والمقارنة نصّية على صيغة 'YYYY-MM-DD HH:MM:SS'
+ * وهي مرتّبة معجميًا بنفس ترتيبها الزمني.
  */
-export function withinServedArchive(createdAt: string | null | undefined, periods: ServedPeriod[]): boolean {
+// النوافذ نصف مفتوحة [from, to): الحدّ الأدنى داخل والأعلى خارج، فلا تتداخل فترتان
+// ولا يقع سجل في فترتين. وسجل أُنشئ في لحظة الانتقال نفسها ينتمي للفترة الجديدة لا القديمة
+// (دقة datetime في SQLite ثانية واحدة، فالتداخل وارد بلا هذا الضبط).
+export function withinAccessWindow(createdAt: string | null | undefined, windows: ServedPeriod[]): boolean {
   const t = tsOf(createdAt);
   if (!t) return false;
-  return periods.some((p) => p.to == null || t <= p.to);
+  return windows.some((w) => t >= w.from && (w.to == null || t < w.to));
 }
+
+/**
+ * العمل الجاري ليس أرشيفًا: المحضر غير المعتمد والبند المفتوح في مجلس يملك المستخدم
+ * اطلاعًا كاملًا عليه الآن يبقى مرئيًا له ولو أُنشئ قبل انضمامه — وإلا تعذّر على من
+ * تولّى مرحلة أن يعتمد محاضرها المعلّقة أو يتابع بنودها المفتوحة.
+ */
+const LIVE_MEETING = ['invitation', 'draft', 'awaiting_signatures'];
+export const isLiveMeeting = (status?: string | null) => !!status && LIVE_MEETING.includes(status);
+export const isOpenAction = (status?: string | null) => !!status && !['done', 'cancelled'].includes(status);
 
 // ---- الاطلاع على المجلس (وجوده في القوائم) ----
 // يشمل الاطلاع التاريخي للقراءة — والتقييد الفعلي يكون على مستوى المحضر/البند.
@@ -107,21 +126,21 @@ export async function isMeetingAttendee(env: Env, meetingId: number, userId: num
 }
 
 /**
- * الاطلاع على محضر بعينه — القاعدة الدقيقة:
- *   1) اطلاع كامل على المجلس → نعم.
- *   2) اطلاع تاريخي والمحضر أُنشئ قبل انتقاله → نعم (قراءة فقط).
+ * الاطلاع على محضر بعينه — القاعدة الدقيقة بالترتيب:
+ *   1) أُنشئ داخل إحدى نوافذ اطلاعه → نعم.
+ *   2) محضر غير معتمد في مجلس يملك اطلاعًا كاملًا عليه الآن → نعم (عمل جارٍ لا أرشيف).
  *   3) مسجَّل في الحضور → نعم دائمًا (لا يُحجب عن أحد ما شارك فيه أو وقّعه).
  */
 export async function canViewMeeting(
   env: Env,
   u: User,
-  meeting: { id: number; created_at?: string | null },
+  meeting: { id: number; created_at?: string | null; status?: string | null },
   council: CouncilRow,
   scope?: CouncilScope,
 ): Promise<boolean> {
   const s = scope ?? (await councilScope(env, u, council));
-  if (s.level === 'full') return true;
-  if (s.level === 'legacy' && withinServedArchive(meeting.created_at, s.periods)) return true;
+  if (withinAccessWindow(meeting.created_at, s.windows)) return true;
+  if (s.level === 'full' && isLiveMeeting(meeting.status)) return true;
   return await isMeetingAttendee(env, meeting.id, u.id);
 }
 

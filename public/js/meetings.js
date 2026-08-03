@@ -309,7 +309,7 @@ async function meetingDetail(id) {
       </div>
       <div class="card-body">
         ${d.read_only ? `<div class="tag tag-gold" style="display:block;padding:10px">اطلاع ${d.access_level === 'legacy' ? 'تاريخي' : 'شخصي'} — قراءة فقط. ${d.access_level === 'legacy'
-          ? 'هذا المحضر ضمن أرشيف مرحلتك السابقة حتى تاريخ انتقالك، فتراه ولا تحرّره.'
+          ? 'هذا المحضر أُنشئ أثناء خدمتك السابقة في هذه المرحلة، فتراه ولا تحرّره.'
           : 'تراه لأنك مسجَّل في حضوره.'}</div>` : ''}
         ${m.status === 'cancelled' ? `<div class="form-error">هذا المحضر <b>ملغى</b>. السبب: ${esc(m.cancel_reason || '')}</div>` : ''}
         ${m.status === 'approved' ? `<div class="tag tag-green" style="display:block;padding:10px">${icon('check', 15)} محضر معتمد ومقفل — أي تصحيح يكون عبر محضر تصويب/ملحق.</div>` : ''}

@@ -33,7 +33,7 @@ app.get('/print/meeting/:id', async (c) => {
   if (!s) return c.redirect('/');
   if (s.user.must_change_password) return c.redirect('/');
   const id = Number(c.req.param('id'));
-  const m = await c.env.DB.prepare('SELECT id, council_id, created_at FROM meetings WHERE id = ?').bind(id).first<any>();
+  const m = await c.env.DB.prepare('SELECT id, council_id, created_at, status FROM meetings WHERE id = ?').bind(id).first<any>();
   if (!m) return c.text('المحضر غير موجود', 404);
   const council = await getCouncil(c.env, m.council_id);
   if (!(await canViewMeeting(c.env, s.user, m, council!))) return c.text('لا تملك صلاحية', 403);

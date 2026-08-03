@@ -638,7 +638,7 @@ async function roleHistoryModal(user) {
     </tr>`).join('');
   openModal({
     title: `سجل الأدوار — ${user.name}`,
-    body: `<p class="muted">يرى المستخدم أرشيف كل مرحلة خدمها كما كان يوم انتقاله عنها — قراءة فقط، ولا يرى ما استُجدّ بعده.</p>
+    body: `<p class="muted">القاعدة: يرى السجل إن أُنشئ أثناء فترة كان يملك فيها الاطلاع — فلا أرشيف يسبق انضمامه، ولا ينقطع عنه ما رآه بعد انتقاله.</p>
       <table class="tbl"><thead><tr><th>الدور</th><th>المرحلة</th><th>من</th><th>إلى</th><th>ملاحظة</th></tr></thead>
       <tbody>${rows}</tbody></table>`,
     buttons: [{ label: 'إغلاق', onClick: (cl) => cl() }],
