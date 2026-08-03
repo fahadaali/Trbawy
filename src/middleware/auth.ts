@@ -15,7 +15,7 @@ export async function loadSession(c: Ctx): Promise<{ user: User; sessionId: stri
   const row = await c.env.DB.prepare(
     `SELECT s.id AS sid, s.last_active,
             u.id, u.name, u.email, u.role, u.stage, u.signature_image,
-            u.must_change_password, u.is_active
+            u.must_change_password, u.is_active, u.deleted_at
        FROM sessions s JOIN users u ON u.id = s.user_id
       WHERE s.id = ?`,
   )
@@ -23,7 +23,11 @@ export async function loadSession(c: Ctx): Promise<{ user: User; sessionId: stri
     .first<any>();
 
   if (!row) return null;
-  if (!row.is_active) return null;
+  // المعلَّق والمحذوف: الجلسة تسقط فورًا ولا تُجدَّد
+  if (!row.is_active || row.deleted_at) {
+    await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sid).run();
+    return null;
+  }
 
   // خمول ٨ ساعات
   const last = new Date((row.last_active as string).replace(' ', 'T') + 'Z').getTime();
@@ -46,6 +50,7 @@ export async function loadSession(c: Ctx): Promise<{ user: User; sessionId: stri
     signature_image: row.signature_image,
     must_change_password: row.must_change_password,
     is_active: row.is_active,
+    deleted_at: row.deleted_at ?? null,
   };
   return { user, sessionId: row.sid };
 }

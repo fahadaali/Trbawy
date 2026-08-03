@@ -85,7 +85,7 @@ export async function restoreBackup(env: Env, key: string): Promise<RestoreRepor
   // إعادة الجلسات لمن بقي حسابه قائماً ونشطاً
   if (keptSessions.length) {
     const alive = new Set(
-      (await env.DB.prepare('SELECT id FROM users WHERE is_active = 1').all<{ id: number }>())
+      (await env.DB.prepare('SELECT id FROM users WHERE is_active = 1 AND deleted_at IS NULL').all<{ id: number }>())
         .results.map((r) => r.id),
     );
     const stmts = keptSessions

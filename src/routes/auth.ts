@@ -18,7 +18,8 @@ app.post('/login', async (c) => {
   if (!email || !password) return c.json({ error: 'البريد وكلمة المرور مطلوبان' }, 400);
 
   const user = await c.env.DB.prepare(
-    'SELECT id, name, email, password_hash, role, stage, must_change_password, is_active FROM users WHERE email = ?',
+    `SELECT id, name, email, password_hash, role, stage, must_change_password, is_active, deleted_at
+       FROM users WHERE email = ? AND deleted_at IS NULL`,
   )
     .bind(String(email).trim().toLowerCase())
     .first<any>();

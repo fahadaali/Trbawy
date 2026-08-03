@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { canViewCouncil, canEditDraft, isPresident } from '../permissions';
+import { councilScope, withinServedArchive, canEditDraft, isPresident, type CouncilRow } from '../permissions';
 import { getCouncil, nextActionNumber, formatActionNumber } from '../lib/meetings';
 import { notify, notifyMany } from '../lib/notify';
 
@@ -33,6 +33,19 @@ async function isAssignee(env: Env, actionId: number, userId: number): Promise<b
   const r = await env.DB.prepare('SELECT 1 FROM action_assignees WHERE action_item_id = ? AND user_id = ?')
     .bind(actionId, userId).first();
   return !!r;
+}
+
+// الاطلاع على بند: اطلاع كامل على مجلسه، أو اطلاع تاريخي ومحضره ضمن أرشيف فترة خدمته،
+// أو كونه مسؤولًا عنه (فالمسؤول يرى بنده دائمًا ولو انتقل عن المرحلة).
+async function canViewAction(env: Env, u: any, action: { id: number; council_id: number; source_meeting_id: number }, council: CouncilRow): Promise<boolean> {
+  const scope = await councilScope(env, u, council);
+  if (scope.level === 'full') return true;
+  if (scope.level === 'legacy') {
+    const m = await env.DB.prepare('SELECT created_at FROM meetings WHERE id = ?')
+      .bind(action.source_meeting_id).first<any>();
+    if (withinServedArchive(m?.created_at, scope.periods)) return true;
+  }
+  return await isAssignee(env, action.id, u.id);
 }
 
 // ---- إنشاء قرار/توصية/مهمة ضمن محضر ----
@@ -97,7 +110,8 @@ app.get('/', async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT DISTINCT a.id, a.type, a.council_id, a.display_number, a.text, a.priority, a.due_date,
             a.status, a.progress, a.completed_at, a.source_meeting_id,
-            co.name AS council_name, co.type AS council_type, m.display_number AS meeting_number
+            co.name AS council_name, co.type AS council_type,
+            m.display_number AS meeting_number, m.created_at AS meeting_created_at
        FROM action_items a
        JOIN councils co ON co.id = a.council_id
        LEFT JOIN meetings m ON m.id = a.source_meeting_id
@@ -105,11 +119,24 @@ app.get('/', async (c) => {
       ORDER BY a.status='done', a.due_date IS NULL, a.due_date, a.id DESC LIMIT 400`,
   ).bind(...binds).all<any>();
 
-  // تصفية حسب صلاحية الاطلاع على المجلس (ما لم تكن "مهامي")
+  // تصفية دقيقة: اطلاع كامل، أو أرشيف فترة الخدمة السابقة، أو كونه مسؤولًا عن البند
+  const assigned = new Set<number>(
+    (await c.env.DB.prepare('SELECT action_item_id FROM action_assignees WHERE user_id = ?')
+      .bind(u.id).all<{ action_item_id: number }>()).results.map((r) => r.action_item_id),
+  );
+  const scopes = new Map<number, Awaited<ReturnType<typeof councilScope>>>();
   const out = [];
   for (const a of rows.results) {
-    if (mine || (await canViewCouncil(c.env, u, { id: a.council_id, type: a.council_type, default_writer_id: null } as any)))
-      out.push(a);
+    if (mine) { out.push(a); continue; }
+    let scope = scopes.get(a.council_id);
+    if (!scope) {
+      scope = await councilScope(c.env, u, { id: a.council_id, type: a.council_type, default_writer_id: null });
+      scopes.set(a.council_id, scope);
+    }
+    const visible = scope.level === 'full'
+      || (scope.level === 'legacy' && withinServedArchive(a.meeting_created_at, scope.periods))
+      || assigned.has(a.id);
+    if (visible) out.push({ ...a, read_only: scope.level !== 'full' });
   }
   return c.json({ actions: out });
 });
@@ -120,7 +147,7 @@ app.get('/:id', async (c) => {
   const a = await loadAction(c.env, id);
   if (!a) return c.json({ error: 'البند غير موجود' }, 404);
   const council = await getCouncil(c.env, a.council_id);
-  if (!(await canViewCouncil(c.env, c.get('user'), council!)) && !(await isAssignee(c.env, id, c.get('user').id)))
+  if (!(await canViewAction(c.env, c.get('user'), a, council!)))
     return c.json({ error: 'لا تملك صلاحية الاطلاع' }, 403);
 
   const assignees = await assigneesOf(c.env, id);
@@ -249,7 +276,7 @@ app.get('/:id/delegate-candidates', async (c) => {
   if (!a) return c.json({ error: 'البند غير موجود' }, 404);
   const rows = await c.env.DB.prepare(
     `SELECT cm.user_id, u.name, u.role FROM council_members cm JOIN users u ON u.id = cm.user_id
-      WHERE cm.council_id = ? AND u.is_active = 1 ORDER BY u.name`,
+      WHERE cm.council_id = ? AND u.is_active = 1 AND u.deleted_at IS NULL ORDER BY u.name`,
   ).bind(a.council_id).all();
   return c.json({ candidates: rows.results });
 });
@@ -314,7 +341,7 @@ app.get('/:id/attachments/:attId', async (c) => {
   const a = await loadAction(c.env, id);
   if (!a) return c.json({ error: 'البند غير موجود' }, 404);
   const council = await getCouncil(c.env, a.council_id);
-  if (!(await canViewCouncil(c.env, c.get('user'), council!)) && !(await isAssignee(c.env, id, c.get('user').id)))
+  if (!(await canViewAction(c.env, c.get('user'), a, council!)))
     return c.json({ error: 'لا تملك صلاحية' }, 403);
   const row = await c.env.DB.prepare('SELECT r2_key, file_name FROM action_attachments WHERE id = ? AND action_item_id = ?')
     .bind(attId, id).first<any>();

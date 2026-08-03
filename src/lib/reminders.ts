@@ -11,8 +11,12 @@ async function alreadySentToday(env: Env, userId: number, type: string, link: st
   return !!r;
 }
 
+// المسؤولون القادرون على التصرّف — المعلَّق والمحذوف لا تصلهما تذكيرات لا يستطيعان تنفيذها
 async function assigneesOf(env: Env, actionId: number): Promise<number[]> {
-  const r = await env.DB.prepare('SELECT user_id FROM action_assignees WHERE action_item_id = ?').bind(actionId).all<{ user_id: number }>();
+  const r = await env.DB.prepare(
+    `SELECT aa.user_id FROM action_assignees aa JOIN users u ON u.id = aa.user_id
+      WHERE aa.action_item_id = ? AND u.is_active = 1 AND u.deleted_at IS NULL`,
+  ).bind(actionId).all<{ user_id: number }>();
   return r.results.map((x) => x.user_id);
 }
 
@@ -44,14 +48,22 @@ async function taskReminders(env: Env): Promise<void> {
       if (await alreadySentToday(env, uid, type, link)) continue;
       await notify(env, { userId: uid, type, title, body: `${t.display_number} — ${t.text}`, link });
     }
+
+    const chair = await env.DB.prepare(
+      `SELECT cm.user_id FROM council_members cm JOIN users u ON u.id = cm.user_id
+        WHERE cm.council_id = ? AND cm.position = 'chair' AND u.is_active = 1 AND u.deleted_at IS NULL`,
+    ).bind(t.council_id).first<{ user_id: number }>();
+
+    // بند بلا مسؤول فعّال (عُلِّق مسؤوله أو حُذف) — يُنبَّه رئيس المجلس ليُعيد الإسناد
+    if (!assignees.length && chair && !(await alreadySentToday(env, chair.user_id, 'task_unassigned', link))) {
+      await notify(env, {
+        userId: chair.user_id, type: 'task_unassigned', title: 'مهمة بلا مسؤول فعّال',
+        body: `${t.display_number} — ${t.text} (مسؤولها معلَّق أو محذوف — أعِد إسنادها)`, link,
+      });
+    }
     // عند التأخر: إشعار رئيس المجلس أيضاً
-    if (type === 'task_overdue') {
-      const chair = await env.DB.prepare(
-        "SELECT user_id FROM council_members WHERE council_id = ? AND position = 'chair'",
-      ).bind(t.council_id).first<{ user_id: number }>();
-      if (chair && !(await alreadySentToday(env, chair.user_id, 'task_overdue_chair', link))) {
-        await notify(env, { userId: chair.user_id, type: 'task_overdue_chair', title: 'تنبيه: مهمة متأخرة في مجلسك', body: `${t.display_number} — ${t.text}`, link });
-      }
+    if (type === 'task_overdue' && chair && !(await alreadySentToday(env, chair.user_id, 'task_overdue_chair', link))) {
+      await notify(env, { userId: chair.user_id, type: 'task_overdue_chair', title: 'تنبيه: مهمة متأخرة في مجلسك', body: `${t.display_number} — ${t.text}`, link });
     }
   }
 }

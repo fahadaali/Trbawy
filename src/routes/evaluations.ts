@@ -231,7 +231,7 @@ app.post('/cycles/:id/status', async (c) => {
   // إشعار من يقيّم فعلًا في هذه الدورة فقط (لا كل المستخدمين)
   if (ns === 'open') {
     const candidates = await c.env.DB.prepare(
-      "SELECT id, role, stage FROM users WHERE is_active = 1 AND role IN ('president','vice_president','first_supervisor','team_member')",
+      "SELECT id, role, stage FROM users WHERE is_active = 1 AND deleted_at IS NULL AND role IN ('president','vice_president','first_supervisor','team_member')",
     ).all<any>();
     const targeted: number[] = [];
     for (const usr of candidates.results) {
@@ -249,7 +249,7 @@ app.post('/cycles/:id/status', async (c) => {
   // إشعار أصحاب الصلاحية عند نشر النتائج
   if (ns === 'published') {
     const viewers = await c.env.DB.prepare(
-      "SELECT id, role FROM users WHERE is_active = 1",
+      "SELECT id, role FROM users WHERE is_active = 1 AND deleted_at IS NULL",
     ).all<{ id: number; role: string }>();
     const eligible = viewers.results.filter((v) => types.some((tt) => canViewResults({ role: v.role } as any, tt)));
     await notifyMany(c.env, eligible.map((v) => v.id), {

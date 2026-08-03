@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { loadSession } from '../middleware/auth';
 import { getCouncil } from '../lib/meetings';
-import { canViewCouncil } from '../permissions';
+import { canViewMeeting, hasFullCouncilAccess } from '../permissions';
 import { renderMeetingHtml, renderVerifyHtml, renderBundleHtml, renderStudentReportHtml } from '../lib/print';
 import { buildStudentTimeline } from './students';
 import { serveAsset } from './settings';
@@ -33,10 +33,10 @@ app.get('/print/meeting/:id', async (c) => {
   if (!s) return c.redirect('/');
   if (s.user.must_change_password) return c.redirect('/');
   const id = Number(c.req.param('id'));
-  const m = await c.env.DB.prepare('SELECT council_id FROM meetings WHERE id = ?').bind(id).first<any>();
+  const m = await c.env.DB.prepare('SELECT id, council_id, created_at FROM meetings WHERE id = ?').bind(id).first<any>();
   if (!m) return c.text('المحضر غير موجود', 404);
   const council = await getCouncil(c.env, m.council_id);
-  if (!(await canViewCouncil(c.env, s.user, council!))) return c.text('لا تملك صلاحية', 403);
+  if (!(await canViewMeeting(c.env, s.user, m, council!))) return c.text('لا تملك صلاحية', 403);
   const origin = new URL(c.req.url).origin;
   const html = await renderMeetingHtml(c.env, id, origin);
   if (!html) return c.text('تعذّر التوليد', 500);
@@ -68,7 +68,7 @@ app.get('/ics/meeting/:id', async (c) => {
   const m = await c.env.DB.prepare('SELECT * FROM meetings WHERE id = ?').bind(id).first<any>();
   if (!m) return c.text('المحضر غير موجود', 404);
   const council = await getCouncil(c.env, m.council_id);
-  if (!(await canViewCouncil(c.env, s.user, council!))) return c.text('لا تملك صلاحية', 403);
+  if (!(await canViewMeeting(c.env, s.user, m, council!))) return c.text('لا تملك صلاحية', 403);
 
   // تحويل التاريخ/الوقت إلى صيغة ICS (بلا منطقة زمنية — وقت محلي عائم)
   const d = String(m.greg_date || '').replace(/-/g, '');
@@ -108,7 +108,8 @@ app.get('/print/bundle', async (c) => {
   const to = c.req.query('to') || '9999-12-31';
   const council = await getCouncil(c.env, councilId);
   if (!council) return c.text('المجلس غير موجود', 404);
-  if (!(await canViewCouncil(c.env, s.user, council))) return c.text('لا تملك صلاحية', 403);
+  // تصدير حزمة كاملة لمجلس: للاطلاع الكامل الحالي فقط — الاطلاع التاريخي لا يُصدَّر جملةً
+  if (!hasFullCouncilAccess(s.user, council)) return c.text('لا تملك صلاحية', 403);
   const origin = new URL(c.req.url).origin;
   return c.html(await renderBundleHtml(c.env, councilId, from, to, origin));
 });

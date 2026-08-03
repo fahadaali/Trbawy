@@ -17,7 +17,7 @@ export async function evaluatorProgress(
 ): Promise<EvaluatorProgress[]> {
   const types = cycle.target_types.split(',');
   const users = (await env.DB.prepare(
-    'SELECT id, name, role, stage FROM users WHERE is_active = 1',
+    'SELECT id, name, role, stage FROM users WHERE is_active = 1 AND deleted_at IS NULL',
   ).all<any>()).results;
 
   const rows: EvaluatorProgress[] = [];

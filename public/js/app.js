@@ -418,32 +418,55 @@ VIEWS.dashboard = async () => {
 // VIEWS.evaluations → evaluations.js | VIEWS.students → students.js
 
 // ---- المستخدمون ----
+// كل عملية تغيّر وضع المستخدم تمرّ بتقرير أثر يُعرض قبل التنفيذ: ماذا سيحدث،
+// ما الموانع، وما الذي يبقى محفوظًا. لا تنفيذ صامت.
+const ACCESS_AR = { full: 'اطلاع كامل', legacy: 'اطلاع تاريخي — قراءة فقط', none: 'لا اطلاع' };
+const ACCESS_TAG = { full: 'tag-green', legacy: 'tag-gold', none: 'tag-gray' };
+const ACTION_AR = {
+  suspend: 'تعليق الحساب', reactivate: 'رفع التعليق', delete: 'حذف المستخدم',
+  purge: 'حذف نهائي', restore: 'استعادة المستخدم', role_change: 'تغيير الدور أو المرحلة',
+};
+let USERS_SHOW_DELETED = false;
+
 VIEWS.users = async () => {
   setTitle('المستخدمون والصلاحيات');
   content().innerHTML = '<div class="spinner"></div>';
   let data;
-  try { data = await API.get('/users'); }
+  try { data = await API.get('/users' + (USERS_SHOW_DELETED ? '?include_deleted=1' : '')); }
   catch (err) { return renderError(err); }
 
-  const rows = data.users.map((u) => `
-    <tr>
-      <td><b>${esc(u.name)}</b></td>
-      <td dir="ltr" style="text-align:right">${esc(u.email)}</td>
-      <td>${esc(ROLE_AR[u.role] || u.role)}</td>
-      <td>${u.stage ? esc(STAGE_AR[u.stage]) : '—'}</td>
-      <td>${u.is_active ? '<span class="tag tag-green">نشط</span>' : '<span class="tag tag-gray">معطّل</span>'}
-          ${u.must_change_password ? '<span class="tag tag-gold">لم يغيّر كلمته</span>' : ''}</td>
-      <td class="row">
-        <button class="btn-ghost btn-sm" data-edit="${u.id}">تعديل</button>
-        <button class="btn-ghost btn-sm" data-reset="${u.id}">إعادة تعيين</button>
-      </td>
-    </tr>`).join('');
+  const rows = data.users.map((u) => {
+    const state = u.deleted_at
+      ? '<span class="tag tag-gray">محذوف</span>'
+      : (u.is_active ? '<span class="tag tag-green">نشط</span>' : '<span class="tag tag-gold">معلَّق</span>')
+        + (u.must_change_password ? ' <span class="tag tag-gold">لم يغيّر كلمته</span>' : '');
+    const acts = u.deleted_at
+      ? `<button class="btn-ghost btn-sm" data-restore="${u.id}">استعادة</button>
+         <button class="btn-ghost btn-sm" data-purge="${u.id}">حذف نهائي</button>`
+      : `<button class="btn-ghost btn-sm" data-edit="${u.id}">تعديل</button>
+         <button class="btn-ghost btn-sm" data-reset="${u.id}">إعادة تعيين</button>
+         <button class="btn-ghost btn-sm" data-toggle="${u.id}">${u.is_active ? 'تعليق' : 'تفعيل'}</button>
+         <button class="btn-ghost btn-sm" data-history="${u.id}">سجل الأدوار</button>
+         <button class="btn-ghost btn-sm" data-del="${u.id}">حذف</button>`;
+    return `
+      <tr${u.deleted_at ? ' style="opacity:.6"' : ''}>
+        <td><b>${esc(u.name)}</b></td>
+        <td dir="ltr" style="text-align:right">${esc(u.email)}</td>
+        <td>${esc(ROLE_AR[u.role] || u.role)}</td>
+        <td>${u.stage ? esc(STAGE_AR[u.stage]) : '—'}</td>
+        <td>${state}${u.suspended_reason && !u.deleted_at ? `<div class="muted" style="font-size:12px">${esc(u.suspended_reason)}</div>` : ''}</td>
+        <td class="row">${acts}</td>
+      </tr>`;
+  }).join('');
 
   content().innerHTML = `
     <div class="card">
       <div class="card-head">
         <h3>المستخدمون (${arNum(data.users.length)})</h3>
         <div class="spacer"></div>
+        <label class="muted" style="font-size:13px;display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="showDeleted" ${USERS_SHOW_DELETED ? 'checked' : ''} /> إظهار المحذوفين
+        </label>
         <button class="btn btn-sm" id="addUser">+ مستخدم جديد</button>
       </div>
       <table class="tbl">
@@ -452,12 +475,175 @@ VIEWS.users = async () => {
       </table>
     </div>`;
 
+  const find = (id) => data.users.find((x) => x.id == id);
+  document.getElementById('showDeleted').onchange = (e) => { USERS_SHOW_DELETED = e.target.checked; VIEWS.users(); };
   document.getElementById('addUser').onclick = () => userForm(null);
-  content().querySelectorAll('[data-edit]').forEach((b) =>
-    b.onclick = () => userForm(data.users.find((x) => x.id == b.dataset.edit)));
-  content().querySelectorAll('[data-reset]').forEach((b) =>
-    b.onclick = () => resetUserPassword(b.dataset.reset));
+  content().querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => userForm(find(b.dataset.edit)));
+  content().querySelectorAll('[data-reset]').forEach((b) => b.onclick = () => resetUserPassword(b.dataset.reset));
+  content().querySelectorAll('[data-history]').forEach((b) => b.onclick = () => roleHistoryModal(find(b.dataset.history)));
+  content().querySelectorAll('[data-toggle]').forEach((b) => {
+    const u = find(b.dataset.toggle);
+    b.onclick = () => userAction(u, u.is_active ? 'suspend' : 'reactivate');
+  });
+  content().querySelectorAll('[data-del]').forEach((b) => b.onclick = () => userAction(find(b.dataset.del), 'delete'));
+  content().querySelectorAll('[data-restore]').forEach((b) => b.onclick = () => userAction(find(b.dataset.restore), 'restore'));
+  content().querySelectorAll('[data-purge]').forEach((b) => b.onclick = () => userAction(find(b.dataset.purge), 'purge'));
 };
+
+// ---- تقرير الأثر ----
+function impactHtml(im) {
+  const li = (arr, cls) => arr.map((n) => `<li class="${cls}">${esc(n.message || n)}</li>`).join('');
+
+  const councilRows = im.councils.map((c) => `
+    <tr>
+      <td>${esc(c.name)}</td>
+      <td><span class="tag ${ACCESS_TAG[c.access_before]}">${ACCESS_AR[c.access_before]}</span></td>
+      <td><span class="tag ${ACCESS_TAG[c.access_after]}">${ACCESS_AR[c.access_after]}</span></td>
+      <td>${arNum(c.visible_before)} ← ${arNum(c.visible_after)} من ${arNum(c.meetings_total)}</td>
+      <td>${c.is_member ? (c.position === 'chair' ? 'رئيس المجلس' : 'عضو') : '—'}${c.is_default_writer ? ' · كاتب افتراضي' : ''}</td>
+    </tr>`).join('');
+
+  const r = im.records;
+  const kept = [
+    ['محاضر أنشأها', r.meetings_created], ['محاضر كتبها', r.meetings_written],
+    ['محاضر اعتمدها', r.meetings_approved], ['محاضر حضرها', r.meetings_attended],
+    ['تواقيع', r.signatures], ['بنود أنجزها', r.actions_completed],
+    ['تقييمات أعطاها', r.evaluations_given], ['تقييمات تلقّاها', r.evaluations_received],
+    ['قيود تدقيق', r.audit_entries],
+  ].filter(([, n]) => n > 0);
+
+  return `
+    ${im.next ? `<p class="muted">من <b>${esc(ROLE_AR[im.user.role] || im.user.role)}${im.user.stage ? ' — ' + esc(STAGE_AR[im.user.stage]) : ''}</b>
+       إلى <b>${esc(ROLE_AR[im.next.role] || im.next.role)}${im.next.stage ? ' — ' + esc(STAGE_AR[im.next.stage]) : ''}</b></p>` : ''}
+
+    ${im.blockers.length ? `<div class="form-error"><b>موانع يجب معالجتها:</b><ul>${li(im.blockers, '')}</ul></div>` : ''}
+    ${im.warnings.length ? `<div class="card" style="border-color:var(--gold,#b8860b);padding:10px;margin:8px 0">
+        <b>تنبيهات:</b><ul>${li(im.warnings, '')}</ul></div>` : ''}
+
+    <h4 style="margin:12px 0 6px">ما سيحدث</h4>
+    <ul>${im.effects.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>
+
+    <h4 style="margin:12px 0 6px">أثر الاطلاع على المجالس</h4>
+    <table class="tbl"><thead><tr>
+      <th>المجلس</th><th>قبل</th><th>بعد</th><th>محاضر مرئية</th><th>الصفة</th>
+    </tr></thead><tbody>${councilRows}</tbody></table>
+
+    ${kept.length ? `<h4 style="margin:12px 0 6px">سجلات تبقى محفوظة باسمه</h4>
+      <p class="muted">${kept.map(([l, n]) => `${l}: ${arNum(n)}`).join(' · ')}</p>` : ''}
+
+    ${im.open_actions.length ? `<h4 style="margin:12px 0 6px">بنود مفتوحة مسندة إليه (${arNum(im.open_actions.length)})</h4>
+      <ul>${im.open_actions.slice(0, 8).map((a) => `<li>${esc(a.display_number)} — ${esc(a.text)}${a.sole ? ' <span class="tag tag-gold">لا مسؤول غيره</span>' : ''}</li>`).join('')}</ul>` : ''}
+
+    ${im.pending_signatures.length ? `<h4 style="margin:12px 0 6px">محاضر بانتظار توقيعه</h4>
+      <ul>${im.pending_signatures.map((m) => `<li>${esc(m.display_number)} — ${esc(m.council_name)}</li>`).join('')}</ul>` : ''}`;
+}
+
+async function transferOptions(userId) {
+  try {
+    const d = await API.get(`/users/${userId}/transfer-candidates`);
+    return d.candidates.map((c) => `<option value="${c.id}">${esc(c.name)} — ${esc(ROLE_AR[c.role] || c.role)}${c.stage ? ' (' + esc(STAGE_AR[c.stage]) + ')' : ''}</option>`).join('');
+  } catch { return ''; }
+}
+
+// يعرض الأثر ثم ينفّذ العملية بعد التأكيد. params لتغيير الدور: {role, stage, name}
+async function userAction(user, action, params = {}, preloaded) {
+  let im = preloaded;
+  if (!im) {
+    const qs = new URLSearchParams({ action });
+    ['role', 'stage', 'transfer_to'].forEach((k) => { if (params[k]) qs.set(k, params[k]); });
+    try { im = (await API.get(`/users/${user.id}/impact?${qs.toString()}`)).impact; }
+    catch (err) { return toast(err.message, 'err'); }
+  }
+
+  const needsTransfer = ['delete', 'suspend', 'role_change'].includes(action)
+    && (im.open_actions.length > 0 || im.chair_of.length > 0);
+  const opts = needsTransfer ? await transferOptions(user.id) : '';
+
+  const { close } = openModal({
+    title: `${ACTION_AR[action]} — ${user.name}`,
+    body: `
+      <div id="uaErr"></div>
+      ${impactHtml(im)}
+      ${needsTransfer ? `<div class="field mt"><label>نقل المهام المفتوحة والرئاسة إلى</label>
+        <select id="ua_transfer"><option value="">— بلا نقل —</option>${opts}</select></div>` : ''}
+      ${action === 'suspend' ? '<div class="field"><label>سبب التعليق (يُسجَّل في التدقيق)</label><input id="ua_reason" /></div>' : ''}
+      ${im.blockers.length ? `<label class="row" style="gap:6px;margin-top:10px">
+        <input type="checkbox" id="ua_force" /> <span>أتحمّل مسؤولية التنفيذ رغم الموانع أعلاه (يُسجَّل في التدقيق)</span></label>` : ''}`,
+    buttons: [
+      { label: 'تنفيذ', class: action === 'purge' || action === 'delete' ? 'btn-danger' : '', onClick: async (cl, ov) => {
+        const transferTo = ov.querySelector('#ua_transfer')?.value || null;
+        const force = !!ov.querySelector('#ua_force')?.checked;
+        const reason = ov.querySelector('#ua_reason')?.value || null;
+        try {
+          let res;
+          if (action === 'role_change') {
+            res = await API.patch('/users/' + user.id, {
+              name: params.name ?? user.name, role: params.role, stage: params.stage,
+              transfer_to: transferTo ? Number(transferTo) : null, force,
+            });
+          } else if (action === 'suspend') {
+            res = await API.patch('/users/' + user.id, {
+              is_active: false, suspend_reason: reason,
+              transfer_to: transferTo ? Number(transferTo) : null, force,
+            });
+          } else if (action === 'reactivate') {
+            res = await API.patch('/users/' + user.id, { is_active: true });
+          } else if (action === 'restore') {
+            res = await API.post(`/users/${user.id}/restore`);
+          } else {
+            const q = new URLSearchParams();
+            if (action === 'purge') q.set('purge', '1');
+            if (transferTo) q.set('transfer_to', transferTo);
+            if (force) q.set('force', '1');
+            res = await API.del(`/users/${user.id}?${q.toString()}`);
+          }
+          cl();
+          effectsModal(ACTION_AR[action], res.effects || []);
+          VIEWS.users();
+        } catch (err) {
+          // 409 مع تقرير أثر محدَّث: أعِد فتح النافذة عليه
+          if (err.code === 'BLOCKED' && err.data && err.data.impact) {
+            cl();
+            return userAction(user, action, params, err.data.impact);
+          }
+          ov.querySelector('#uaErr').innerHTML = `<div class="form-error">${esc(err.message)}</div>`;
+        }
+      }},
+      { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
+    ],
+  });
+  return close;
+}
+
+function effectsModal(title, effects) {
+  if (!effects.length) return toast('تم التنفيذ', 'ok');
+  openModal({
+    title: `تم: ${title}`,
+    body: `<ul>${effects.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>`,
+    buttons: [{ label: 'حسناً', onClick: (cl) => cl() }],
+  });
+}
+
+async function roleHistoryModal(user) {
+  let d;
+  try { d = await API.get(`/users/${user.id}/role-history`); }
+  catch (err) { return toast(err.message, 'err'); }
+  const rows = d.periods.map((p) => `
+    <tr>
+      <td>${esc(ROLE_AR[p.role] || p.role)}</td>
+      <td>${p.stage ? esc(STAGE_AR[p.stage]) : '—'}</td>
+      <td>${esc(String(p.from_at).slice(0, 10))}</td>
+      <td>${p.to_at ? esc(String(p.to_at).slice(0, 10)) : '<span class="tag tag-green">جارية</span>'}</td>
+      <td>${esc(p.note || '—')}</td>
+    </tr>`).join('');
+  openModal({
+    title: `سجل الأدوار — ${user.name}`,
+    body: `<p class="muted">يرى المستخدم أرشيف كل مرحلة خدمها كما كان يوم انتقاله عنها — قراءة فقط، ولا يرى ما استُجدّ بعده.</p>
+      <table class="tbl"><thead><tr><th>الدور</th><th>المرحلة</th><th>من</th><th>إلى</th><th>ملاحظة</th></tr></thead>
+      <tbody>${rows}</tbody></table>`,
+    buttons: [{ label: 'إغلاق', onClick: (cl) => cl() }],
+  });
+}
 
 function userForm(existing) {
   const isEdit = !!existing;
@@ -477,26 +663,29 @@ function userForm(existing) {
           <option value="middle" ${existing && existing.stage === 'middle' ? 'selected' : ''}>المتوسطة</option>
         </select></div>
     </div>
-    ${isEdit ? `<div class="field"><label>الحالة</label><select id="uf_active">
-        <option value="1" ${existing.is_active ? 'selected' : ''}>نشط</option>
-        <option value="0" ${!existing.is_active ? 'selected' : ''}>معطّل</option></select></div>` : ''}
-    ${!isEdit ? '<p class="hint">سيُنشأ الحساب بكلمة المرور الافتراضية <b>1234</b> مع إلزام التغيير عند أول دخول.</p>' : ''}`;
+    ${isEdit ? '<p class="hint">تغيير الدور أو المرحلة يعرض تقرير أثر قبل التنفيذ. التعليق والحذف من أزرار الصف.</p>'
+             : '<p class="hint">سيُنشأ الحساب بكلمة المرور الافتراضية <b>1234</b> مع إلزام التغيير عند أول دخول.</p>'}`;
 
-  const { close } = openModal({
+  openModal({
     title: isEdit ? 'تعديل مستخدم' : 'مستخدم جديد',
     body,
     buttons: [
       { label: 'حفظ', onClick: async (cl, overlay) => {
-        const payload = {
-          name: overlay.querySelector('#uf_name').value.trim(),
-          role: overlay.querySelector('#uf_role').value,
-          stage: overlay.querySelector('#uf_stage').value || null,
-        };
-        if (isEdit) payload.is_active = overlay.querySelector('#uf_active').value === '1';
-        else payload.email = overlay.querySelector('#uf_email').value.trim();
+        const name = overlay.querySelector('#uf_name').value.trim();
+        const role = overlay.querySelector('#uf_role').value;
+        const stage = overlay.querySelector('#uf_stage').value || null;
         try {
-          if (isEdit) await API.patch('/users/' + existing.id, payload);
-          else await API.post('/users', payload);
+          if (!isEdit) {
+            await API.post('/users', { name, role, stage, email: overlay.querySelector('#uf_email').value.trim() });
+            cl(); toast('تم الحفظ', 'ok'); VIEWS.users();
+            return;
+          }
+          // تغيير الدور أو المرحلة يمرّ بتقرير الأثر
+          if (role !== existing.role || (stage || null) !== (existing.stage || null)) {
+            cl();
+            return userAction(existing, 'role_change', { role, stage, name });
+          }
+          await API.patch('/users/' + existing.id, { name });
           cl(); toast('تم الحفظ', 'ok'); VIEWS.users();
         } catch (err) {
           overlay.querySelector('#ufErr').innerHTML = `<div class="form-error">${esc(err.message)}</div>`;

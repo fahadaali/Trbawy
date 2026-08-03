@@ -4,7 +4,9 @@ import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import {
-  canViewCouncil, canCreateMeeting, canApproveMeeting, canEditDraft, canCancelMeeting, canAssignWriter, isPresident,
+  canViewMeeting, councilScope, withinServedArchive, hasFullCouncilAccess, canCreateMeeting, canApproveMeeting,
+  canEditDraft, canCancelMeeting, canAssignWriter, isPresident,
+  type CouncilScope,
 } from '../permissions';
 import { getCouncil, nextMeetingNumber, formatDisplayNumber, currentAcademicYear } from '../lib/meetings';
 import { hijriYear } from '../lib/hijri';
@@ -138,17 +140,30 @@ app.get('/', async (c) => {
   const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
 
   const rows = await c.env.DB.prepare(
-    `SELECT m.id, m.council_id, m.display_number, m.title, m.hijri_date, m.greg_date,
+    `SELECT m.id, m.council_id, m.display_number, m.title, m.hijri_date, m.greg_date, m.created_at,
             m.status, m.hijri_year, m.academic_year, co.name AS council_name, co.type AS council_type
        FROM meetings m JOIN councils co ON co.id = m.council_id
        ${whereSql} ORDER BY m.id DESC LIMIT 300`,
   ).bind(...binds).all<any>();
 
-  // تصفية حسب صلاحية الاطلاع
+  // تصفية دقيقة: اطلاع كامل، أو أرشيف فترة الخدمة السابقة، أو حضور شخصي مسجَّل.
+  const attended = new Set<number>(
+    (await c.env.DB.prepare(
+      'SELECT meeting_id FROM meeting_attendees WHERE user_id = ? AND is_guest = 0',
+    ).bind(u.id).all<{ meeting_id: number }>()).results.map((r) => r.meeting_id),
+  );
+  const scopes = new Map<number, CouncilScope>();
   const out = [];
   for (const m of rows.results) {
-    const council = { id: m.council_id, type: m.council_type, default_writer_id: null };
-    if (await canViewCouncil(c.env, u, council as any)) out.push(m);
+    let scope = scopes.get(m.council_id);
+    if (!scope) {
+      scope = await councilScope(c.env, u, { id: m.council_id, type: m.council_type, default_writer_id: null });
+      scopes.set(m.council_id, scope);
+    }
+    const visible = scope.level === 'full'
+      || (scope.level === 'legacy' && withinServedArchive(m.created_at, scope.periods))
+      || attended.has(m.id);
+    if (visible) out.push({ ...m, read_only: scope.level !== 'full' });
   }
   return c.json({ meetings: out });
 });
@@ -175,7 +190,8 @@ app.get('/:id', async (c) => {
   if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
   const council = await getCouncil(c.env, m.council_id);
   if (!council) return c.json({ error: 'المجلس غير موجود' }, 404);
-  if (!(await canViewCouncil(c.env, c.get('user'), council)))
+  const scope = await councilScope(c.env, c.get('user'), council);
+  if (!(await canViewMeeting(c.env, c.get('user'), m, council, scope)))
     return c.json({ error: 'لا تملك صلاحية الاطلاع على هذا المحضر' }, 403);
 
   const attendees = await c.env.DB.prepare(
@@ -227,7 +243,7 @@ app.get('/:id', async (c) => {
   // أعضاء المجلس غير المُدرجين في الحضور (أُضيفوا للمجلس بعد إنشاء المحضر)
   const missingMembers = (await c.env.DB.prepare(
     `SELECT cm.user_id, u.name FROM council_members cm JOIN users u ON u.id = cm.user_id
-      WHERE cm.council_id = ? AND u.is_active = 1
+      WHERE cm.council_id = ? AND u.is_active = 1 AND u.deleted_at IS NULL
         AND cm.user_id NOT IN (SELECT COALESCE(user_id, -1) FROM meeting_attendees WHERE meeting_id = ?)`,
   ).bind(m.council_id, id).all()).results;
 
@@ -235,6 +251,9 @@ app.get('/:id', async (c) => {
     meeting: m, council, attendees: attendees.results, agenda: agenda.results,
     actions: actions.results, followups, perms, parent, amendments,
     missing_members: missingMembers,
+    // اطلاع تاريخي أو شخصي: قراءة فقط، ويُبيَّن سببه في الواجهة
+    read_only: scope.level !== 'full',
+    access_level: scope.level,
   });
 });
 
@@ -276,9 +295,12 @@ app.post('/', async (c) => {
 
   const meetingId = res.meta.last_row_id as number;
 
-  // الحضور: أعضاء المجلس (الحالة الافتراضية حاضر) + أي حالات مرسلة
-  const members = await c.env.DB.prepare('SELECT user_id FROM council_members WHERE council_id = ?')
-    .bind(council.id).all<{ user_id: number }>();
+  // الحضور: أعضاء المجلس النشطون (الحالة الافتراضية حاضر) + أي حالات مرسلة.
+  // المعلَّق والمحذوف لا يُدرَجان — وإلا بقي المحضر بانتظار توقيع من لا يستطيع الدخول.
+  const members = await c.env.DB.prepare(
+    `SELECT cm.user_id FROM council_members cm JOIN users u ON u.id = cm.user_id
+      WHERE cm.council_id = ? AND u.is_active = 1 AND u.deleted_at IS NULL`,
+  ).bind(council.id).all<{ user_id: number }>();
   const statusMap: Record<string, string> = {};
   (b.attendees || []).forEach((a: any) => { statusMap[a.user_id] = a.attendance_status; });
   const attStmts = members.results.map((m) =>
@@ -681,10 +703,10 @@ app.post('/:id/duplicate', async (c) => {
 // ---- مرفقات المحضر ----
 app.get('/:id/attachments', async (c) => {
   const id = Number(c.req.param('id'));
-  const m = await c.env.DB.prepare('SELECT council_id FROM meetings WHERE id = ?').bind(id).first<any>();
+  const m = await c.env.DB.prepare('SELECT id, council_id, created_at FROM meetings WHERE id = ?').bind(id).first<any>();
   if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
   const council = await getCouncil(c.env, m.council_id);
-  if (!(await canViewCouncil(c.env, c.get('user'), council!))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!(await canViewMeeting(c.env, c.get('user'), m, council!))) return c.json({ error: 'لا تملك صلاحية' }, 403);
   const rows = await c.env.DB.prepare(
     `SELECT a.id, a.file_name, a.uploaded_at, u.name AS uploaded_by_name FROM meeting_attachments a
        LEFT JOIN users u ON u.id = a.uploaded_by WHERE a.meeting_id = ? ORDER BY a.id`,
@@ -712,10 +734,10 @@ app.put('/:id/attachments', async (c) => {
 
 app.get('/:id/attachments/:attId', async (c) => {
   const id = Number(c.req.param('id'));
-  const m = await c.env.DB.prepare('SELECT council_id FROM meetings WHERE id = ?').bind(id).first<any>();
+  const m = await c.env.DB.prepare('SELECT id, council_id, created_at FROM meetings WHERE id = ?').bind(id).first<any>();
   if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
   const council = await getCouncil(c.env, m.council_id);
-  if (!(await canViewCouncil(c.env, c.get('user'), council!))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!(await canViewMeeting(c.env, c.get('user'), m, council!))) return c.json({ error: 'لا تملك صلاحية' }, 403);
   const row = await c.env.DB.prepare('SELECT r2_key, file_name FROM meeting_attachments WHERE id = ? AND meeting_id = ?')
     .bind(Number(c.req.param('attId')), id).first<any>();
   if (!row) return c.json({ error: 'المرفق غير موجود' }, 404);
@@ -743,10 +765,10 @@ app.delete('/:id/attachments/:attId', async (c) => {
 // ---- تعليقات المسودة (مناقشة قبل الاعتماد) ----
 app.get('/:id/comments', async (c) => {
   const id = Number(c.req.param('id'));
-  const m = await c.env.DB.prepare('SELECT council_id FROM meetings WHERE id = ?').bind(id).first<any>();
+  const m = await c.env.DB.prepare('SELECT id, council_id, created_at FROM meetings WHERE id = ?').bind(id).first<any>();
   if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
   const council = await getCouncil(c.env, m.council_id);
-  if (!(await canViewCouncil(c.env, c.get('user'), council!))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!(await canViewMeeting(c.env, c.get('user'), m, council!))) return c.json({ error: 'لا تملك صلاحية' }, 403);
   const rows = await c.env.DB.prepare(
     `SELECT cm.id, cm.body, cm.created_at, cm.user_id, u.name AS user_name FROM meeting_comments cm
        JOIN users u ON u.id = cm.user_id WHERE cm.meeting_id = ? ORDER BY cm.id`,
@@ -760,7 +782,8 @@ app.post('/:id/comments', async (c) => {
   if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
   const council = await getCouncil(c.env, m.council_id);
   const u = c.get('user');
-  if (!(await canViewCouncil(c.env, u, council!))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  // الكتابة (التعليق) تتطلب اطلاعًا كاملًا حاليًا — الاطلاع التاريخي للقراءة فقط
+  if (!hasFullCouncilAccess(u, council!)) return c.json({ error: 'لا تملك صلاحية' }, 403);
   if (['approved', 'archived', 'cancelled'].includes(m.status))
     return c.json({ error: 'المحضر مقفل — لا تُقبل تعليقات جديدة' }, 409);
   const { body } = await c.req.json().catch(() => ({}));

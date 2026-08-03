@@ -30,7 +30,8 @@ export interface User {
   stage: Stage;
   signature_image: string | null;
   must_change_password: number;
-  is_active: number;
+  is_active: number;          // 0 = معلَّق
+  deleted_at?: string | null; // محذوف أرشيفيًا — لا دخول ولا ظهور في القوائم
 }
 
 // سياق الطلب بعد المصادقة

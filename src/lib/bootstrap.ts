@@ -163,4 +163,12 @@ async function seed(env: Env): Promise<void> {
     `INSERT OR IGNORE INTO settings (id, org_name, header_text, footer_text)
      VALUES (1, 'الإدارة التربوية', 'منصة المجلس التربوي', 'وثيقة رسمية — منصة المجلس التربوي')`,
   ).run();
+
+  // 7) فتح فترة الدور الجارية لكل مستخدم (أساس الاطلاع التاريخي عند تغيّر الدور/المرحلة)
+  await env.DB.prepare(
+    `INSERT INTO user_role_periods (user_id, role, stage, from_at, note)
+     SELECT u.id, u.role, u.stage, u.created_at, 'إنشاء الحساب'
+       FROM users u
+      WHERE NOT EXISTS (SELECT 1 FROM user_role_periods p WHERE p.user_id = u.id)`,
+  ).run();
 }

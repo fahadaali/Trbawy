@@ -26,7 +26,7 @@ export async function notify(env: Env, opts: NotifyOpts): Promise<void> {
   // 2) البريد — فقط عند ربط Resend، ولكل الإشعارات، وبتجاوز آمن لأي إخفاق
   if (!env.RESEND_API_KEY) return;
   try {
-    const u = await env.DB.prepare('SELECT email FROM users WHERE id = ? AND is_active = 1')
+    const u = await env.DB.prepare('SELECT email FROM users WHERE id = ? AND is_active = 1 AND deleted_at IS NULL')
       .bind(opts.userId)
       .first<{ email: string }>();
     if (u?.email) {

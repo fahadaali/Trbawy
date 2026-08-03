@@ -2,7 +2,8 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { canViewResults, canViewCouncil, canEvaluate, isPresident, isVice } from '../permissions';
+import { canViewResults, councilScope, withinServedArchive, canEvaluate, isPresident, isVice } from '../permissions';
+import type { CouncilScope } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
 import { evaluationTargets } from '../lib/evaltargets';
 
@@ -64,15 +65,27 @@ app.get('/search', async (c) => {
 
   // المحاضر (مع تصفية صلاحية الاطلاع)
   const mRows = (await c.env.DB.prepare(
-    `SELECT m.id, m.display_number, m.title, m.status, m.council_id, co.type AS council_type, co.name AS council_name
+    `SELECT m.id, m.display_number, m.title, m.status, m.council_id, m.created_at, co.type AS council_type, co.name AS council_name
        FROM meetings m JOIN councils co ON co.id = m.council_id
       WHERE m.display_number LIKE ? OR m.title LIKE ?
          OR EXISTS (SELECT 1 FROM agenda_items ai WHERE ai.meeting_id = m.id AND (ai.title LIKE ? OR ai.body LIKE ?))
       ORDER BY m.id DESC LIMIT 30`,
   ).bind(like, like, like, like).all<any>()).results;
+  const scopes = new Map<number, CouncilScope>();
+  const scopeOf = async (councilId: number, type: string) => {
+    let s = scopes.get(councilId);
+    if (!s) { s = await councilScope(c.env, u, { id: councilId, type: type as any, default_writer_id: null }); scopes.set(councilId, s); }
+    return s;
+  };
+  const attended = new Set<number>(
+    (await c.env.DB.prepare('SELECT meeting_id FROM meeting_attendees WHERE user_id = ? AND is_guest = 0')
+      .bind(u.id).all<{ meeting_id: number }>()).results.map((r) => r.meeting_id),
+  );
   const meetings = [];
   for (const m of mRows) {
-    if (await canViewCouncil(c.env, u, { id: m.council_id, type: m.council_type, default_writer_id: null } as any)) {
+    const sc = await scopeOf(m.council_id, m.council_type);
+    const ok = sc.level === 'full' || (sc.level === 'legacy' && withinServedArchive(m.created_at, sc.periods)) || attended.has(m.id);
+    if (ok) {
       meetings.push({ id: m.id, title: m.display_number, sub: m.title || m.council_name, link: `#/meetings/${m.id}` });
       if (meetings.length >= 8) break;
     }
@@ -80,13 +93,20 @@ app.get('/search', async (c) => {
 
   // القرارات والمهام
   const aRows = (await c.env.DB.prepare(
-    `SELECT a.id, a.type, a.display_number, a.text, a.council_id, co.type AS council_type
+    `SELECT a.id, a.type, a.display_number, a.text, a.council_id, co.type AS council_type, m.created_at AS meeting_created_at
        FROM action_items a JOIN councils co ON co.id = a.council_id
+       LEFT JOIN meetings m ON m.id = a.source_meeting_id
       WHERE a.text LIKE ? OR a.display_number LIKE ? ORDER BY a.id DESC LIMIT 30`,
   ).bind(like, like).all<any>()).results;
+  const assigned = new Set<number>(
+    (await c.env.DB.prepare('SELECT action_item_id FROM action_assignees WHERE user_id = ?')
+      .bind(u.id).all<{ action_item_id: number }>()).results.map((r) => r.action_item_id),
+  );
   const actions = [];
   for (const a of aRows) {
-    if (await canViewCouncil(c.env, u, { id: a.council_id, type: a.council_type, default_writer_id: null } as any)) {
+    const sc = await scopeOf(a.council_id, a.council_type);
+    const ok = sc.level === 'full' || (sc.level === 'legacy' && withinServedArchive(a.meeting_created_at, sc.periods)) || assigned.has(a.id);
+    if (ok) {
       actions.push({ id: a.id, title: a.text, sub: a.display_number, link: `#/tasks/${a.id}` });
       if (actions.length >= 8) break;
     }
@@ -127,12 +147,15 @@ app.get('/summary', async (c) => {
 
   // آخر المحاضر التي أراها
   const recent = await c.env.DB.prepare(
-    `SELECT m.id, m.display_number, m.title, m.status, m.council_id, co.type AS council_type
+    `SELECT m.id, m.display_number, m.title, m.status, m.council_id, m.created_at, co.type AS council_type
        FROM meetings m JOIN councils co ON co.id = m.council_id ORDER BY m.id DESC LIMIT 20`,
   ).all<any>();
+  const summaryScopes = new Map<number, CouncilScope>();
   const visible = [];
   for (const m of recent.results) {
-    if (await canViewCouncil(c.env, u, { id: m.council_id, type: m.council_type, default_writer_id: null } as any)) {
+    let sc = summaryScopes.get(m.council_id);
+    if (!sc) { sc = await councilScope(c.env, u, { id: m.council_id, type: m.council_type, default_writer_id: null }); summaryScopes.set(m.council_id, sc); }
+    if (sc.level === 'full' || (sc.level === 'legacy' && withinServedArchive(m.created_at, sc.periods))) {
       visible.push(m);
       if (visible.length >= 5) break;
     }
@@ -230,8 +253,8 @@ async function boardTargets(env: Env, targetType: string, stage: string | null):
   if (targetType === 'students')
     return (await env.DB.prepare(`SELECT id, name FROM students WHERE status='active' ${stage ? 'AND stage = ?' : ''}`).bind(...(stage ? [stage] : [])).all<any>()).results;
   if (targetType === 'team_members')
-    return (await env.DB.prepare(`SELECT id, name FROM users WHERE role='team_member' AND is_active=1 ${stage ? 'AND stage = ?' : ''}`).bind(...(stage ? [stage] : [])).all<any>()).results;
-  return (await env.DB.prepare("SELECT id, name FROM users WHERE role='first_supervisor' AND is_active=1").all<any>()).results;
+    return (await env.DB.prepare(`SELECT id, name FROM users WHERE role='team_member' AND is_active=1 AND deleted_at IS NULL ${stage ? 'AND stage = ?' : ''}`).bind(...(stage ? [stage] : [])).all<any>()).results;
+  return (await env.DB.prepare("SELECT id, name FROM users WHERE role='first_supervisor' AND is_active=1 AND deleted_at IS NULL").all<any>()).results;
 }
 
 // لوحة مؤشرات عامة لأي فئة تقييم

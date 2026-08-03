@@ -4,7 +4,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { canViewCouncil, canEditDraft, canViewResults } from '../permissions';
+import { canViewMeeting, canEditDraft, canViewResults } from '../permissions';
 import { getCouncil } from '../lib/meetings';
 import { resultTargets } from '../lib/evaltargets';
 import { sanitizeHtml } from '../lib/sanitize';
@@ -146,7 +146,7 @@ app.post('/meeting-summary', async (c) => {
   if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);
   const council = await getCouncil(c.env, m.council_id);
   if (!council) return c.json({ error: 'المجلس غير موجود' }, 404);
-  if (!(await canViewCouncil(c.env, c.get('user'), council)))
+  if (!(await canViewMeeting(c.env, c.get('user'), m, council)))
     return c.json({ error: 'لا تملك صلاحية الاطلاع على هذا المحضر' }, 403);
 
   const agenda = await c.env.DB.prepare(

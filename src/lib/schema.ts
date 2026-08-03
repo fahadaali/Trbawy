@@ -13,12 +13,29 @@ export const SCHEMA_STATEMENTS: string[] = [
   stage                TEXT    CHECK (stage IN ('secondary','middle')),
   signature_image      TEXT,                       -- مفتاح R2 لصورة التوقيع
   must_change_password INTEGER NOT NULL DEFAULT 1,  -- إلزام التغيير عند أول دخول
-  is_active            INTEGER NOT NULL DEFAULT 1,
+  is_active            INTEGER NOT NULL DEFAULT 1,  -- 0 = معلَّق (تعليق قابل للرجوع)
+  suspended_at         TEXT,                       -- وقت التعليق
+  suspended_reason     TEXT,                       -- سبب التعليق (يظهر في التدقيق)
+  deleted_at           TEXT,                       -- حذف أرشيفي: يختفي من المنصة ويبقى في السجلات
+  deleted_by           INTEGER REFERENCES users(id),
+  deleted_email        TEXT,                       -- البريد الأصلي (يُحرَّر عند الحذف لإعادة الاستخدام)
   created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at           TEXT    NOT NULL DEFAULT (datetime('now'))
 )`,
   `CREATE INDEX IF NOT EXISTS idx_users_role  ON users(role)`,
   `CREATE INDEX IF NOT EXISTS idx_users_stage ON users(stage)`,
+  `CREATE INDEX IF NOT EXISTS idx_users_deleted ON users(deleted_at)`,
+  `CREATE TABLE IF NOT EXISTS user_role_periods (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role       TEXT    NOT NULL,
+  stage      TEXT,
+  from_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  to_at      TEXT,                                 -- NULL = الفترة الجارية
+  changed_by INTEGER REFERENCES users(id),
+  note       TEXT
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_role_periods_user ON user_role_periods(user_id)`,
   `CREATE TABLE IF NOT EXISTS sessions (
   id           TEXT    PRIMARY KEY,        -- رمز الجلسة العشوائي
   user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
