@@ -1,11 +1,14 @@
 // النسخ الاحتياطي: تصدير كل جداول D1 إلى ملف JSON في R2 (يومياً + يدوي).
 import type { Env } from '../types';
 
+// الترتيب ترتيب إدراج: الجدول المُشار إليه قبل المُشير إليه (والحذف بعكسه).
+// أي جدول جديد يُضاف هنا وإلا خرج من النسخ الاحتياطي بلا إنذار.
 const TABLES = [
   'users', 'councils', 'council_members', 'fixed_agenda_templates', 'meetings',
   'meeting_attendees', 'agenda_items', 'action_items', 'action_assignees', 'action_attachments',
   'students', 'student_transfers', 'eval_cycles', 'eval_criteria', 'evaluations',
   'evaluation_scores', 'notifications', 'audit_log', 'settings',
+  'user_role_periods', 'meeting_comments', 'meeting_attachments',
 ];
 
 export async function createBackup(env: Env): Promise<string> {
