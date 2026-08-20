@@ -1,10 +1,5 @@
 // وحدة المهام (الواجهة) — لوحة «مهامي»، جميع البنود حسب الصلاحية، وتفاصيل البند.
 
-const ACTION_STATUS_COLOR = {
-  not_started: 'tag-gray', in_progress: 'tag-gold', done: 'tag-green', stalled: 'tag-red', cancelled: 'tag-gray',
-};
-const PRIORITY_COLOR = { high: 'tag-red', medium: 'tag-gold', low: 'tag-gray' };
-
 VIEWS.tasks = async (rest) => {
   if (rest && rest[0]) return taskDetail(rest[0]);
   return taskBoard();
@@ -12,16 +7,19 @@ VIEWS.tasks = async (rest) => {
 
 async function taskBoard() {
   setTitle('المهام');
-  const tab = (location.hash.split('?')[1] || '').includes('all') ? 'all' : 'mine';
+  const q = location.hash.split('?')[1] || '';
+  const tab = q.includes('perf') ? 'perf' : q.includes('all') ? 'all' : 'mine';
   content().innerHTML = `
     <div class="row" style="margin-bottom:16px">
       <button class="btn ${tab === 'mine' ? '' : 'btn-ghost'} btn-sm" id="tabMine">مهامي</button>
       <button class="btn ${tab === 'all' ? '' : 'btn-ghost'} btn-sm" id="tabAll">جميع البنود</button>
+      <button class="btn ${tab === 'perf' ? '' : 'btn-ghost'} btn-sm" id="tabPerf">الالتزام والأداء</button>
     </div>
     <div id="tBody"><div class="spinner"></div></div>`;
   document.getElementById('tabMine').onclick = () => { location.hash = '#/tasks'; taskBoard(); };
   document.getElementById('tabAll').onclick = () => { location.hash = '#/tasks?all'; taskBoard(); };
-  tab === 'mine' ? loadMine() : loadAll();
+  document.getElementById('tabPerf').onclick = () => { location.hash = '#/tasks?perf'; taskBoard(); };
+  tab === 'perf' ? loadPerformance() : tab === 'mine' ? loadMine() : loadAll();
 }
 
 async function loadMine() {
@@ -69,19 +67,79 @@ async function loadAll() {
 
 function taskTable(actions, allowComplete) {
   return `<table class="tbl">
-    <thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>الأولوية</th><th>الاستحقاق</th><th>الحالة</th><th>الإنجاز</th><th></th></tr></thead>
+    <thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الأولوية</th><th>الاستحقاق</th>
+      <th>الحالة</th><th>الإنجاز</th><th>الالتزام بالموعد</th><th></th></tr></thead>
     <tbody>${actions.map((a) => `<tr>
       <td>${esc(ACTION_TYPE_AR[a.type] || a.type)}</td>
       <td dir="ltr" style="text-align:right">${esc(a.display_number)}</td>
-      <td>${esc(a.text)}</td>
+      <td>${esc(a.text)}${Number(a.carried_count) > 1 ? ` <span class="tag tag-gold">رُحِّل ${arNum(a.carried_count)} مرات</span>` : ''}</td>
+      <td>${esc(a.assignees || '—')}</td>
       <td><span class="tag ${PRIORITY_COLOR[a.priority] || 'tag-gray'}">${esc(PRIORITY_AR[a.priority] || '')}</span></td>
       <td>${a.due_date ? esc(a.due_date) : '—'}</td>
       <td>${statusTag(a.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</td>
-      <td>${arNum(a.progress)}٪</td>
+      <td>${miniBar(a.progress)}</td>
+      <td>${delayTag(a)}</td>
       <td class="row">
         <button class="btn-ghost btn-sm" data-open="${a.id}">تفاصيل</button>
         ${allowComplete && a.status !== 'done' ? `<button class="btn btn-sm" data-done="${a.id}">${icon('check', 15)} إنجاز</button>` : ''}
       </td></tr>`).join('')}</tbody></table>`;
+}
+
+// ---- لوحة الالتزام: نسبة الإنجاز ودقة التوقيت والتأخير لكل مكلَّف ----
+async function loadPerformance() {
+  const box = document.getElementById('tBody');
+  let d;
+  try { d = await API.get('/actions/stats'); } catch (err) { return void (box.innerHTML = `<div class="empty">${esc(err.message)}</div>`); }
+  const o = d.overall;
+  const tone = (v) => (v >= 80 ? 'stat-ok' : v >= 50 ? 'stat-warn' : 'stat-bad');
+
+  const rows = d.board.map((r) => `<tr>
+    <td><b>${esc(r.name)}</b><div class="muted" style="font-size:12px">${esc(ROLE_AR[r.role] || r.role)}</div></td>
+    <td>${arNum(r.total)}</td>
+    <td>${arNum(r.done)}</td>
+    <td>${r.overdue ? `<span class="tag tag-red">${arNum(r.overdue)}</span>` : arNum(0)}</td>
+    <td>${r.stalled ? `<span class="tag tag-red">${arNum(r.stalled)}</span>` : arNum(0)}</td>
+    <td>${arNum(r.late)}</td>
+    <td>${r.delay_total ? `<span class="tag tag-red">${arNum(r.delay_total)}</span>` : arNum(0)}</td>
+    <td>${arNum(r.delay_avg)}</td>
+    <td>${miniBar(r.completion_rate)}</td>
+    <td>${miniBar(r.timeliness)}</td>
+    <td>${miniBar(r.commitment)}</td>
+  </tr>`).join('');
+
+  const stalledHtml = (d.stalled && d.stalled.length) ? `
+    <div class="card mt"><div class="card-head"><h3>أكثر البنود تعثّرًا</h3></div>
+      <table class="tbl"><thead><tr><th>الرقم</th><th>النص</th><th>المسؤول</th><th>المحضر</th>
+        <th>الاستحقاق</th><th>التأخر</th><th>مرات الترحيل</th><th>الإنجاز</th></tr></thead>
+      <tbody>${d.stalled.map((a) => `<tr>
+        <td dir="ltr" style="text-align:right">${esc(a.display_number)}</td>
+        <td>${esc(a.text)}</td><td>${esc(a.assignees || '—')}</td>
+        <td dir="ltr" style="text-align:right">${esc(a.meeting_number || '—')}</td>
+        <td>${a.due_date ? esc(a.due_date) : '—'}</td>
+        <td>${a.overdue_days ? `<span class="tag tag-red">${arCount(a.overdue_days, ['يومًا واحدًا', 'يومين', 'أيام', 'يومًا'])}</span>` : '<span class="muted">—</span>'}</td>
+        <td>${arNum(a.carried_count || 0)}</td>
+        <td>${miniBar(a.progress)}</td></tr>`).join('')}</tbody></table></div>` : '';
+
+  box.innerHTML = `
+    <div class="grid grid-4">
+      <div class="stat ${tone(o.completion_rate)}"><div class="v">${arNum(o.completion_rate)}٪</div><div class="l">نسبة الإنجاز</div>
+        <div class="s">${arNum(o.done)} من ${arNum(o.total)} بندًا</div></div>
+      <div class="stat ${tone(o.timeliness)}"><div class="v">${arNum(o.timeliness)}٪</div><div class="l">دقة التوقيت</div>
+        <div class="s">${arNum(o.on_time)} في الموعد · ${arNum(o.late)} متأخرة</div></div>
+      <div class="stat ${o.overdue ? 'stat-bad' : 'stat-ok'}"><div class="v">${arNum(o.overdue)}</div><div class="l">بنود متأخرة الآن</div>
+        <div class="s">${arNum(o.overdue_days_now)} يوم تأخّر تراكمي</div></div>
+      <div class="stat ${o.delay_total ? 'stat-bad' : 'stat-ok'}"><div class="v">${arNum(o.delay_total)}</div><div class="l">أيام التأخير المسجّلة</div>
+        <div class="s">أطول تأخير ${arNum(o.delay_max)} يومًا</div></div>
+    </div>
+    <div class="card mt"><div class="card-head"><h3>الالتزام حسب المكلَّف</h3>
+      <div class="spacer"></div><span class="legend-note">نسبة الالتزام = ٦٠٪ إنجاز + ٤٠٪ دقة توقيت</span></div>
+      ${d.board.length ? `<table class="tbl"><thead><tr><th>المكلَّف</th><th>المُسنَد</th><th>المنجَز</th>
+        <th>متأخرة الآن</th><th>متعثرة</th><th>أُنجزت متأخرة</th><th>مجموع أيام التأخير</th><th>متوسط التأخير</th>
+        <th>نسبة الإنجاز</th><th>دقة التوقيت</th><th>الالتزام</th></tr></thead><tbody>${rows}</tbody></table>`
+        : `<div class="empty"><div class="ico">${icon('tasks', 42)}</div><p>لا توجد بنود مُسندة بعد</p></div>`}
+    </div>
+    ${stalledHtml}
+    ${d.scope === 'self' ? '<p class="muted mt">تُعرض بياناتك وحدها — لوحة المجلس الكاملة لمن يملك اطلاعًا كاملًا عليه.</p>' : ''}`;
 }
 
 function wireTaskTable(scope) {

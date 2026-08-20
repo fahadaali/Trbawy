@@ -13,6 +13,7 @@ import { hijriYear } from '../lib/hijri';
 import { shortCode } from '../lib/crypto';
 import { notifyMany } from '../lib/notify';
 import { sanitizeHtml } from '../lib/sanitize';
+import { computeFollowups, getFollowups, freezeFollowups } from '../lib/followups';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -80,7 +81,7 @@ app.get('/meta/new', async (c) => {
     'SELECT title, body FROM fixed_agenda_templates WHERE council_id = ? AND is_active = 1 ORDER BY sort_order',
   ).bind(councilId).all();
 
-  const followups = await openFollowups(c.env, councilId, null);
+  const followups = await previewFollowups(c.env, councilId);
 
   const hy = hijriYear(new Date());
   const num = await nextMeetingNumber(c.env, councilId, hy);
@@ -94,22 +95,16 @@ app.get('/meta/new', async (c) => {
   });
 });
 
-// القرارات/المهام المفتوحة من محاضر سابقة (بنود المتابعة).
-// تظهر: كل ما لم يُنجَز بعد + ما أُنجِز ولم يُبلَّغ عنه في محضر معتمد سابق (يظهر مرة واحدة).
-async function openFollowups(env: Env, councilId: number, excludeMeetingId: number | null) {
-  const rows = await env.DB.prepare(
-    `SELECT a.id, a.type, a.display_number, a.text, a.status, a.priority, a.due_date,
-            a.progress, a.completed_at, a.source_meeting_id
-       FROM action_items a
-      WHERE a.council_id = ?
-        AND (a.source_meeting_id != ? OR ? IS NULL)
-        AND (
-          a.status IN ('not_started','in_progress','stalled')
-          OR (a.status = 'done' AND a.reported_done_meeting_id IS NULL)
-        )
-      ORDER BY a.status, a.id`,
-  ).bind(councilId, excludeMeetingId ?? -1, excludeMeetingId).all();
-  return rows.results;
+// بنود المتابعة المرشّحة لمحضر جديد لم يُنشأ بعد (معاينة الدعوة):
+// نُحاكيه كمحضر يُعقد اليوم بعد كل المحاضر القائمة.
+async function previewFollowups(env: Env, councilId: number) {
+  const today = (await env.DB.prepare("SELECT date('now') AS d").first<{ d: string }>())!.d;
+  const last = await env.DB.prepare(
+    'SELECT MAX(greg_date) AS d FROM meetings WHERE council_id = ?',
+  ).bind(councilId).first<{ d: string | null }>();
+  const date = last?.d && last.d > today ? last.d : today;
+  // معرّف وهمي أكبر من أي محضر قائم: المحضر المرتقب يأتي بعد كل محاضر اليوم نفسه
+  return await computeFollowups(env, { id: Number.MAX_SAFE_INTEGER, council_id: councilId, greg_date: date });
 }
 
 // ---- قائمة المحاضر (حسب الصلاحية والفلاتر) ----
@@ -213,8 +208,9 @@ app.get('/:id', async (c) => {
        FROM action_items a WHERE a.source_meeting_id = ? ORDER BY a.id`,
   ).bind(id).all();
 
-  // بنود المتابعة (مفتوحة من محاضر سابقة) — تظهر عند التحرير
-  const followups = EDITABLE.includes(m.status) ? await openFollowups(c.env, m.council_id, id) : [];
+  // جدول المتابعة: يُحسب حيًّا للمحضر المفتوح، ويُقرأ من اللقطة المجمّدة للمحضر المعتمد
+  // (فالمحضر المقفل وثيقة ثابتة لا تتبدّل بتغيّر حالة البنود بعد اعتماده).
+  const followups = await getFollowups(c.env, m);
 
   const u = c.get('user');
   const myAtt = attendees.results.find((a: any) => a.user_id === u.id && !a.is_guest);
@@ -575,13 +571,9 @@ app.post('/:id/status', async (c) => {
     await c.env.DB.prepare(
       "UPDATE meetings SET status = ?, approved_at = datetime('now'), approved_by = ?, verify_code = ?, updated_at = datetime('now') WHERE id = ?",
     ).bind(newStatus, u.id, verifyCode, id).run();
-    // تأشير المهام المنجزة التي ظهرت في جدول متابعة هذا المحضر كـ«مُبلَّغ عنها»
-    // حتى تختفي من متابعة المحاضر اللاحقة (تظهر مرة واحدة كمنجزة).
-    await c.env.DB.prepare(
-      `UPDATE action_items SET reported_done_meeting_id = ?
-        WHERE council_id = ? AND status = 'done'
-          AND reported_done_meeting_id IS NULL AND source_meeting_id != ?`,
-    ).bind(id, m.council_id, id).run();
+    // تجميد جدول المتابعة: تُحفظ حالة كل بند مُرحَّل كما هي لحظة الاعتماد، ويُؤشَّر
+    // المنجَز بأنه وُثِّق (فلا يظهر في محضر لاحق) ويرتفع عدّاد الترحيل لغير المنجَز.
+    await freezeFollowups(c.env, m);
   } else {
     await c.env.DB.prepare("UPDATE meetings SET status = ?, updated_at = datetime('now') WHERE id = ?")
       .bind(newStatus, id).run();

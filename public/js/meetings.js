@@ -251,12 +251,25 @@ async function meetingDetail(id) {
     ${(d.amendments && d.amendments.length) ? `<div>محاضر التصويب/الملحق: ${d.amendments.map((a) => `<a href="#/meetings/${a.id}" dir="ltr">${esc(a.display_number)}</a>`).join('، ')}</div>` : ''}
   </div></div>` : '';
 
+  // جدول المتابعة: بنود المحاضر السابقة المرحَّلة إلى هذا المحضر — يظهر أيضًا في المحضر
+  // المعتمد من لقطته المجمّدة، فهو جزء من الوثيقة لا شاشة تحرير فقط.
+  const locked = ['approved', 'archived'].includes(m.status);
   const followupHtml = d.followups && d.followups.length ? `
-    <div class="card mt"><div class="card-head"><h3>جدول المتابعة (بنود سابقة مفتوحة)</h3></div>
-      <table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>الحالة</th><th>الإنجاز</th><th>تاريخ الإنجاز</th>${p.can_edit ? '<th></th>' : ''}</tr></thead>
-      <tbody>${d.followups.map((f) => `<tr><td>${esc(ACTION_TYPE_AR[f.type] || f.type)}</td><td dir="ltr" style="text-align:right">${esc(f.display_number)}</td>
-        <td>${esc(f.text)}</td><td>${statusTag(f.status, ACTION_STATUS_AR)}</td><td>${arNum(f.progress)}٪</td>
-        <td>${f.completed_at ? fmtDateTime(f.completed_at) : '—'}</td>
+    <div class="card mt"><div class="card-head"><h3>جدول المتابعة (بنود المحاضر السابقة)</h3>
+      <div class="spacer"></div>
+      <span class="legend-note">${locked ? 'لقطة مجمّدة وقت الاعتماد' : 'البند غير المنجَز يُرحَّل حتى يُنجَز، ثم يظهر مرة أخيرة للتوثيق'}</span></div>
+      <table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الاستحقاق</th>
+        <th>الحالة</th><th>الإنجاز</th><th>الالتزام بالموعد</th><th>الترحيل</th>${p.can_edit ? '<th></th>' : ''}</tr></thead>
+      <tbody>${d.followups.map((f) => `<tr>
+        <td>${esc(ACTION_TYPE_AR[f.type] || f.type)}</td>
+        <td dir="ltr" style="text-align:right">${esc(f.display_number)}</td>
+        <td>${esc(f.text)}${f.source_meeting_number ? `<div class="muted" style="font-size:12px" dir="ltr">${esc(f.source_meeting_number)}</div>` : ''}</td>
+        <td>${esc(f.assignees || '—')}</td>
+        <td>${f.due_date ? esc(f.due_date) : '—'}</td>
+        <td>${statusTag(f.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</td>
+        <td>${miniBar(f.progress)}</td>
+        <td>${delayTag(f)}</td>
+        <td>${f.is_final ? '<span class="tag tag-green">توثيق أخير</span>' : `<span class="tag tag-gold">ترحيل ${arNum(f.carried_index || 1)}</span>`}</td>
         ${p.can_edit ? `<td>${f.status === 'done' ? `<button class="btn-ghost btn-sm" data-fixdate="${f.id}">تعديل التاريخ</button>` : ''}</td>` : ''}</tr>`).join('')}</tbody></table></div>` : '';
 
   const actionsHtml = (d.actions && d.actions.length) || p.can_edit ? `
@@ -849,9 +862,13 @@ function renderActionsSection(meetingId, d, canEdit) {
   const render = () => {
     const rows = d.actions || [];
     box.innerHTML = `
-      ${rows.length ? `<table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الاستحقاق</th><th>الحالة</th><th></th></tr></thead>
+      ${rows.length ? `<table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th>
+          <th>الأولوية</th><th>الاستحقاق</th><th>الحالة</th><th>الإنجاز</th><th></th></tr></thead>
         <tbody>${rows.map((a) => `<tr><td>${esc(ACTION_TYPE_AR[a.type] || a.type)}</td><td dir="ltr" style="text-align:right">${esc(a.display_number)}</td><td>${esc(a.text)}</td>
-          <td>${esc(a.assignees || '—')}</td><td>${a.due_date ? esc(a.due_date) : '—'}</td><td>${statusTag(a.status, ACTION_STATUS_AR)}</td>
+          <td>${esc(a.assignees || '—')}</td>
+          <td><span class="tag ${PRIORITY_COLOR[a.priority] || 'tag-gray'}">${esc(PRIORITY_AR[a.priority] || '')}</span></td>
+          <td>${a.due_date ? esc(a.due_date) : '—'}</td><td>${statusTag(a.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</td>
+          <td>${miniBar(a.progress)}</td>
           <td><button class="btn-ghost btn-sm" data-openaction="${a.id}">عرض</button>${canEdit ? `<button class="btn-ghost btn-sm" data-editaction="${a.id}">تعديل</button>` : ''}</td></tr>`).join('')}</tbody></table>`
         : '<div class="card-body muted">لا توجد بنود بعد.</div>'}
       ${canEdit ? `<div class="card-body quick-add">

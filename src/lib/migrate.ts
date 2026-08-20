@@ -11,6 +11,12 @@ const COLUMN_ADDS = [
   "ALTER TABLE users ADD COLUMN deleted_at TEXT",
   "ALTER TABLE users ADD COLUMN deleted_by INTEGER",
   "ALTER TABLE users ADD COLUMN deleted_email TEXT",
+  // قياس الالتزام على بنود القرارات/المهام + سجل ترحيل المتابعة
+  "ALTER TABLE action_items ADD COLUMN first_due_date TEXT",
+  "ALTER TABLE action_items ADD COLUMN delay_days INTEGER",
+  "ALTER TABLE action_items ADD COLUMN carried_count INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE action_items ADD COLUMN last_carried_meeting_id INTEGER",
+  "ALTER TABLE meetings ADD COLUMN followups_frozen_at TEXT",
 ];
 
 /**
@@ -40,5 +46,28 @@ export async function backfillRolePeriods(env: Env): Promise<void> {
     ).run();
   } catch (e) {
     console.error('backfill role periods failed', e);
+  }
+}
+
+/**
+ * تعبئة قياسات الالتزام للبنود القائمة (أثر رجعي):
+ *   first_due_date — أول استحقاق معروف (نأخذ الحالي مرجعًا للبنود القديمة).
+ *   delay_days     — الإنجاز ناقص الاستحقاق بالأيام: موجب = تأخير، صفر أو سالب = في الموعد.
+ * تُنفَّذ بعد إنشاء المخطط، وتلمس الصفوف الفارغة فقط فتكون رخيصة عند التكرار.
+ */
+export async function backfillActionMetrics(env: Env): Promise<void> {
+  try {
+    await env.DB.prepare(
+      `UPDATE action_items SET first_due_date = due_date
+        WHERE first_due_date IS NULL AND due_date IS NOT NULL`,
+    ).run();
+    await env.DB.prepare(
+      `UPDATE action_items
+          SET delay_days = CAST(julianday(date(completed_at)) - julianday(date(due_date)) AS INTEGER)
+        WHERE delay_days IS NULL AND status = 'done'
+          AND completed_at IS NOT NULL AND due_date IS NOT NULL`,
+    ).run();
+  } catch (e) {
+    console.error('backfill action metrics failed', e);
   }
 }

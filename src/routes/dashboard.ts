@@ -6,6 +6,7 @@ import { canViewResults, councilScope, withinAccessWindow, isLiveMeeting, isOpen
 import type { CouncilScope } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
 import { evaluationTargets } from '../lib/evaltargets';
+import { assigneeStats } from '../lib/taskmetrics';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -209,7 +210,12 @@ app.get('/staff', async (c) => {
 
   const board = await boardFor(c.env, cycleId, tt, stage);
   const prevAvg = await previousCycleAvg(c.env, cycleId, tt, stage);
-  return c.json({ cycle, target_type: tt, stage, board, previous_avg: prevAvg });
+  // الالتزام بالمهام (نسبة الإنجاز ودقة التوقيت والتأخير) يُعرض بجانب نتيجة التقييم،
+  // فأداء المكلَّف في بنود المحاضر جزء من صورة تقييمه لا معزول عنها.
+  const targets = await boardTargets(c.env, tt, stage);
+  const ids = new Set(targets.map((t) => t.id));
+  const commitment = (await assigneeStats(c.env, {})).filter((r) => ids.has(r.user_id));
+  return c.json({ cycle, target_type: tt, stage, board, previous_avg: prevAvg, commitment });
 });
 
 // ---- مقارنة الدورات عبر الزمن (اتجاه المتوسط لكل دورة منشورة) ----

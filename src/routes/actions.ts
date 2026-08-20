@@ -3,9 +3,10 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { councilScope, withinAccessWindow, isOpenAction, canEditDraft, isPresident, type CouncilRow } from '../permissions';
+import { councilScope, withinAccessWindow, isOpenAction, canEditDraft, isPresident, isVice, hasFullCouncilAccess, type CouncilRow } from '../permissions';
 import { getCouncil, nextActionNumber, formatActionNumber } from '../lib/meetings';
 import { notify, notifyMany } from '../lib/notify';
+import { recomputeDelay, assigneeStats, overallStats, stalledActions } from '../lib/taskmetrics';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -72,10 +73,12 @@ app.post('/meeting/:meetingId', async (c) => {
   const number = await nextActionNumber(c.env, council!.id, type);
   const display = formatActionNumber(council!.number_prefix, type, number);
 
+  // first_due_date يُثبَّت مرة واحدة: أي تمديد لاحق يبقى مرئيًا مقابل الوعد الأصلي
   const res = await c.env.DB.prepare(
-    `INSERT INTO action_items (type, council_id, source_meeting_id, number, display_number, text, priority, due_date, status, progress)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'not_started', 0)`,
-  ).bind(type, council!.id, meetingId, number, display, text, priority, b.due_date || null).run();
+    `INSERT INTO action_items (type, council_id, source_meeting_id, number, display_number, text,
+       priority, due_date, first_due_date, status, progress)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_started', 0)`,
+  ).bind(type, council!.id, meetingId, number, display, text, priority, b.due_date || null, b.due_date || null).run();
   const actionId = res.meta.last_row_id as number;
 
   const assignees: number[] = Array.isArray(b.assignees) ? b.assignees.map(Number) : [];
@@ -114,6 +117,11 @@ app.get('/', async (c) => {
   const rows = await c.env.DB.prepare(
     `SELECT DISTINCT a.id, a.type, a.council_id, a.display_number, a.text, a.priority, a.due_date,
             a.status, a.progress, a.completed_at, a.source_meeting_id,
+            a.delay_days, a.carried_count, a.first_due_date,
+            (SELECT GROUP_CONCAT(us.name, '، ') FROM action_assignees ax
+               JOIN users us ON us.id = ax.user_id WHERE ax.action_item_id = a.id) AS assignees,
+            CASE WHEN a.status NOT IN ('done','cancelled') AND a.due_date IS NOT NULL AND a.due_date < date('now')
+                 THEN CAST(julianday(date('now')) - julianday(date(a.due_date)) AS INTEGER) ELSE 0 END AS overdue_days,
             co.name AS council_name, co.type AS council_type,
             m.display_number AS meeting_number, m.created_at AS meeting_created_at
        FROM action_items a
@@ -143,6 +151,33 @@ app.get('/', async (c) => {
     if (visible) out.push({ ...a, read_only: scope.level !== 'full' });
   }
   return c.json({ actions: out });
+});
+
+// ---- لوحة الالتزام: نسبة الإنجاز ودقة التوقيت والتأخير لكل مكلَّف ----
+// الاطلاع الكامل على المجلس يرى الجميع، ومن دونه يرى بياناته وحدها.
+app.get('/stats', async (c) => {
+  const u = c.get('user');
+  const councilId = Number(c.req.query('council_id')) || null;
+  const type = TYPES.includes(c.req.query('type') || '') ? c.req.query('type')! : null;
+  const from = c.req.query('from') || null;
+  const to = c.req.query('to') || null;
+
+  let full = isPresident(u) || isVice(u);
+  if (councilId) {
+    const council = await getCouncil(c.env, councilId);
+    if (!council) return c.json({ error: 'المجلس غير موجود' }, 404);
+    full = hasFullCouncilAccess(u, council);
+  }
+  const scoped = { councilId, type, from, to };
+  const asked = Number(c.req.query('user_id')) || null;
+  const userId = full ? asked : u.id;
+
+  const [board, overall, stalled] = await Promise.all([
+    assigneeStats(c.env, { ...scoped, userId }),
+    overallStats(c.env, { ...scoped, userId }),
+    full ? stalledActions(c.env, scoped) : Promise.resolve([]),
+  ]);
+  return c.json({ scope: full ? 'full' : 'self', board, overall, stalled });
 });
 
 // ---- تفاصيل ----
@@ -186,8 +221,10 @@ app.patch('/:id', async (c) => {
     const due = b.due_date !== undefined ? (b.due_date || null) : a.due_date;
     if (a.type === 'task' && !due) return c.json({ error: 'تاريخ الاستحقاق إلزامي للمهمة' }, 400);
     await c.env.DB.prepare(
-      "UPDATE action_items SET text=?, priority=?, due_date=?, updated_at=datetime('now') WHERE id=?",
-    ).bind(text, priority, due, id).run();
+      `UPDATE action_items SET text=?, priority=?, due_date=?,
+         first_due_date=COALESCE(first_due_date, ?), updated_at=datetime('now') WHERE id=?`,
+    ).bind(text, priority, due, due, id).run();
+    if (due !== a.due_date) await recomputeDelay(c.env, id);
     if (Array.isArray(b.assignees)) {
       await c.env.DB.prepare('DELETE FROM action_assignees WHERE action_item_id = ?').bind(id).run();
       if (b.assignees.length) await c.env.DB.batch(b.assignees.map((uid: number) =>
@@ -201,9 +238,16 @@ app.patch('/:id', async (c) => {
     const status = b.status !== undefined && STATUSES.includes(b.status) ? b.status : a.status;
     let progress = b.progress !== undefined ? Math.max(0, Math.min(100, Number(b.progress))) : a.progress;
     if (status === 'done') progress = 100;
+    // الانتقال إلى «منجزة» من هنا يُسجَّل كما يُسجَّل من زر الإنجاز: تاريخ ومُنجِز وتأخير
+    const becameDone = status === 'done' && a.status !== 'done';
     await c.env.DB.prepare(
-      "UPDATE action_items SET status=?, progress=?, updated_at=datetime('now') WHERE id=?",
-    ).bind(status, progress, id).run();
+      `UPDATE action_items SET status=?, progress=?,
+         completed_at = CASE WHEN ? = 1 THEN datetime('now') ELSE completed_at END,
+         completed_by = CASE WHEN ? = 1 THEN ? ELSE completed_by END,
+         original_completed_at = CASE WHEN ? = 1 THEN COALESCE(original_completed_at, datetime('now')) ELSE original_completed_at END,
+         updated_at=datetime('now') WHERE id=?`,
+    ).bind(status, progress, becameDone ? 1 : 0, becameDone ? 1 : 0, u.id, becameDone ? 1 : 0, id).run();
+    if (becameDone || status !== a.status) await recomputeDelay(c.env, id);
   }
 
   await audit(c.env, { userId: u.id, action: 'update_action', entityType: 'action_item', entityId: id, oldValue: { text: a.text, status: a.status }, newValue: b });
@@ -228,6 +272,7 @@ app.post('/:id/complete', async (c) => {
        completed_by=?, completion_note=?, original_completed_at=COALESCE(original_completed_at, datetime('now')),
        updated_at=datetime('now') WHERE id=?`,
   ).bind(u.id, note || null, id).run();
+  await recomputeDelay(c.env, id);
   await audit(c.env, { userId: u.id, action: 'complete_action', entityType: 'action_item', entityId: id });
   return c.json({ ok: true });
 });
@@ -295,7 +340,7 @@ app.post('/:id/reopen', async (c) => {
   if (!isPresident(u) && !canEditDraft(u, council!, await meetingWriterOf(c.env, a.source_meeting_id)) && !(await isAssignee(c.env, id, u.id)))
     return c.json({ error: 'لا تملك صلاحية' }, 403);
   await c.env.DB.prepare(
-    "UPDATE action_items SET status='in_progress', completed_at=NULL, updated_at=datetime('now') WHERE id=?",
+    "UPDATE action_items SET status='in_progress', completed_at=NULL, delay_days=NULL, updated_at=datetime('now') WHERE id=?",
   ).bind(id).run();
   await audit(c.env, { userId: u.id, action: 'reopen_action', entityType: 'action_item', entityId: id });
   return c.json({ ok: true });
@@ -314,6 +359,7 @@ app.patch('/:id/completion-date', async (c) => {
   const { completed_at } = await c.req.json().catch(() => ({}));
   if (!completed_at) return c.json({ error: 'التاريخ مطلوب' }, 400);
   await c.env.DB.prepare("UPDATE action_items SET completed_at=? WHERE id=?").bind(completed_at, id).run();
+  await recomputeDelay(c.env, id);
   await audit(c.env, {
     userId: u.id, action: 'adjust_completion_date', entityType: 'action_item', entityId: id,
     oldValue: { completed_at: a.completed_at, original: a.original_completed_at }, newValue: { completed_at },

@@ -129,6 +129,7 @@ CREATE TABLE meetings (
   cancel_reason  TEXT,
   parent_meeting_id INTEGER REFERENCES meetings(id), -- لمحاضر التصويب/الملحق
   academic_year  TEXT,                         -- السنة الدراسية (سياق)
+  followups_frozen_at TEXT,                    -- وقت تجميد جدول المتابعة (عند الاعتماد)
   created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at     TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (council_id, hijri_year, number)
@@ -189,6 +190,11 @@ CREATE TABLE action_items (
   original_completed_at TEXT,                  -- التاريخ الأصلي قبل أي تعديل يدوي
   -- المحضر الذي ظهرت فيه المهمة كمنجزة (لتختفي من جدول المتابعة بعده)
   reported_done_meeting_id INTEGER REFERENCES meetings(id),
+  -- قياسات الالتزام (أساس تقييم المكلَّف):
+  first_due_date    TEXT,                      -- أول استحقاق سُجِّل — لا يتغيّر بتعديل الاستحقاق لاحقًا
+  delay_days        INTEGER,                   -- الإنجاز ناقص الاستحقاق بالأيام: موجب = تأخير
+  carried_count     INTEGER NOT NULL DEFAULT 0,-- عدد المحاضر التي رُحِّل إليها قبل إنجازه (مؤشر التعثّر)
+  last_carried_meeting_id INTEGER REFERENCES meetings(id),
   created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (council_id, type, number)
@@ -375,3 +381,27 @@ CREATE TABLE meeting_attachments (
   uploaded_at TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_mattach_meeting ON meeting_attachments(meeting_id);
+
+-- ============================================================
+-- توسعة: ترحيل بنود المتابعة بين المحاضر، وقياس التأخير والالتزام
+-- ============================================================
+
+-- سجل ترحيل بنود المتابعة: صف لكل (محضر، بند) ظهر في جدول متابعة ذلك المحضر.
+-- القاعدة: البند غير المنجَز يُرحَّل إلى كل محضر تالٍ حتى يُنجَز، ثم يظهر ظهورًا
+-- أخيرًا واحدًا للتوثيق (is_final = 1) ولا يظهر بعده. تُجمَّد اللقطة عند اعتماد
+-- المحضر فلا يتغيّر محضر مقفل بتغيّر حالة البند لاحقًا.
+CREATE TABLE meeting_followups (
+  meeting_id     INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  action_item_id INTEGER NOT NULL REFERENCES action_items(id) ON DELETE CASCADE,
+  status         TEXT    NOT NULL,
+  progress       INTEGER NOT NULL DEFAULT 0,
+  due_date       TEXT,
+  completed_at   TEXT,
+  delay_days     INTEGER,
+  is_final       INTEGER NOT NULL DEFAULT 0,   -- 1 = ظهور التوثيق الأخير بعد الإنجاز
+  carried_index  INTEGER NOT NULL DEFAULT 1,   -- ترتيب هذا الترحيل للبند (١ = أول ترحيل)
+  reconstructed  INTEGER NOT NULL DEFAULT 0,   -- 1 = صف أُعيد بناؤه لمحضر قديم (أثر رجعي)
+  snapshot_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (meeting_id, action_item_id)
+);
+CREATE INDEX idx_mfollowups_action ON meeting_followups(action_item_id);

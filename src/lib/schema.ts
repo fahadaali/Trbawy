@@ -93,6 +93,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   cancel_reason  TEXT,
   parent_meeting_id INTEGER REFERENCES meetings(id), -- لمحاضر التصويب/الملحق
   academic_year  TEXT,                         -- السنة الدراسية (سياق)
+  followups_frozen_at TEXT,                    -- وقت تجميد جدول المتابعة (عند الاعتماد)
   created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at     TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (council_id, hijri_year, number)
@@ -140,6 +141,10 @@ export const SCHEMA_STATEMENTS: string[] = [
   completion_note   TEXT,
   original_completed_at TEXT,                  -- التاريخ الأصلي قبل أي تعديل يدوي
   reported_done_meeting_id INTEGER REFERENCES meetings(id),
+  first_due_date    TEXT,
+  delay_days        INTEGER,
+  carried_count     INTEGER NOT NULL DEFAULT 0,
+  last_carried_meeting_id INTEGER REFERENCES meetings(id),
   created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (council_id, type, number)
@@ -284,4 +289,19 @@ export const SCHEMA_STATEMENTS: string[] = [
   uploaded_at TEXT    NOT NULL DEFAULT (datetime('now'))
 )`,
   `CREATE INDEX IF NOT EXISTS idx_mattach_meeting ON meeting_attachments(meeting_id)`,
+  `CREATE TABLE IF NOT EXISTS meeting_followups (
+  meeting_id     INTEGER NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  action_item_id INTEGER NOT NULL REFERENCES action_items(id) ON DELETE CASCADE,
+  status         TEXT    NOT NULL,
+  progress       INTEGER NOT NULL DEFAULT 0,
+  due_date       TEXT,
+  completed_at   TEXT,
+  delay_days     INTEGER,
+  is_final       INTEGER NOT NULL DEFAULT 0,   -- 1 = ظهور التوثيق الأخير بعد الإنجاز
+  carried_index  INTEGER NOT NULL DEFAULT 1,   -- ترتيب هذا الترحيل للبند
+  reconstructed  INTEGER NOT NULL DEFAULT 0,   -- 1 = صف أُعيد بناؤه لمحضر قديم (أثر رجعي)
+  snapshot_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (meeting_id, action_item_id)
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_mfollowups_action ON meeting_followups(action_item_id)`,
 ];

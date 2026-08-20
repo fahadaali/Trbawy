@@ -68,7 +68,9 @@ function route() {
   if (!u) return renderLogin();
   if (u.must_change_password) return renderChangePassword(true);
 
-  const hash = location.hash.replace(/^#\/?/, '') || 'dashboard';
+  // المسار قبل «؟» فقط: التبويبات تمرَّر كاستعلام (#/tasks?perf) وتقرؤه شاشتها بنفسها،
+  // فلو دخل الاستعلام في اسم العرض لم يُطابق أي شاشة وسقط كل شيء إلى الرئيسية.
+  const hash = location.hash.replace(/^#\/?/, '').split('?')[0] || 'dashboard';
   const [view, ...rest] = hash.split('/');
   renderShell(view, rest);
 }
@@ -395,6 +397,7 @@ VIEWS.dashboard = async () => {
       <p class="muted">${esc(ROLE_AR[u.role] || u.role)}${u.stage ? ' — المرحلة ' + STAGE_AR[u.stage] : ''}</p>
     </div></div>
     <div id="dashCards" class="grid grid-4 mt"><div class="spinner"></div></div>
+    <div id="dashCommit" class="mt"></div>
     <div id="dashRecent" class="mt"></div>`;
   let s;
   try { s = await API.get('/dashboard/summary'); } catch (err) { return renderError(err); }
@@ -405,6 +408,7 @@ VIEWS.dashboard = async () => {
     <div class="stat" style="cursor:pointer" onclick="nav('meetings')"><div class="v">${arNum(s.awaiting_signature)}</div><div class="l">محاضر بانتظار توقيعي</div></div>
     <div class="stat" style="cursor:pointer" onclick="nav('evaluations')"><div class="v">${arNum(s.open_cycles)}</div><div class="l">دورات تقييم مفتوحة</div></div>
     <div class="stat"><div class="v">${arNum(s.recent_meetings.length)}</div><div class="l">آخر المحاضر</div></div>`;
+  renderCommitmentCard();
   document.getElementById('dashRecent').innerHTML = s.recent_meetings.length ? `
     <div class="card"><div class="card-head"><h3>آخر المحاضر</h3></div>
       <table class="tbl"><thead><tr><th>الرقم</th><th>العنوان</th><th>الحالة</th></tr></thead>
@@ -412,6 +416,33 @@ VIEWS.dashboard = async () => {
         <td dir="ltr" style="text-align:right"><b>${esc(m.display_number)}</b></td><td>${esc(m.title || '—')}</td>
         <td>${statusTag(m.status, MEETING_STATUS_AR, MEETING_STATUS_COLOR)}</td></tr>`).join('')}</tbody></table></div>` : '';
 };
+
+// بطاقة التزامي بالمهام: نسبة الإنجاز ودقة التوقيت والتأخير المسجَّل — مؤشرات
+// التقييم نفسها التي تظهر في لوحة «الالتزام والأداء».
+async function renderCommitmentCard() {
+  const box = document.getElementById('dashCommit');
+  if (!box) return;
+  let d;
+  try { d = await API.get('/actions/stats?user_id=' + State.user.id); } catch { return; }
+  if (!document.getElementById('dashCommit')) return;
+  const o = d.overall;
+  if (!o.total) return;
+  const tone = (v) => (v >= 80 ? 'stat-ok' : v >= 50 ? 'stat-warn' : 'stat-bad');
+  box.innerHTML = `
+    <div class="card"><div class="card-head"><h3>التزامي بالبنود المُسندة إليّ</h3>
+      <div class="spacer"></div>
+      <button class="btn-ghost btn-sm" onclick="location.hash='#/tasks?perf';VIEWS.tasks()">لوحة الالتزام</button></div>
+      <div class="card-body grid grid-4">
+        <div class="stat ${tone(o.completion_rate)}"><div class="v">${arNum(o.completion_rate)}٪</div><div class="l">نسبة الإنجاز</div>
+          <div class="s">${arNum(o.done)} من ${arNum(o.total)}</div></div>
+        <div class="stat ${tone(o.timeliness)}"><div class="v">${arNum(o.timeliness)}٪</div><div class="l">دقة التوقيت</div>
+          <div class="s">${arNum(o.on_time)} في الموعد · ${arNum(o.late)} متأخرة</div></div>
+        <div class="stat ${o.overdue ? 'stat-bad' : 'stat-ok'}"><div class="v">${arNum(o.overdue)}</div><div class="l">متأخرة الآن</div>
+          <div class="s">${arNum(o.stalled)} متعثرة</div></div>
+        <div class="stat ${o.delay_total ? 'stat-bad' : 'stat-ok'}"><div class="v">${arNum(o.delay_total)}</div><div class="l">أيام التأخير المسجّلة</div>
+          <div class="s">متوسط ${arNum(o.delay_avg)} يوم</div></div>
+      </div></div>`;
+}
 
 // العروض المتخصّصة تُعرَّف في وحداتها:
 // VIEWS.meetings → meetings.js | VIEWS.tasks → tasks.js

@@ -394,7 +394,8 @@ async function renderDashboard(cycleId, tt) {
       <div class="row-2 mt">
         <div class="card"><div class="card-head"><h3>أعلى ١٠</h3></div><table class="tbl"><tbody>${b.top.map((t) => `<tr><td>${nameCell(t, tt)}</td><td><b>${arFixed(t.score)}</b></td></tr>`).join('') || '<tr><td class="muted">—</td></tr>'}</tbody></table></div>
         <div class="card"><div class="card-head"><h3>أدنى ١٠</h3></div><table class="tbl"><tbody>${b.bottom.map((t) => `<tr><td>${nameCell(t, tt)}</td><td><b>${arFixed(t.score)}</b></td></tr>`).join('') || '<tr><td class="muted">—</td></tr>'}</tbody></table></div>
-      </div>`;
+      </div>
+      ${commitmentPanel(d.commitment)}`;
     // فتح السجل التاريخي من أسماء الطلاب في اللوحة
     inner.querySelectorAll('[data-hist]').forEach((a) => a.onclick = (e) => {
       e.preventDefault();
@@ -403,6 +404,22 @@ async function renderDashboard(cycleId, tt) {
   };
   if (stageFilter) document.getElementById('stage_' + tt).onchange = load;
   load();
+}
+
+// الالتزام بالمهام بجانب نتيجة التقييم: نسبة الإنجاز ودقة التوقيت وأيام التأخير المسجَّلة
+function commitmentPanel(rows) {
+  if (!rows || !rows.length) return '';
+  const sorted = [...rows].sort((a, b) => b.commitment - a.commitment);
+  return `<div class="card mt"><div class="card-head"><h3>الالتزام ببنود المحاضر</h3>
+    <div class="spacer"></div><span class="legend-note">نسبة الالتزام = ٦٠٪ إنجاز + ٤٠٪ دقة توقيت</span></div>
+    <table class="tbl"><thead><tr><th>الاسم</th><th>المُسنَد</th><th>المنجَز</th><th>متأخرة الآن</th>
+      <th>أيام التأخير</th><th>نسبة الإنجاز</th><th>دقة التوقيت</th><th>الالتزام</th></tr></thead>
+    <tbody>${sorted.map((r) => `<tr>
+      <td>${esc(r.name)}</td><td>${arNum(r.total)}</td><td>${arNum(r.done)}</td>
+      <td>${r.overdue ? `<span class="tag tag-red">${arNum(r.overdue)}</span>` : arNum(0)}</td>
+      <td>${r.delay_total ? `<span class="tag tag-red">${arNum(r.delay_total)}</span>` : arNum(0)}</td>
+      <td>${miniBar(r.completion_rate)}</td><td>${miniBar(r.timeliness)}</td><td>${miniBar(r.commitment)}</td>
+    </tr>`).join('')}</tbody></table></div>`;
 }
 
 function canViewResultsClient(tt) {

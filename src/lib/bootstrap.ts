@@ -3,7 +3,8 @@
 import type { Env } from '../types';
 import { hashPassword } from './crypto';
 import { SCHEMA_STATEMENTS } from './schema';
-import { addMissingColumns, backfillRolePeriods } from './migrate';
+import { addMissingColumns, backfillRolePeriods, backfillActionMetrics } from './migrate';
+import { backfillFollowupLedger } from './followups';
 
 let checkedThisIsolate = false;
 
@@ -37,9 +38,14 @@ export async function ensureBootstrap(env: Env): Promise<void> {
   //    فأي فهرس جديد على عمود جديد سيفشل ما لم يُضَف العمود أولًا.
   // ٢) الجداول والفهارس (الجديد منها فقط يُنشأ).
   // ٣) تعبئة فترات الأدوار — تحتاج جدولها الذي أُنشئ في الخطوة السابقة.
+  // ٤) تعبئة قياسات الالتزام وسجل ترحيل المتابعة للمحاضر القائمة (أثر رجعي).
   await addMissingColumns(env);
   await ensureSchema(env);
   await backfillRolePeriods(env);
+  if (seeded) {
+    await backfillActionMetrics(env);
+    await backfillFollowupLedger(env);
+  }
 
   if (!seeded) await seed(env);
   checkedThisIsolate = true;

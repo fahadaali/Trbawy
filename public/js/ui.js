@@ -401,6 +401,10 @@ const ACTION_STATUS_AR = {
   not_started: 'لم تبدأ', in_progress: 'جارية', done: 'منجزة', stalled: 'متعثرة', cancelled: 'ملغاة',
 };
 const PRIORITY_AR = { high: 'عالية', medium: 'متوسطة', low: 'منخفضة' };
+const ACTION_STATUS_COLOR = {
+  not_started: 'tag-gray', in_progress: 'tag-gold', done: 'tag-green', stalled: 'tag-red', cancelled: 'tag-gray',
+};
+const PRIORITY_COLOR = { high: 'tag-red', medium: 'tag-gold', low: 'tag-gray' };
 const STUDENT_STATUS_AR = { active: 'نشط', transferred: 'منقول', withdrawn: 'منسحب', graduated: 'متخرج' };
 const CYCLE_STATUS_AR = { draft: 'مسودة', open: 'مفتوحة', closed: 'مغلقة', published: 'منشورة النتائج' };
 const TARGET_TYPE_AR = { students: 'الطلاب', team_members: 'أعضاء الفرق', first_supervisors: 'المشرفون الأوائل' };
@@ -408,6 +412,37 @@ const TARGET_TYPE_AR = { students: 'الطلاب', team_members: 'أعضاء ا�
 function statusTag(status, map, colorMap) {
   const cls = (colorMap && colorMap[status]) || 'tag-gray';
   return `<span class="tag ${cls}">${esc((map && map[status]) || status)}</span>`;
+}
+
+// ---------- مؤشرات الالتزام ----------
+// شارة الالتزام بالموعد: للمنجَز فرق أيام (الإنجاز − الاستحقاق)، وللمفتوح تأخّره حتى اليوم.
+function delayTag(a) {
+  if (!a.due_date) return '<span class="muted">—</span>';
+  if (a.status === 'done') {
+    if (a.delay_days == null) return '<span class="muted">—</span>';
+    return a.delay_days > 0
+      ? `<span class="tag tag-red">تأخّر ${arCount(a.delay_days, ['يومًا واحدًا', 'يومين', 'أيام', 'يومًا'])}</span>`
+      : '<span class="tag tag-green">في الموعد</span>';
+  }
+  const over = Number(a.overdue_days || 0);
+  if (over > 0) return `<span class="tag tag-red">متأخرة ${arCount(over, ['يومًا واحدًا', 'يومين', 'أيام', 'يومًا'])}</span>`;
+  return '<span class="muted">—</span>';
+}
+
+// توافق العدد والمعدود: يوم واحد · يومان · ٣ أيام · ١٥ يومًا
+function arCount(n, [one, two, few, many]) {
+  n = Number(n);
+  if (n === 1) return one;
+  if (n === 2) return two;
+  if (n >= 3 && n <= 10) return `${arNum(n)} ${few}`;
+  return `${arNum(n)} ${many}`;
+}
+
+// شريط نسبة مصغّر داخل الجداول
+function miniBar(pct) {
+  const v = Math.max(0, Math.min(100, Math.round(Number(pct) || 0)));
+  const color = v >= 80 ? 'var(--success)' : v >= 50 ? 'var(--warning)' : v > 0 ? 'var(--accent)' : 'var(--border)';
+  return `<span class="mbar"><span style="width:${v}%;background:${color}"></span></span><span class="mbar-num">${arNum(v)}٪</span>`;
 }
 
 // ---------- الوقت ----------
