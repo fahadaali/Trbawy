@@ -753,6 +753,135 @@ function initMobile() {
 
 
 // ============================================================
+// سحب الشاشة للتحديث
+// ============================================================
+//
+// إيماءة الجوال المألوفة: سحبٌ لأسفل والصفحةُ في أعلاها يُنزل حلقةً تدور، ثم تُعاد
+// بناء الشاشة الحالية. المقاومة أُسّية كإيماءة النظام: أولُ السحب يستجيب وآخره يشدّ.
+// وتُلغى الإيماءة حيث قد تُتلف عملًا أو تُربك تمريرًا — نافذةٌ مفتوحة، أو درجُ
+// القائمة، أو محرّرٌ فيه كتابة لم تُحفظ، أو منطقةٌ لها تمريرها الرأسي.
+
+const PullRefresh = {
+  THRESHOLD: 58,      // نزول الحلقة الذي يُطلق التحديث عند رفع الإصبع
+  MAX: 88,            // أقصى نزول مهما امتدّ السحب
+  PARKED: -44,        // موضع الحلقة مستقرّةً: فوق النطاق فيقصّها الشريط العلوي
+  el: null, ring: null, onRefresh: null,
+  startY: 0, lastY: 0, pull: 0, touching: false, tracking: false, halted: false, busy: false,
+
+  init(onRefresh) {
+    this.onRefresh = onRefresh;
+    if (this.el) return;
+    const zone = document.createElement('div');
+    zone.className = 'ptr-zone';
+    zone.setAttribute('aria-hidden', 'true');   // مؤشّر بصري بحت: الحالة تُعلن في المحتوى
+    zone.innerHTML = '<div class="ptr"><i></i></div>';
+    document.body.appendChild(zone);
+    this.el = zone.querySelector('.ptr');
+    this.ring = zone.querySelector('i');
+    // اللمس غير المنفعل شرطُ منع اهتزاز الصفحة تحت الإصبع أثناء السحب
+    addEventListener('touchstart', (e) => this.start(e), { passive: true });
+    addEventListener('touchmove', (e) => this.move(e), { passive: false });
+    addEventListener('touchend', () => this.end());
+    addEventListener('touchcancel', () => this.end());
+  },
+
+  atTop() { return (document.scrollingElement || document.documentElement).scrollTop <= 0; },
+
+  /** مواضع لا تصلح فيها الإيماءة — تُترك للتمرير أو تُصان مما تُتلفه إعادةُ البناء. */
+  blocked(target) {
+    if (!document.getElementById('content')) return true;      // شاشة دخول أو تغيير كلمة مرور
+    if (document.querySelector('.modal-overlay')) return true;
+    const sb = document.getElementById('sidebar');
+    if (sb && sb.classList.contains('open')) return true;
+    if (document.querySelector('#content [contenteditable="true"]')) return true;  // كتابة لم تُحفظ
+    for (let n = target; n && n !== document.body; n = n.parentElement) {
+      if (n.scrollHeight - n.clientHeight > 2) {
+        const oy = getComputedStyle(n).overflowY;
+        if (oy === 'auto' || oy === 'scroll') return true;
+      }
+    }
+    return false;
+  },
+
+  start(e) {
+    this.tracking = false;
+    this.touching = false;
+    if (this.busy || e.touches.length !== 1) return;
+    this.halted = this.blocked(e.target);
+    this.touching = true;
+    this.startY = this.lastY = e.touches[0].clientY;
+    this.pull = 0;
+    this.tracking = !this.halted && this.atTop();
+  },
+
+  move(e) {
+    if (!this.touching || this.halted) return;
+    if (e.touches.length !== 1) { this.cancel(); return; }
+    const y = e.touches[0].clientY;
+    const goingDown = y > this.lastY;
+    this.lastY = y;
+    // لم نكن نتتبّع لأن الصفحة كانت مُمرَّرة: نبدأ متى بلغت أعلاها والإصبع ما زال
+    // ينزل — فمن يمرّر إلى الأعلى ثم يواصل النزول بلا رفع إصبعه يجد التحديث بانتظاره
+    if (!this.tracking) {
+      if (!goingDown || !this.atTop()) return;
+      this.tracking = true;
+      this.startY = y;
+    }
+    const dy = y - this.startY;
+    if (dy <= 0) {
+      // عاد لأعلى: تمريرٌ عادي — ولا نُنهي التتبّع، فقد يسحب ثانيةً بلا رفع إصبعه
+      if (this.pull) { this.pull = 0; this.draw(0); }
+      return;
+    }
+    e.preventDefault();
+    this.pull = this.MAX * (1 - Math.exp(-dy / this.MAX));
+    this.draw(this.pull);
+  },
+
+  draw(v) {
+    const t = Math.min(1, v / this.THRESHOLD);
+    this.el.style.transition = 'none';                 // أثناء السحب تتبع الحلقة الإصبع بلا تأخير
+    this.el.style.opacity = String(Math.min(1, v / 16));
+    this.el.style.transform = `translateY(${this.PARKED + v}px) scale(${0.85 + 0.15 * t})`;
+    this.ring.style.transform = `rotate(${v * 4}deg)`;
+    this.el.classList.toggle('ready', t >= 1);
+  },
+
+  async end() {
+    this.touching = false;
+    if (!this.tracking) return;
+    this.tracking = false;
+    if (this.pull < this.THRESHOLD) return this.hide();
+
+    this.busy = true;
+    this.el.style.transition = 'transform .22s ease, opacity .22s ease';
+    this.el.style.opacity = '1';
+    this.el.style.transform = `translateY(${this.PARKED + this.THRESHOLD}px) scale(1)`;
+    this.ring.style.transform = '';                    // الدوران يتولّاه التحريك لا الإصبع
+    this.el.classList.add('spin');
+    const started = Date.now();
+    try { await this.onRefresh(); } catch { /* الشاشة تعرض خطأها بنفسها */ }
+    // ومضةٌ أقصر من أن تُرى تبدو كزرّ لم يعمل — نُبقي الحلقة لحظةً تُدرَك
+    const rest = 450 - (Date.now() - started);
+    if (rest > 0) await new Promise((r) => setTimeout(r, rest));
+    this.busy = false;
+    this.hide();
+  },
+
+  cancel() { this.tracking = this.touching = false; if (this.pull) this.hide(); },
+
+  hide() {
+    this.pull = 0;
+    this.el.classList.remove('spin', 'ready');
+    this.el.style.transition = 'transform .25s ease, opacity .2s ease';
+    this.el.style.opacity = '0';
+    this.el.style.transform = `translateY(${this.PARKED}px) scale(.85)`;
+    this.ring.style.transform = '';
+  },
+};
+
+
+// ============================================================
 // إشعارات الدفع على الجهاز (متصفح الجوال وتطبيق الشاشة الرئيسية)
 // ============================================================
 //

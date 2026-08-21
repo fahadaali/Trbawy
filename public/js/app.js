@@ -287,12 +287,27 @@ function renderShell(view, rest) {
   setupNotifications();
   setupGlobalSearch();
   initMobile();
+  PullRefresh.init(refreshCurrentView);
 
   // تنبيه العناصر المنتظرة — مرة واحدة عند فتح الصفحة/الدخول
   if (!State.pendingShown) { State.pendingShown = true; setTimeout(showPendingPopup, 500); }
 
   const handler = VIEWS[view] || VIEWS.dashboard;
+  State.view = view; State.rest = rest;     // ليعرف سحبُ التحديث ما يُعيد بناءه
   handler(rest);
+}
+
+/**
+ * إعادة بناء الشاشة الحالية — وهو ما يفعله سحبُ الشاشة للتحديث.
+ * نُعيد بناء الشاشة وحدها لا الهيكل: إعادة بناء الهيكل تُغلق ما فُتح وتُعيد ضبط
+ * الشريط والتبويب بلا داعٍ. وشارة الإشعارات تُحدَّث معها لأنها أول ما يُنتظر تجدّده.
+ */
+async function refreshCurrentView() {
+  const handler = VIEWS[State.view] || VIEWS.dashboard;
+  await Promise.allSettled([
+    Promise.resolve().then(() => handler(State.rest || [])),
+    refreshNotifBadge(),
+  ]);
 }
 
 // ---- تنبيه منبثق عائم بالعناصر التي تنتظر المستخدم ----

@@ -641,6 +641,34 @@ body { overflow-x: hidden; }
 /* في وضع التطبيق المستقل (شاشة الآيفون الرئيسية) لا يوجد شريط متصفح */
 html.standalone .topbar { padding-top: calc(10px + var(--safe-t)); }
 html.standalone body { overscroll-behavior-y: none; }
+/* تحديثُ المتصفح المدمج بالسحب لا يزاحم تحديثنا: contain تمنع تسلسل التمرير إلى
+   المتصفح وتُبقي ارتداد الصفحة نفسه. */
+body { overscroll-behavior-y: contain; }
+
+/* ---------- سحب الشاشة للتحديث ---------- */
+/* حلقة تخرج من تحت الشريط العلوي مع الإصبع ثم تدور أثناء التحديث.
+   الخروج من «تحت» الشريط بالقصّ لا بترتيب الطبقات: نطاقٌ يبدأ من أسفل الشريط
+   ويُخفي ما فوقه، فتبدو الحلقة خارجةً منه وتبقى فوق كل ما قد يعترضها (المنبثق
+   العائم مثلًا). وموضعها كلّه من transform لتتبع الإصبع بإطار واحد بلا إعادة تخطيط. */
+.ptr-zone {
+  position: fixed; z-index: 155; top: var(--topbar-h, 59px); inset-inline: 0;
+  height: 150px; overflow: hidden; pointer-events: none;
+}
+.ptr {
+  position: absolute; top: 0; inset-inline: 0; margin-inline: auto;
+  width: 34px; height: 34px; border-radius: 50%;
+  background: var(--surface); border: 1px solid var(--border);
+  box-shadow: 0 6px 16px rgba(16, 42, 33, .16);
+  display: grid; place-items: center;
+  transform: translateY(-44px); opacity: 0;
+}
+.ptr i {
+  display: block; width: 17px; height: 17px; border-radius: 50%;
+  border: 2.5px solid var(--primary); border-top-color: transparent;
+}
+.ptr.ready { border-color: var(--primary); }
+.ptr.spin i { animation: ptr-spin .65s linear infinite; }
+@keyframes ptr-spin { to { transform: rotate(360deg); } }
 
 /* بطاقة «أضف إلى الشاشة الرئيسية» */
 .a2hs {
