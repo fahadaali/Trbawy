@@ -1,12 +1,12 @@
 // عامل الخدمة — تخزين هيكل التطبيق للفتح السريع والعمل دون اتصال جزئيًا.
 // مهم: لا نُخزّن أي استجابة من /api أبدًا (بيانات حية وحسّاسة).
 
-const CACHE = 'tarbawi-shell-v8';
+const CACHE = 'tarbawi-shell-v9';
 const SHELL = [
   '/', '/index.html', '/css/styles.css',
   '/js/api.js', '/js/xlsx.js', '/js/ui.js', '/js/ai.js', '/js/app.js',
   '/js/meetings.js', '/js/tasks.js', '/js/evaluations.js', '/js/students.js',
-  '/manifest.webmanifest', '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png',
+  '/manifest.webmanifest', '/icons/icon-192.png?v=2', '/icons/icon-512.png?v=2', '/icons/apple-touch-icon.png?v=2',
 ];
 
 // مهلة الشبكة: بعدها نُقدّم النسخة المخزَّنة بدل ترك الصفحة معلّقة.
@@ -84,8 +84,8 @@ self.addEventListener('push', (e) => {
   const title = d.title || 'منصة المجلس التربوي';
   const options = {
     body: d.body || '',
-    icon: '/icons/icon-192.png',
-    badge: '/icons/icon-192.png',
+    icon: '/icons/icon-192.png?v=2',
+    badge: '/icons/icon-192.png?v=2',
     lang: 'ar',
     dir: 'rtl',
     tag: d.type || 'tarbawi',          // نوع واحد لا يتراكم عشرات المرات
