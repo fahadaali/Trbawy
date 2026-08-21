@@ -10,6 +10,7 @@
 // meeting_followups فلا يتبدّل محضر مقفل بتغيّر حالة البنود لاحقًا.
 import type { Env } from '../types';
 import { assigneesJson } from './people';
+import { effStatusSql, meetingRefSql, overdueDaysSql } from './status';
 
 export interface FollowupRow {
   id: number;
@@ -56,11 +57,11 @@ const ASSIGNEES_SQL = assigneesJson('a');
  */
 export async function computeFollowups(env: Env, m: MeetingRef): Promise<FollowupRow[]> {
   const rows = (await env.DB.prepare(
-    `SELECT a.id, a.type, a.display_number, a.text, a.status, a.priority, a.due_date,
+    `SELECT a.id, a.type, a.display_number, a.text, a.priority, a.due_date,
             a.progress, a.completed_at, a.delay_days, a.carried_count, a.source_meeting_id,
             sm.display_number AS source_meeting_number,
-            CASE WHEN a.status NOT IN ('done','cancelled') AND a.due_date IS NOT NULL AND a.due_date < date('now')
-                 THEN CAST(julianday(date('now')) - julianday(date(a.due_date)) AS INTEGER) ELSE 0 END AS overdue_days,
+            ${effStatusSql('a.status', 'a.due_date', meetingRefSql())} AS status,
+            ${overdueDaysSql('a.status', 'a.due_date', meetingRefSql())} AS overdue_days,
             ${ASSIGNEES_SQL} AS assignees
        FROM action_items a
        JOIN meetings sm ON sm.id = a.source_meeting_id
@@ -72,7 +73,7 @@ export async function computeFollowups(env: Env, m: MeetingRef): Promise<Followu
           SELECT 1 FROM meeting_followups mf
            WHERE mf.action_item_id = a.id AND mf.is_final = 1 AND mf.meeting_id != ?))
       ORDER BY a.status = 'done', a.due_date IS NULL, a.due_date, a.id`,
-  ).bind(m.council_id, m.id, m.greg_date, m.greg_date, m.id, m.id).all<any>()).results;
+  ).bind(m.greg_date, m.greg_date, m.council_id, m.id, m.greg_date, m.greg_date, m.id, m.id).all<any>()).results;
 
   return rows.map((r) => ({
     id: r.id, type: r.type, display_number: r.display_number, text: r.text,
@@ -89,15 +90,15 @@ export async function computeFollowups(env: Env, m: MeetingRef): Promise<Followu
 export async function frozenFollowups(env: Env, meetingId: number): Promise<FollowupRow[]> {
   return (await env.DB.prepare(
     `SELECT a.id, a.type, a.display_number, a.text, a.priority, a.source_meeting_id,
-            mf.status, mf.progress, mf.due_date, mf.completed_at, mf.delay_days,
+            mf.progress, mf.due_date, mf.completed_at, mf.delay_days,
             mf.is_final, mf.carried_index, mf.reconstructed,
             sm.display_number AS source_meeting_number,
-            CASE WHEN mf.status NOT IN ('done','cancelled') AND mf.due_date IS NOT NULL
-                      AND mf.due_date < date(mf.snapshot_at)
-                 THEN CAST(julianday(date(mf.snapshot_at)) - julianday(date(mf.due_date)) AS INTEGER) ELSE 0 END AS overdue_days,
+            ${effStatusSql('mf.status', 'mf.due_date', meetingRefSql('mm.greg_date'))} AS status,
+            ${overdueDaysSql('mf.status', 'mf.due_date', meetingRefSql('mm.greg_date'))} AS overdue_days,
             ${ASSIGNEES_SQL} AS assignees
        FROM meeting_followups mf
        JOIN action_items a ON a.id = mf.action_item_id
+       JOIN meetings mm ON mm.id = mf.meeting_id
        LEFT JOIN meetings sm ON sm.id = a.source_meeting_id
       WHERE mf.meeting_id = ?
       ORDER BY mf.is_final, mf.due_date IS NULL, mf.due_date, a.id`,

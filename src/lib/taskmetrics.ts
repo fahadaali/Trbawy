@@ -8,6 +8,7 @@
 //   نسبة الالتزام = ٦٠٪ من نسبة الإنجاز + ٤٠٪ من دقة التوقيت.
 import type { Env } from '../types';
 import { assigneesJson } from './people';
+import { effStatusSql } from './status';
 
 export interface AssigneeStats {
   user_id: number;
@@ -69,7 +70,10 @@ const AGGREGATES = `
     COUNT(*) AS total,
     SUM(a.status = 'done') AS done,
     SUM(a.status NOT IN ('done','cancelled')) AS open,
-    SUM(a.status = 'stalled') AS stalled,
+    -- متعثّرة: ما مضى استحقاقه ولم يُنجَز، أو ما عُلِّم متعثّرًا يدويًا بلا استحقاق فائت
+    SUM(a.status NOT IN ('done','cancelled')
+        AND (a.status = 'stalled'
+             OR (a.due_date IS NOT NULL AND date(a.due_date) < date('now')))) AS stalled,
     SUM(a.status NOT IN ('done','cancelled') AND a.due_date IS NOT NULL AND a.due_date < date('now')) AS overdue,
     SUM(a.status = 'done' AND a.due_date IS NOT NULL AND COALESCE(a.delay_days, 0) <= 0) AS on_time,
     SUM(a.status = 'done' AND a.due_date IS NOT NULL AND COALESCE(a.delay_days, 0) > 0) AS late,
@@ -141,7 +145,8 @@ export async function stalledActions(env: Env, f: StatsFilter, limit = 10) {
   if (f.from) { where.push('sm.greg_date >= ?'); binds.push(f.from); }
   if (f.to) { where.push('sm.greg_date <= ?'); binds.push(f.to); }
   return (await env.DB.prepare(
-    `SELECT a.id, a.type, a.display_number, a.text, a.status, a.due_date, a.progress,
+    `SELECT a.id, a.type, a.display_number, a.text, a.due_date, a.progress,
+            ${effStatusSql('a.status', 'a.due_date', "date('now')")} AS status,
             a.carried_count, sm.display_number AS meeting_number,
             CASE WHEN a.due_date IS NOT NULL AND a.due_date < date('now')
                  THEN CAST(julianday(date('now')) - julianday(date(a.due_date)) AS INTEGER) ELSE 0 END AS overdue_days,

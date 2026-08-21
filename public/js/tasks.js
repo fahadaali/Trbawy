@@ -97,7 +97,6 @@ async function loadPerformance() {
     <td>${personChips([{ n: r.name, c: r.color }])}<div class="muted" style="font-size:12px">${esc(ROLE_AR[r.role] || r.role)}</div></td>
     <td>${arNum(r.total)}</td>
     <td>${arNum(r.done)}</td>
-    <td>${r.overdue ? `<span class="tag tag-red">${arNum(r.overdue)}</span>` : arNum(0)}</td>
     <td>${r.stalled ? `<span class="tag tag-red">${arNum(r.stalled)}</span>` : arNum(0)}</td>
     <td>${arNum(r.late)}</td>
     <td>${r.delay_total ? `<span class="tag tag-red">${arNum(r.delay_total)}</span>` : arNum(0)}</td>
@@ -126,7 +125,7 @@ async function loadPerformance() {
         <div class="s">${arNum(o.done)} من ${arNum(o.total)} بندًا</div></div>
       <div class="stat ${tone(o.timeliness)}"><div class="v">${arNum(o.timeliness)}٪</div><div class="l">دقة التوقيت</div>
         <div class="s">${arNum(o.on_time)} في الموعد · ${arNum(o.late)} متأخرة</div></div>
-      <div class="stat ${o.overdue ? 'stat-bad' : 'stat-ok'}"><div class="v">${arNum(o.overdue)}</div><div class="l">بنود متأخرة الآن</div>
+      <div class="stat ${o.stalled ? 'stat-bad' : 'stat-ok'}"><div class="v">${arNum(o.stalled)}</div><div class="l">بنود متعثّرة الآن</div>
         <div class="s">${arNum(o.overdue_days_now)} يوم تأخّر تراكمي</div></div>
       <div class="stat ${o.delay_total ? 'stat-bad' : 'stat-ok'}"><div class="v">${arNum(o.delay_total)}</div><div class="l">أيام التأخير المسجّلة</div>
         <div class="s">أطول تأخير ${arNum(o.delay_max)} يومًا</div></div>
@@ -134,7 +133,7 @@ async function loadPerformance() {
     <div class="card mt"><div class="card-head"><h3>الالتزام حسب المكلَّف</h3>
       <div class="spacer"></div><span class="legend-note">نسبة الالتزام = ٦٠٪ إنجاز + ٤٠٪ دقة توقيت</span></div>
       ${d.board.length ? `<table class="tbl"><thead><tr><th>المكلَّف</th><th>المُسنَد</th><th>المنجَز</th>
-        <th>متأخرة الآن</th><th>متعثرة</th><th>أُنجزت متأخرة</th><th>مجموع أيام التأخير</th><th>متوسط التأخير</th>
+        <th>متعثرة الآن</th><th>أُنجزت متأخرة</th><th>مجموع أيام التأخير</th><th>متوسط التأخير</th>
         <th>نسبة الإنجاز</th><th>دقة التوقيت</th><th>الالتزام</th></tr></thead><tbody>${rows}</tbody></table>`
         : `<div class="empty"><div class="ico">${icon('tasks', 42)}</div><p>لا توجد بنود مُسندة بعد</p></div>`}
     </div>
@@ -210,7 +209,7 @@ async function taskDetail(id, onBack) {
       <div class="row-2 mt">
         <div><span class="muted">الأولوية:</span> ${esc(PRIORITY_AR[a.priority] || '')}</div>
         <div><span class="muted">الاستحقاق:</span> ${fmtDate(a.due_date)}</div>
-        <div><span class="muted">الحالة:</span> ${statusTag(a.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</div>
+        <div><span class="muted">الحالة:</span> ${statusTag(a.effective_status || a.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</div>
         <div><span class="muted">نسبة الإنجاز:</span> ${arNum(a.progress)}٪</div>
         <div><span class="muted">المحضر المنشئ:</span> ${d.meeting ? esc(d.meeting.display_number) : '—'}</div>
         <div><span class="muted">تاريخ الإنجاز:</span> ${a.completed_at ? fmtDateTime(a.completed_at) : '—'}</div>

@@ -15,6 +15,7 @@ import { notifyMany } from '../lib/notify';
 import { sanitizeHtml } from '../lib/sanitize';
 import { computeFollowups, getFollowups, freezeFollowups } from '../lib/followups';
 import { assigneesJson } from '../lib/people';
+import { effStatusSql, meetingRefSql, overdueDaysSql } from '../lib/status';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -202,11 +203,14 @@ app.get('/:id', async (c) => {
   ).bind(id).all();
 
   // القرارات/المهام المنشأة في هذا المحضر (مع أسماء المسؤولين)
+  // الحالة بمرجع تاريخ انعقاد المحضر: ما مضى استحقاقه ولم يُنجَز متعثّر لا «لم تبدأ»
   const actions = await c.env.DB.prepare(
-    `SELECT a.id, a.type, a.display_number, a.text, a.status, a.priority, a.due_date, a.progress, a.completed_at,
-            ${assigneesJson('a')} AS assignees
+    `SELECT a.id, a.type, a.display_number, a.text, a.priority, a.due_date, a.progress, a.completed_at,
+            ${assigneesJson('a')} AS assignees,
+            ${effStatusSql('a.status', 'a.due_date', meetingRefSql())} AS status,
+            ${overdueDaysSql('a.status', 'a.due_date', meetingRefSql())} AS overdue_days
        FROM action_items a WHERE a.source_meeting_id = ? ORDER BY a.id`,
-  ).bind(id).all();
+  ).bind(m.greg_date, m.greg_date, id).all();
 
   // جدول المتابعة: يُحسب حيًّا للمحضر المفتوح، ويُقرأ من اللقطة المجمّدة للمحضر المعتمد
   // (فالمحضر المقفل وثيقة ثابتة لا تتبدّل بتغيّر حالة البنود بعد اعتماده).

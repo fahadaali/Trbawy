@@ -8,6 +8,7 @@ import { getCouncil, nextActionNumber, formatActionNumber } from '../lib/meeting
 import { notify, notifyMany } from '../lib/notify';
 import { recomputeDelay, assigneeStats, overallStats, stalledActions } from '../lib/taskmetrics';
 import { assigneesJson } from '../lib/people';
+import { effStatus, effStatusSql, overdueDaysSql } from '../lib/status';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -109,7 +110,11 @@ app.get('/', async (c) => {
   const where: string[] = [];
   const binds: any[] = [];
   if (type && TYPES.includes(type)) { where.push('a.type = ?'); binds.push(type); }
-  if (status && STATUSES.includes(status)) { where.push('a.status = ?'); binds.push(status); }
+  if (status && STATUSES.includes(status)) {
+    // التصفية تتبع الحالة الفعلية: من اختار «متعثرة» يريد ما مضى استحقاقه فعلًا
+    where.push(`${effStatusSql('a.status', 'a.due_date', "date('now')")} = ?`);
+    binds.push(status);
+  }
   if (councilId) { where.push('a.council_id = ?'); binds.push(Number(councilId)); }
   let join = '';
   if (mine) { join = 'JOIN action_assignees aa ON aa.action_item_id = a.id AND aa.user_id = ?'; binds.unshift(u.id); }
@@ -117,11 +122,13 @@ app.get('/', async (c) => {
 
   const rows = await c.env.DB.prepare(
     `SELECT DISTINCT a.id, a.type, a.council_id, a.display_number, a.text, a.priority, a.due_date,
-            a.status, a.progress, a.completed_at, a.source_meeting_id,
+            a.progress, a.completed_at, a.source_meeting_id,
             a.delay_days, a.carried_count, a.first_due_date,
             ${assigneesJson('a')} AS assignees,
-            CASE WHEN a.status NOT IN ('done','cancelled') AND a.due_date IS NOT NULL AND a.due_date < date('now')
-                 THEN CAST(julianday(date('now')) - julianday(date(a.due_date)) AS INTEGER) ELSE 0 END AS overdue_days,
+            -- الحالة الفعلية: ما مضى استحقاقه ولم يُنجَز متعثّر مهما كانت الحالة المسجَّلة
+            ${effStatusSql('a.status', 'a.due_date', "date('now')")} AS status,
+            a.status AS recorded_status,
+            ${overdueDaysSql('a.status', 'a.due_date', "date('now')")} AS overdue_days,
             co.name AS council_name, co.type AS council_type,
             m.display_number AS meeting_number, m.created_at AS meeting_created_at
        FROM action_items a
@@ -194,7 +201,13 @@ app.get('/:id', async (c) => {
     'SELECT id, file_name, uploaded_at FROM action_attachments WHERE action_item_id = ? ORDER BY id',
   ).bind(id).all();
   const meeting = await c.env.DB.prepare('SELECT id, display_number FROM meetings WHERE id = ?').bind(a.source_meeting_id).first();
-  return c.json({ action: a, assignees, attachments: attachments.results, meeting });
+  // الحالة المسجَّلة تبقى كما هي (نموذج التحديث يعمل عليها)، ومعها الحالة الفعلية
+  // للعرض: ما مضى استحقاقه ولم يُنجَز متعثّر.
+  const today = new Date().toISOString().slice(0, 10);
+  return c.json({
+    action: { ...a, effective_status: effStatus(a.status, a.due_date, today) },
+    assignees, attachments: attachments.results, meeting,
+  });
 });
 
 // ---- تعديل بند (نص/أولوية/استحقاق/مسؤولون/حالة/نسبة) ----

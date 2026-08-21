@@ -17,6 +17,7 @@ import { sanitizeHtml } from './sanitize';
 import { getFollowups, type FollowupRow } from './followups';
 import { donut, bars, meter, kpi, arNum, type Slice } from './charts';
 import { assigneesJson, isValidColor, parsePeople, tint, type Person } from './people';
+import { effStatusSql, meetingRefSql, overdueDaysSql } from './status';
 
 const esc = (s: any) =>
   s == null ? '' : String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -120,7 +121,10 @@ function printStyles(primary: string, font: string): string {
   * { box-sizing: border-box; }
   /* الألوان جزء من المعنى هنا (حالات ومؤشرات) فتُطبع كما تُعرض */
   html, body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  body { font-family: '${font}', Tahoma, sans-serif; color: #1c2a26; margin: 0; font-size: 13px; }
+  body { font-family: '${font}', Tahoma, sans-serif; color: #1c2a26; margin: 0; font-size: 11.5px;
+    line-height: 1.55; word-break: keep-all; }
+  /* الكلمة لا تُقصّ في منتصفها إلا إن لم تسع سطرًا كاملًا وحدها — والمقاسات أدناه
+     معايَرة على عرض A4 حتى لا يقع ذلك أصلًا. */
   @page { size: A4; margin: 12mm 14mm 14mm 14mm; }
 
   /* إطار الصفحة: صفّا الحجز يحفظان مكان الترويسة والتذييل في كل صفحة */
@@ -131,10 +135,10 @@ function printStyles(primary: string, font: string): string {
 
   .page-head { display: flex; align-items: center; justify-content: space-between;
     border-bottom: 2.5px solid ${primary}; padding: 3mm 0 2mm; background: #fff; }
-  .page-head .org { font-weight: 700; color: ${primary}; font-size: 15px; }
+  .page-head .org { font-weight: 700; color: ${primary}; font-size: 13.5px; }
   .page-head .logo { height: 14mm; max-width: 46mm; object-fit: contain; }
   .page-foot { display: flex; align-items: center; justify-content: space-between;
-    border-top: 1px solid #dfe6e3; font-size: 10.5px; color: #6b7a75; padding-top: 2mm; background: #fff; }
+    border-top: 1px solid #dfe6e3; font-size: 10px; color: #6b7a75; padding-top: 2mm; background: #fff; }
   .page-foot .doc { font-weight: 700; color: #4a5b55; }
 
   .watermark { position: fixed; inset: 0; display: grid; place-items: center; opacity: .05; z-index: -1; }
@@ -143,21 +147,37 @@ function printStyles(primary: string, font: string): string {
   .content { padding: 2mm 0 4mm; }
   .content.brk { break-before: page; page-break-before: always; }
 
+  /* ---------- تقسيم المحضر أقسامًا، لكل قسم صفحته ----------
+     المحضر يُقرأ قسمًا قسمًا لا سيلًا متصلًا: الصفحة الأولى للتعريف ولوحة
+     المؤشرات والحضور، ثم جدول الأعمال، ثم متابعة بنود المحاضر السابقة، ثم
+     القرارات والمهام الجديدة، ثم التوقيعات — كلٌّ يبدأ من رأس صفحة ويمتدّ إلى
+     ما يحتاجه. وداخل القسم يبقى العنوان ملازمًا لجدوله (h2 { break-after: avoid })
+     فلا يقع عنوان في ذيل صفحة وبياناته في التالية. */
+  .sec { break-before: page; page-break-before: always; }
+  .sec > h2:first-child { margin-top: 0; }
+  .sec:first-child, .sec.sec-open { break-before: auto; page-break-before: auto; }
+  /* رأس الجدول يتكرّر على كل صفحة يمتدّ إليها الجدول */
+  .sec > .t-wrap { break-before: avoid; page-break-before: avoid; }
+
   /* العناوين */
-  h1 { font-size: 21px; text-align: center; color: ${primary}; margin: 4px 0 2px; }
+  h1 { font-size: 19px; text-align: center; color: ${primary}; margin: 4px 0 2px; }
   .subnum { text-align: center; font-weight: 700; direction: ltr; color: ${primary};
     background: ${primary}12; border: 1px solid ${primary}33; border-radius: 999px;
     display: inline-block; padding: 2px 14px; }
   .center { text-align: center; }
-  h2 { font-size: 14.5px; color: ${primary}; margin: 14px 0 6px; padding: 4px 10px 4px 0;
-    border-right: 4px solid ${primary}; background: ${primary}0f; border-radius: 0 6px 6px 0; }
-  h3.sub { font-size: 12.5px; color: #4a5b55; margin: 8px 0 4px; }
+  /* عنوان القسم لا يُترك وحده في ذيل صفحة وجدوله في التالية */
+  h2 { font-size: 13px; color: ${primary}; margin: 14px 0 6px; padding: 4px 10px 4px 0;
+    border-right: 4px solid ${primary}; background: ${primary}0f; border-radius: 0 6px 6px 0;
+    break-after: avoid; page-break-after: avoid; break-inside: avoid; }
+  h3.sub { font-size: 11.5px; color: #4a5b55; margin: 8px 0 4px; break-after: avoid; page-break-after: avoid; }
 
   /* الجداول */
   table.tbl { width: 100%; border-collapse: collapse; margin: 6px 0 10px; }
-  table.tbl th, table.tbl td { border: 1px solid #dbe3e0; padding: 5px 8px; text-align: right;
-    font-size: 12px; vertical-align: middle; }
-  table.tbl th { background: ${primary}; color: #fff; font-weight: 700; font-size: 11.5px; }
+  table.tbl th, table.tbl td { border: 1px solid #dbe3e0; padding: 4px 6px; text-align: right;
+    font-size: 11px; vertical-align: middle; }
+  /* عنوان العمود كلمة اصطلاحية: يلتفّ عند المسافات ولا يُقصّ في منتصف الكلمة */
+  table.tbl th { background: ${primary}; color: #fff; font-weight: 700; font-size: 10.5px;
+    overflow-wrap: normal; hyphens: none; }
   table.tbl tbody tr:nth-child(even) td { background: #f7faf9; }
   table.tbl tbody tr.row-bad td { background: #fdf1ef; }
   table.tbl tbody tr.row-ok  td { background: #f1f9f4; }
@@ -165,11 +185,11 @@ function printStyles(primary: string, font: string): string {
   table.tbl.fixed { table-layout: fixed; }
   table.tbl tr { break-inside: avoid; page-break-inside: avoid; }
   .meta { width: 100%; border-collapse: collapse; margin: 10px 0; }
-  .meta td, .meta th { border: 1px solid #dbe3e0; padding: 5px 9px; text-align: right; font-size: 12px; }
+  .meta td, .meta th { border: 1px solid #dbe3e0; padding: 4px 8px; text-align: right; font-size: 11px; }
   .meta th { background: ${primary}14; color: ${primary}; width: 15%; font-weight: 700; }
 
   /* الشارات */
-  .chip { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 11px;
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 10px;
     font-weight: 700; white-space: nowrap; line-height: 1.7; }
   .chip-ok   { background: #e7f5ee; color: ${C.ok};   border: 1px solid #bfe3d0; }
   .chip-warn { background: #fdf3e1; color: ${C.warn}; border: 1px solid #f0dcb4; }
@@ -182,12 +202,12 @@ function printStyles(primary: string, font: string): string {
   .prog { display: block; }
   .pbar { display: block; width: 100%; height: 5px; border-radius: 3px; background: #e6ebe9; overflow: hidden; }
   .pbar-fill { display: block; height: 100%; }
-  .pbar-num { display: block; font-size: 10.5px; color: #4a5b55; text-align: center; line-height: 1.5; }
+  .pbar-num { display: block; font-size: 10px; color: #4a5b55; text-align: center; line-height: 1.5; }
 
   /* شارات الأشخاص: إطار منحنٍ ولون ثابت لكل شخص في كل المحاضر */
   .whos { display: block; }
   .who { display: inline-block; max-width: 100%; border: 1px solid; border-radius: 999px;
-    padding: 0 7px; margin: 1px 0 1px 3px; font-size: 10.5px; font-weight: 700; line-height: 1.75;
+    padding: 0 6px; margin: 1px 0 1px 3px; font-size: 10px; font-weight: 700; line-height: 1.7;
     overflow-wrap: break-word; }
 
   /* لوحة المؤشرات */
@@ -196,14 +216,14 @@ function printStyles(primary: string, font: string): string {
   .kpis { display: flex; flex-wrap: wrap; gap: 8px; }
   .kpi { flex: 1 1 88px; border: 1px solid #e0e6e3; border-radius: 9px; padding: 7px 6px;
     text-align: center; background: #fff; }
-  .kpi-v { font-size: 19px; font-weight: 700; line-height: 1.2; }
-  .kpi-l { font-size: 10.5px; color: #5b6a65; }
-  .kpi-s { font-size: 9.5px; color: #8a9691; }
+  .kpi-v { font-size: 17px; font-weight: 700; line-height: 1.2; }
+  .kpi-l { font-size: 10px; color: #5b6a65; }
+  .kpi-s { font-size: 9px; color: #8a9691; }
   .kpi-ok .kpi-v { color: ${C.ok}; }  .kpi-warn .kpi-v { color: ${C.warn}; }
   .kpi-bad .kpi-v { color: ${C.bad}; } .kpi-neutral .kpi-v { color: ${primary}; }
   .panels { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
   .panel { flex: 1 1 220px; border: 1px solid #e8edeb; border-radius: 9px; padding: 8px 10px; background: #fff; }
-  .panel > .ttl { font-size: 11.5px; font-weight: 700; color: #4a5b55; margin-bottom: 6px; }
+  .panel > .ttl { font-size: 11px; font-weight: 700; color: #4a5b55; margin-bottom: 6px; }
 
   .chart { display: flex; align-items: center; gap: 10px; }
   .dn-v { font-size: 20px; font-weight: 700; fill: ${primary}; }
@@ -235,7 +255,7 @@ function printStyles(primary: string, font: string): string {
   .body-rich img { max-width: 100%; }
   .body-rich mark { background: #fff3b0; padding: 0 2px; border-radius: 3px; }
   .body-rich table { width: 100%; border-collapse: collapse; }
-  .body-rich table td, .body-rich table th { border: 1px solid #dbe3e0; padding: 4px 7px; font-size: 12px; }
+  .body-rich table td, .body-rich table th { border: 1px solid #dbe3e0; padding: 4px 6px; font-size: 11px; }
   .body-rich blockquote { border-right: 3px solid ${primary}55; margin: 6px 0; padding: 2px 10px; color: #4a5b55; }
 
   .sig { height: 12mm; }
@@ -243,16 +263,16 @@ function printStyles(primary: string, font: string): string {
   /* الأرقام والرموز: اتجاه واحد لا يُقلب. داخل الجداول المثبَّتة الأعمدة يُسمح
      لها بالانكسار على سطرين بدل أن تتسرّب خارج الخلية فتعلو نص جارتها — وهو ما
      كان يشوّه جداول التصدير. الانكسار يحفظ المعلومة كاملة، والقصّ يضيّعها. */
-  .code { direction: ltr; font-family: monospace; font-size: 10.5px; text-align: right;
+  .code { direction: ltr; font-family: monospace; font-size: 10px; text-align: right;
     unicode-bidi: isolate; overflow-wrap: anywhere; }
   .num { direction: ltr; unicode-bidi: isolate; white-space: nowrap; display: inline-block;
     max-width: 100%; vertical-align: bottom; }
-  .num.tm { display: block; font-size: 10.5px; color: #6b7a75; }
-  table.tbl.fixed td .num { white-space: normal; overflow-wrap: anywhere; font-size: 11.5px; }
+  .num.tm { display: block; font-size: 10px; color: #6b7a75; }
+  table.tbl.fixed td .num { white-space: normal; overflow-wrap: anywhere; font-size: 10.5px; }
   /* رقم البند مزيج عربي/أرقام: الخط أحادي العرض يبالغ في عرض الحروف العربية
      فيكسر الرقم سطرين في عمود ضيّق — خط المتن يسعه في سطر واحد. */
-  table.tbl.fixed td.code { font-family: '${font}', Tahoma, sans-serif; font-size: 11px; }
-  table.tbl td .chip, table.tbl th .chip { font-size: 10px; padding: 1px 5px; max-width: 100%;
+  table.tbl.fixed td.code { font-family: '${font}', Tahoma, sans-serif; font-size: 10.5px; }
+  table.tbl td .chip, table.tbl th .chip { font-size: 9.5px; padding: 1px 5px; max-width: 100%;
     white-space: normal; vertical-align: middle; }
   table.tbl td, table.tbl th { word-break: normal; overflow-wrap: break-word; }
   /* حاجز أخير: لو طفح محتوى غير متوقّع رغم ما سبق، يُقتطع عند حدّ الخلية ولا يتداخل مع جارتها */
@@ -260,11 +280,11 @@ function printStyles(primary: string, font: string): string {
   .ov { color: ${C.warn}; font-weight: 700; } .muted { color: #8a9691; }
   .verify { margin-top: 14px; display: flex; align-items: center; gap: 14px; border: 1px solid #e0e6e3;
     border-radius: 10px; padding: 10px; break-inside: avoid; background: #fcfdfd; }
-  .verify .txt { font-size: 11.5px; color: #5b6a65; }
+  .verify .txt { font-size: 11px; color: #5b6a65; }
   .banner { text-align: center; font-weight: 700; margin: 8px 0; padding: 6px 10px; border-radius: 8px; }
   .banner-ok { color: ${C.ok}; background: #e7f5ee; border: 1px solid #bfe3d0; }
   .banner-warn { color: ${C.warn}; background: #fdf3e1; border: 1px solid #f0dcb4; }
-  .note { font-size: 11px; color: #8a9691; margin: 4px 0; }
+  .note { font-size: 10px; color: #8a9691; margin: 3px 0 5px; break-after: avoid; page-break-after: avoid; }
 
   @media print {
     .page-head { position: fixed; top: 0; left: 0; right: 0; height: 19mm; }
@@ -332,7 +352,12 @@ function meetingDashboard(attendees: any[], actions: any[], followups: FollowupR
 
   const overdue = followups.filter((f) => f.status !== 'done' && (f.overdue_days ?? 0) > 0).length;
   const lateDone = followups.filter((f) => f.status === 'done' && (f.delay_days ?? 0) > 0);
-  const delayTotal = lateDone.reduce((a, f) => a + (f.delay_days ?? 0), 0);
+  // أيام التأخير = ما تراكم على البنود المفتوحة حتى تاريخ المحضر + ما تأخّره المنجَز
+  // عن استحقاقه. الاكتفاء بالثاني كان يُظهر «لا تأخير» بجوار «٣ متأخرة» فيناقض نفسه.
+  const delayDone = lateDone.reduce((a, f) => a + (f.delay_days ?? 0), 0);
+  const delayOpen = followups.filter((f) => f.status !== 'done')
+    .reduce((a, f) => a + (f.overdue_days ?? 0), 0);
+  const delayTotal = delayOpen + delayDone;
   const carried = followups.filter((f) => !f.is_final).length;
   const documented = followups.filter((f) => f.is_final).length;
   const doneRate = followups.length ? Math.round((documented / followups.length) * 100) : 0;
@@ -363,7 +388,10 @@ function meetingDashboard(attendees: any[], actions: any[], followups: FollowupR
       ${kpi(carried, 'بنود مُرحَّلة', carried ? 'warn' : 'ok', 'من محاضر سابقة')}
       ${kpi(overdue, 'متأخرة عن الاستحقاق', overdue ? 'bad' : 'ok')}
       ${kpi(delayTotal, 'أيام التأخير', delayTotal ? 'bad' : 'ok',
-        lateDone.length ? `على ${countAr(lateDone.length, ['بند واحد', 'بندين', 'بنود', 'بندًا'])}` : 'لا تأخير')}
+        delayTotal
+          ? [delayOpen ? `${arNum(delayOpen)} مفتوحة` : '', delayDone ? `${arNum(delayDone)} عند الإنجاز` : '']
+              .filter(Boolean).join(' · ')
+          : 'لا تأخير')}
       ${guests.length ? kpi(guests.length, 'ضيوف', 'neutral') : ''}
     </div>
     <div class="panels">
@@ -389,10 +417,14 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
   ).bind(m.id).all()).results as any[];
   const agenda = (await env.DB.prepare('SELECT * FROM agenda_items WHERE meeting_id = ? ORDER BY sort_order').bind(m.id).all()).results as any[];
   // بنود هذا المحضر مع المسؤولين عنها (عمود المسؤول جزء أصيل من الجدول)
+  // الحالة تُشتقّ بمرجع تاريخ انعقاد هذا المحضر: بند مضى استحقاقه ولم يُنجَز متعثّر
+  // ولو بقيت حالته المسجَّلة «لم تبدأ» — والوثيقة تصف حال يوم الاجتماع.
   const actions = (await env.DB.prepare(
-    `SELECT a.*, ${assigneesJson('a')} AS assignees
+    `SELECT a.*, ${assigneesJson('a')} AS assignees,
+            ${effStatusSql('a.status', 'a.due_date', meetingRefSql())} AS status,
+            ${overdueDaysSql('a.status', 'a.due_date', meetingRefSql())} AS overdue_days
        FROM action_items a WHERE a.source_meeting_id = ? ORDER BY a.type, a.id`,
-  ).bind(m.id).all()).results as any[];
+  ).bind(m.greg_date, m.greg_date, m.id).all()).results as any[];
   // جدول المتابعة: بنود المحاضر السابقة المرحَّلة إلى هذا المحضر (§٤٫٣)
   const followups = await getFollowups(env, m);
   const writer = m.writer_id ? await env.DB.prepare('SELECT name FROM users WHERE id = ?').bind(m.writer_id).first<any>() : null;
@@ -443,6 +475,7 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
     </tr>`).join('');
 
   return `<div class="content${brk ? ' brk' : ''}">
+    <section class="sec sec-open">
     <h1>محضر اجتماع ${finalized ? '' : '(مسودة)'}</h1>
     <div class="center"><span class="subnum">${esc(m.display_number)}</span></div>
     ${m.title ? `<p class="center" style="font-weight:700;margin:6px 0 0">${esc(m.title)}</p>` : ''}
@@ -465,27 +498,35 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       ${attendees.filter((a) => !a.is_guest).map((a) => `<tr><td>${esc(a.user_name)}</td><td>${esc(roleAr(a.user_role))}</td><td>${attChip(a.attendance_status)}</td></tr>`).join('')}
       ${guests.map((g) => `<tr><td>${esc(g.guest_name)} ${chip('ضيف', 'info')}</td><td>${esc(g.guest_title || '')}</td><td>${attChip('present')}</td></tr>`).join('')}
     </tbody></table></div>
+    </section>
 
+    <section class="sec">
     <h2>جدول الأعمال والبنود</h2>
     <ol class="agenda">${agenda.map((it) => `<li><b>${esc(it.title)}</b>${it.body ? `<div class="body-rich">${sanitizeHtml(it.body)}</div>` : ''}</li>`).join('') || '<li>—</li>'}</ol>
+    </section>
 
-    ${followups.length ? `<h2>متابعة بنود المحاضر السابقة</h2>
+    ${followups.length ? `<section class="sec">
+    <h2>متابعة بنود المحاضر السابقة</h2>
     <p class="note">البند غير المنجَز يُرحَّل إلى المحضر التالي حتى يُنجَز، ثم يظهر ظهورًا أخيرًا للتوثيق.</p>
     <div class="t-wrap"><table class="tbl fixed">
       <colgroup><col style="width:8%" /><col style="width:11%" /><col style="width:22%" /><col style="width:15%" />
         <col style="width:11%" /><col style="width:15%" /><col style="width:7%" /><col style="width:11%" /></colgroup>
       <thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الاستحقاق</th>
       <th>الحالة والالتزام</th><th>الإنجاز</th><th>الترحيل</th></tr></thead>
-      <tbody>${followupRows}</tbody></table></div>` : ''}
+      <tbody>${followupRows}</tbody></table></div>
+    </section>` : ''}
 
-    ${actions.length ? `<h2>القرارات والتوصيات والمهام</h2>
+    ${actions.length ? `<section class="sec">
+    <h2>القرارات والتوصيات والمهام</h2>
     <div class="t-wrap"><table class="tbl fixed">
       <colgroup><col style="width:8%" /><col style="width:11%" /><col style="width:25%" /><col style="width:18%" />
         <col style="width:9%" /><col style="width:11%" /><col style="width:11%" /><col style="width:7%" /></colgroup>
       <thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الأولوية</th>
       <th>الاستحقاق</th><th>الحالة</th><th>الإنجاز</th></tr></thead>
-      <tbody>${actionRows}</tbody></table></div>` : ''}
+      <tbody>${actionRows}</tbody></table></div>
+    </section>` : ''}
 
+    <section class="sec">
     <h2>التوقيعات</h2>
     <div class="t-wrap"><table class="tbl fixed">
       <colgroup><col style="width:26%" /><col style="width:12%" /><col style="width:22%" />
@@ -493,6 +534,7 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       <thead><tr><th>الاسم</th><th>الحالة</th><th>التوقيع</th><th>رمز التحقق</th><th>وقت التوقيع</th></tr></thead>
       <tbody>${signRows}</tbody></table></div>
     ${qr ? `<div class="verify">${qr}<div class="txt"><b>رمز التحقق من صحة المحضر</b><br />امسح الرمز أو افتح:<br /><span dir="ltr">${esc(verifyUrl)}</span></div></div>` : ''}
+    </section>
   </div>`;
 }
 
