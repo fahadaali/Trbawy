@@ -265,7 +265,7 @@ async function meetingDetail(id) {
         <td dir="ltr" style="text-align:right">${esc(f.display_number)}</td>
         <td>${esc(f.text)}${f.source_meeting_number ? `<div class="muted" style="font-size:12px" dir="ltr">${esc(f.source_meeting_number)}</div>` : ''}</td>
         <td>${esc(f.assignees || '—')}</td>
-        <td>${f.due_date ? esc(f.due_date) : '—'}</td>
+        <td>${fmtDate(f.due_date)}</td>
         <td>${statusTag(f.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</td>
         <td>${miniBar(f.progress)}</td>
         <td>${delayTag(f)}</td>
@@ -330,7 +330,7 @@ async function meetingDetail(id) {
           <div><span class="muted">العنوان:</span> ${esc(m.title || '—')}</div>
           <div><span class="muted">المجلس:</span> ${esc(COUNCIL_TYPE_AR[d.council.type] || d.council.name)}</div>
           <div><span class="muted">التاريخ الهجري:</span> ${esc(m.hijri_date || '—')}</div>
-          <div><span class="muted">التاريخ الميلادي:</span> ${esc(m.greg_date || '—')}</div>
+          <div><span class="muted">التاريخ الميلادي:</span> ${fmtDate(m.greg_date)}</div>
           <div><span class="muted">المكان:</span> ${m.location_type === 'remote' ? 'عن بُعد' : 'حضوري'} ${m.location ? '— ' + esc(m.location) : ''}</div>
         </div>
         <div id="timePanel" class="time-panel mt"></div>
@@ -867,7 +867,7 @@ function renderActionsSection(meetingId, d, canEdit) {
         <tbody>${rows.map((a) => `<tr><td>${esc(ACTION_TYPE_AR[a.type] || a.type)}</td><td dir="ltr" style="text-align:right">${esc(a.display_number)}</td><td>${esc(a.text)}</td>
           <td>${esc(a.assignees || '—')}</td>
           <td><span class="tag ${PRIORITY_COLOR[a.priority] || 'tag-gray'}">${esc(PRIORITY_AR[a.priority] || '')}</span></td>
-          <td>${a.due_date ? esc(a.due_date) : '—'}</td><td>${statusTag(a.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</td>
+          <td>${fmtDate(a.due_date)}</td><td>${statusTag(a.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</td>
           <td>${miniBar(a.progress)}</td>
           <td><button class="btn-ghost btn-sm" data-openaction="${a.id}">عرض</button>${canEdit ? `<button class="btn-ghost btn-sm" data-editaction="${a.id}">تعديل</button>` : ''}</td></tr>`).join('')}</tbody></table>`
         : '<div class="card-body muted">لا توجد بنود بعد.</div>'}

@@ -238,7 +238,41 @@ function printStyles(primary: string, font: string): string {
     .sp-h, .sp-f { display: none; }
     .sheet { background: #fff; max-width: 820px; margin: 0 auto; padding: 22mm 16mm;
       box-shadow: 0 2px 22px rgba(0,0,0,.14); border-radius: 4px; }
-  }`;
+  }
+
+  /* ---------- قراءة المحضر من الجوال ---------- */
+  /* الورقة مقاس A4 لا تُقرأ على شاشة ٣٩٠ بكسل: نُقلّص الهوامش، ونُمرّر الجداول
+     داخل حاويتها وحدها بدل أن تجرّ الصفحة كلها أفقيًا. الطباعة لا تتأثر بشيء من هذا. */
+  @media screen and (max-width: 760px) {
+    body { padding: 0 0 96px; }
+    .sheet { padding: 14px 12px; border-radius: 0; box-shadow: none; max-width: none; }
+    h1 { font-size: 18px; } h2 { font-size: 13.5px; }
+    .t-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin-inline: -4px; padding-inline: 4px; }
+    .t-wrap table.tbl { min-width: 640px; }
+    .meta th { width: auto; }
+    .kpi { flex-basis: calc(50% - 8px); }
+    .panel { flex-basis: 100%; }
+    .verify { flex-direction: column; text-align: center; }
+    .page-head .logo { height: 11mm; }
+    .page-head .org { font-size: 13px; }
+  }
+
+  /* شريط التصدير — يظهر على الشاشة فقط ويختفي في الورق */
+  .pactions {
+    position: fixed; inset-inline: 0; bottom: 0; z-index: 20; display: flex; gap: 8px;
+    align-items: center; flex-wrap: wrap; justify-content: center;
+    background: rgba(255,255,255,.97); border-top: 1px solid #dfe6e3;
+    padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -2px 14px rgba(0,0,0,.08);
+  }
+  .pactions button {
+    font-family: inherit; font-size: 14px; font-weight: 700; border-radius: 10px;
+    padding: 11px 16px; min-height: 44px; border: 1px solid ${primary}; cursor: pointer;
+  }
+  .pactions .prim { background: ${primary}; color: #fff; }
+  .pactions .sec { background: #fff; color: ${primary}; }
+  .pactions .hint { flex-basis: 100%; text-align: center; font-size: 11.5px; color: #6b7a75; }
+  @media print { .pactions { display: none !important; } }`;
 }
 
 // ---------------------------------------------------------------------------
@@ -392,34 +426,34 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
     ${meetingDashboard(attendees, actions, followups)}
 
     <h2>الحضور</h2>
-    <table class="tbl"><thead><tr><th>الاسم</th><th>الصفة</th><th>الحالة</th></tr></thead><tbody>
+    <div class="t-wrap"><table class="tbl"><thead><tr><th>الاسم</th><th>الصفة</th><th>الحالة</th></tr></thead><tbody>
       ${attendees.filter((a) => !a.is_guest).map((a) => `<tr><td>${esc(a.user_name)}</td><td>${esc(roleAr(a.user_role))}</td><td>${attChip(a.attendance_status)}</td></tr>`).join('')}
       ${guests.map((g) => `<tr><td>${esc(g.guest_name)} ${chip('ضيف', 'info')}</td><td>${esc(g.guest_title || '')}</td><td>${attChip('present')}</td></tr>`).join('')}
-    </tbody></table>
+    </tbody></table></div>
 
     <h2>جدول الأعمال والبنود</h2>
     <ol class="agenda">${agenda.map((it) => `<li><b>${esc(it.title)}</b>${it.body ? `<div class="body-rich">${sanitizeHtml(it.body)}</div>` : ''}</li>`).join('') || '<li>—</li>'}</ol>
 
     ${followups.length ? `<h2>متابعة بنود المحاضر السابقة</h2>
     <p class="note">البند غير المنجَز يُرحَّل إلى المحضر التالي حتى يُنجَز، ثم يظهر ظهورًا أخيرًا للتوثيق.</p>
-    <table class="tbl fixed">
+    <div class="t-wrap"><table class="tbl fixed">
       <colgroup><col style="width:9%" /><col style="width:12%" /><col style="width:24%" /><col style="width:13%" />
         <col style="width:10%" /><col style="width:14%" /><col style="width:7%" /><col style="width:11%" /></colgroup>
       <thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الاستحقاق</th>
       <th>الحالة والالتزام</th><th>الإنجاز</th><th>الترحيل</th></tr></thead>
-      <tbody>${followupRows}</tbody></table>` : ''}
+      <tbody>${followupRows}</tbody></table></div>` : ''}
 
     ${actions.length ? `<h2>القرارات والتوصيات والمهام</h2>
-    <table class="tbl fixed">
+    <div class="t-wrap"><table class="tbl fixed">
       <colgroup><col style="width:9%" /><col style="width:12%" /><col style="width:26%" /><col style="width:14%" />
         <col style="width:9%" /><col style="width:10%" /><col style="width:11%" /><col style="width:9%" /></colgroup>
       <thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الأولوية</th>
       <th>الاستحقاق</th><th>الحالة</th><th>الإنجاز</th></tr></thead>
-      <tbody>${actionRows}</tbody></table>` : ''}
+      <tbody>${actionRows}</tbody></table></div>` : ''}
 
     <h2>التوقيعات</h2>
-    <table class="tbl"><thead><tr><th>الاسم</th><th>الحالة</th><th>التوقيع</th><th>رمز التحقق</th><th>وقت التوقيع</th></tr></thead>
-      <tbody>${signRows}</tbody></table>
+    <div class="t-wrap"><table class="tbl"><thead><tr><th>الاسم</th><th>الحالة</th><th>التوقيع</th><th>رمز التحقق</th><th>وقت التوقيع</th></tr></thead>
+      <tbody>${signRows}</tbody></table></div>
     ${qr ? `<div class="verify">${qr}<div class="txt"><b>رمز التحقق من صحة المحضر</b><br />امسح الرمز أو افتح:<br /><span dir="ltr">${esc(verifyUrl)}</span></div></div>` : ''}
   </div>`;
 }
@@ -433,7 +467,7 @@ function shell(settings: any, primary: string, footerRight: string, bodies: stri
   const logoImg = logoUri ? `<img class="logo" src="${logoUri}" />` : '';
   const watermark = wmUri ? `<div class="watermark"><img src="${wmUri}" /></div>` : '';
   return `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>${esc(footerRight)}</title>
 <link href="https://fonts.googleapis.com/css2?family=${encodeURIComponent(font)}:wght@400;500;700&display=swap" rel="stylesheet" />
 <style>${printStyles(primary, font)}${extraCss}</style></head><body>
@@ -448,7 +482,40 @@ ${watermark}
   <!-- التذييل بعد المحتوى ليقع أسفل الصفحة على الشاشة، ويثبت في كل صفحة عند الطباعة -->
   <div class="page-foot"><span>${esc(settings.footer_text || settings.org_name || '')}</span><span class="doc" dir="ltr">${esc(footerRight)}</span></div>
 </div>
-<script>window.addEventListener('load',function(){if(location.search.indexOf('print=1')>-1)window.print();});</script>
+<div class="pactions">
+  <button type="button" class="prim" id="btnPrint">${esc('طباعة / حفظ PDF')}</button>
+  <button type="button" class="sec" id="btnShare" hidden>مشاركة الرابط</button>
+  <span class="hint" id="printHint"></span>
+</div>
+<script>
+(function () {
+  var ios = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  var standalone = window.navigator.standalone === true
+    || window.matchMedia('(display-mode: standalone)').matches;
+  function doPrint() { try { window.print(); } catch (e) { /* نافذة الطباعة غير متاحة */ } }
+  document.getElementById('btnPrint').addEventListener('click', doPrint);
+
+  // المشاركة الأصلية: أسرع طريق على الجوال لإرسال المحضر أو فتحه في سفاري للطباعة
+  if (navigator.share) {
+    var b = document.getElementById('btnShare');
+    b.hidden = false;
+    b.addEventListener('click', function () {
+      navigator.share({ title: document.title, url: location.href }).catch(function () {});
+    });
+  }
+  // في وضع التطبيق المستقل على آيفون قد لا تتوفّر نافذة الطباعة — نرشد للطريق البديل
+  if (ios) {
+    document.getElementById('printHint').textContent = standalone
+      ? 'إن لم تفتح نافذة الطباعة: اضغط «مشاركة الرابط» ثم افتحه في سفاري واختر «طباعة» أو «حفظ في الملفات».'
+      : 'من نافذة الطباعة يمكنك الحفظ كملف PDF عبر «مشاركة» ← «حفظ في الملفات».';
+  }
+  // الطباعة التلقائية عند القدوم من زر التصدير (تُتجاوَز في وضع التطبيق المستقل)
+  window.addEventListener('load', function () {
+    if (location.search.indexOf('print=1') > -1 && !(ios && standalone)) setTimeout(doPrint, 350);
+  });
+})();
+</script>
 </body></html>`;
 }
 
@@ -549,8 +616,8 @@ export async function renderStudentReportHtml(
     </tbody></table>
     <h2>مخطط التطوّر</h2>${chart}
     <h2>نتائج دورات التقييم</h2>
-    <table class="tbl"><thead><tr><th>الدورة</th><th>نتيجته</th><th>متوسط صفه</th><th>متوسط مرحلته</th></tr></thead>
-      <tbody>${rows || '<tr><td colspan="4">لا توجد نتائج منشورة</td></tr>'}</tbody></table>
+    <div class="t-wrap"><table class="tbl"><thead><tr><th>الدورة</th><th>نتيجته</th><th>متوسط صفه</th><th>متوسط مرحلته</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="4">لا توجد نتائج منشورة</td></tr>'}</tbody></table></div>
     ${student.notes ? `<h2>ملاحظات</h2><p>${esc(student.notes)}</p>` : ''}
   </div>`;
 
@@ -563,7 +630,7 @@ export async function renderVerifyHtml(env: Env, code: string): Promise<string> 
   const settings = await getSettings(env);
   const primary = esc(settings.primary_color || '#1f6f54');
   const head = `<!DOCTYPE html><html lang="ar" dir="rtl"><head><meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" /><title>التحقق من المحضر</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" /><title>التحقق من المحضر</title>
     <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700&display=swap" rel="stylesheet" />
     <style>body{font-family:'Tajawal',sans-serif;background:#f4f6f5;margin:0;padding:20px;color:#1c2a26}
     .card{max-width:520px;margin:40px auto;background:#fff;border-radius:14px;padding:28px;box-shadow:0 4px 24px rgba(0,0,0,.08)}

@@ -2,12 +2,17 @@
 <html lang="ar" dir="rtl">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>منصة المجلس التربوي</title>
   <meta name="description" content="إدارة محاضر الاجتماعات والتقييمات التربوية" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" rel="stylesheet" />
+  <!-- الخط يُحمَّل بلا حجب: ورقة نمط معلّقة تُوقف تنفيذ السكربتات بعدها، فتبقى الشاشة
+       فارغة كلما تعذّر الوصول إلى خدمة الخطوط (شبكة جوال ضعيفة أو شبكة مقيّدة).
+       نُحمّلها كـ media="print" ثم نُفعّلها عند وصولها، والخط الاحتياطي يعمل ريثما تصل. -->
+  <link rel="stylesheet" media="print" onload="this.media='all';this.onload=null"
+        href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" />
+  <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&display=swap" /></noscript>
   <link rel="stylesheet" href="/css/styles.css" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <meta name="theme-color" content="#1f6f54" />
@@ -15,8 +20,29 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="المجلس التربوي" />
-  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
   <link rel="icon" href="/icons/icon-192.png" />
+  <!-- أرقام الجوال داخل النصوص العربية لا تتحوّل إلى روابط اتصال في iOS -->
+  <meta name="format-detection" content="telephone=no" />
+  <!-- شاشات الإقلاع لتطبيق الشاشة الرئيسية على آيفون (بلا وميض أبيض عند الفتح) -->
+  <link rel="apple-touch-startup-image" href="/icons/splash/1170x2532.png"
+        media="(device-width: 390px) and (device-height: 844px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/icons/splash/1179x2556.png"
+        media="(device-width: 393px) and (device-height: 852px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/icons/splash/1284x2778.png"
+        media="(device-width: 428px) and (device-height: 926px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/icons/splash/1290x2796.png"
+        media="(device-width: 430px) and (device-height: 932px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/icons/splash/1125x2436.png"
+        media="(device-width: 375px) and (device-height: 812px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/icons/splash/1242x2688.png"
+        media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 3) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/icons/splash/828x1792.png"
+        media="(device-width: 414px) and (device-height: 896px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/icons/splash/750x1334.png"
+        media="(device-width: 375px) and (device-height: 667px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
+  <link rel="apple-touch-startup-image" href="/icons/splash/640x1136.png"
+        media="(device-width: 320px) and (device-height: 568px) and (-webkit-device-pixel-ratio: 2) and (orientation: portrait)" />
 </head>
 <body>
   <div id="app" aria-live="polite"></div>
@@ -32,9 +58,27 @@
   <script src="/js/evaluations.js"></script>
   <script src="/js/students.js"></script>
   <script>
-    // تسجيل عامل الخدمة (PWA) — لا يعيق الإقلاع إن فشل
+    // تسجيل عامل الخدمة (PWA) — لا يعيق الإقلاع إن فشل.
+    // عند نزول نسخة جديدة نُفعّلها فورًا ونُعيد التحميل مرة واحدة، حتى لا يبقى
+    // المستخدم على نسخة قديمة مخزّنة بعد التحديث.
     if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {}));
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('/sw.js').then(function (reg) {
+          reg.addEventListener('updatefound', function () {
+            var sw = reg.installing;
+            if (!sw) return;
+            sw.addEventListener('statechange', function () {
+              if (sw.state === 'installed' && navigator.serviceWorker.controller) sw.postMessage('skip-waiting');
+            });
+          });
+        }).catch(function () {});
+        var reloaded = false;
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+          if (reloaded) return;
+          reloaded = true;
+          location.reload();
+        });
+      });
     }
   </script>
 </body>

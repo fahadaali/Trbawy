@@ -32,6 +32,10 @@ const ICON_PATHS = {
   sparkle: '<path d="M12 3.5l1.9 4.9 4.9 1.9-4.9 1.9L12 17.1l-1.9-4.9L5.2 10.3l4.9-1.9z"/><path d="M18.5 15.5l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8z"/>',
   mic: '<rect x="9" y="3.5" width="6" height="10" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/><path d="M12 18v2.5M9 20.5h6"/>',
   logout: '<path d="M14 4H6v16h8"/><path d="M18 12H10"/><path d="M15 9l3 3-3 3"/>',
+  search: '<circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l4.5 4.5"/>',
+  lock: '<rect x="4.5" y="10" width="15" height="10" rx="2.2"/><path d="M8 10V7.5a4 4 0 0 1 8 0V10"/>',
+  download: '<path d="M12 4v10"/><path d="M8 10.5 12 14.5l4-4"/><path d="M4.5 17.5v2h15v-2"/>',
+  addbox: '<rect x="4.5" y="4.5" width="15" height="15" rx="3.5"/><path d="M12 8.5v7M8.5 12h7"/>',
 };
 function icon(name, size = 20) {
   return `<svg class="ic-svg" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] || ''}</svg>`;
@@ -538,3 +542,115 @@ function fmtDateTime(iso) {
   } catch { return iso; }
 }
 function initials(name) { return (name || '؟').trim().charAt(0); }
+
+// تاريخ ميلادي قصير بأرقام عربية واتجاه معزول: ٢٠٢٦/٠٣/٠٩
+// (التاريخ الخام YYYY-MM-DD ينقلب ترتيبه بصريًا داخل نص عربي)
+function fmtDate(d) {
+  if (!d) return '—';
+  const p = String(d).slice(0, 10).replace(/-/g, '/');
+  return `<span class="num">${arNum(p)}</span>`;
+}
+
+
+// ============================================================
+// تحسينات الجوال
+// ============================================================
+
+/**
+ * الجداول على الشاشات الصغيرة: كل صف بطاقة، وكل خلية سطر «العنوان: القيمة».
+ * ننسخ عنوان العمود إلى الخلية (data-l) فيقرأه CSS — فلا حاجة لتعديل كل جدول
+ * في الوحدات، وأي جدول جديد يستفيد تلقائيًا.
+ */
+function stackTables(root) {
+  (root || document).querySelectorAll('table.tbl').forEach((tbl) => {
+    const heads = [...tbl.querySelectorAll('thead th')].map((th) => th.textContent.trim());
+    if (!heads.length) return;                       // جدول بلا ترويسة يُترك كما هو
+    tbl.classList.add('stack');
+    tbl.querySelectorAll('tbody tr').forEach((tr) => {
+      [...tr.children].forEach((td, i) => {
+        if (td.hasAttribute('colspan') && Number(td.getAttribute('colspan')) > 1) { td.dataset.l = ''; return; }
+        const label = heads[i] || '';
+        td.dataset.l = label;
+        // خلية بلا عنوان = عمود أزرار؛ وخلية فارغة تُخفى بدل أن تشغل سطرًا فارغًا
+        if (!label) td.classList.add('cell-actions');
+        else if (!td.textContent.trim() && !td.querySelector('img,svg,input,button')) td.classList.add('cell-empty');
+      });
+    });
+  });
+}
+
+// أي محتوى يُحقن في الصفحة يمرّ على المُحسِّن — الشاشات تُبنى بـ innerHTML فلا حدث نعتمد عليه
+function watchTables() {
+  const target = document.getElementById('app');
+  if (!target || window.__tblObserver) return;
+  const run = () => stackTables(target);
+  window.__tblObserver = new MutationObserver(() => { clearTimeout(window.__tblTimer); window.__tblTimer = setTimeout(run, 40); });
+  window.__tblObserver.observe(target, { childList: true, subtree: true });
+  run();
+}
+
+// بحث الجوال: حقل البحث نفسه يُعرض كورقة أعلى الشاشة
+function openMobileSearch() {
+  const gs = document.querySelector('.gsearch');
+  if (!gs) return;
+  const open = !gs.classList.contains('mobile-open');
+  gs.classList.toggle('mobile-open', open);
+  if (open) {
+    const inp = document.getElementById('gsInput');
+    if (inp) { inp.value = ''; setTimeout(() => inp.focus(), 60); }
+    setTimeout(() => document.addEventListener('click', closeMobileSearchOutside, true), 250);
+  }
+}
+function closeMobileSearchOutside(e) {
+  const gs = document.querySelector('.gsearch.mobile-open');
+  if (!gs) return document.removeEventListener('click', closeMobileSearchOutside, true);
+  if (gs.contains(e.target) || e.target.closest('#gsMobileBtn')) return;
+  gs.classList.remove('mobile-open');
+  document.removeEventListener('click', closeMobileSearchOutside, true);
+}
+
+// ---------- تطبيق الشاشة الرئيسية (PWA) ----------
+const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent)
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);   // آيباد بواجهة سطح مكتب
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+
+let deferredInstall = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredInstall = e; });
+
+/**
+ * دعوة لتثبيت التطبيق على الشاشة الرئيسية.
+ * آيفون لا يدعم beforeinstallprompt، فنعرض له خطوات المشاركة؛ وغيره يُثبَّت بضغطة.
+ * تظهر مرة واحدة ثم تُحفظ الاستجابة محليًا.
+ */
+function maybeShowInstallCard() {
+  if (isStandalone() || localStorage.getItem('a2hs_dismissed') === '1') return;
+  if (document.querySelector('.a2hs')) return;
+  const ios = isIOS();
+  if (!ios && !deferredInstall) return;              // متصفح لا يدعم التثبيت الآن
+  const el = document.createElement('div');
+  el.className = 'a2hs';
+  el.innerHTML = `
+    <div class="ic">${icon('addbox', 22)}</div>
+    <div class="tx"><b>ثبّت المنصة على شاشتك الرئيسية</b>
+      ${ios
+        ? 'افتح قائمة <b style="display:inline">المشاركة</b> في سفل سفاري ثم اختر «إضافة إلى الشاشة الرئيسية».'
+        : 'تفتح كتطبيق مستقل وتعمل أسرع، وتصلك إشعاراتها من الشاشة الرئيسية.'}
+      ${!ios ? '<div style="margin-top:8px"><button class="btn btn-sm" id="a2hsGo">تثبيت الآن</button></div>' : ''}
+    </div>
+    <button class="x" id="a2hsX" aria-label="إخفاء">&times;</button>`;
+  document.body.appendChild(el);
+  el.querySelector('#a2hsX').onclick = () => { localStorage.setItem('a2hs_dismissed', '1'); el.remove(); };
+  const go = el.querySelector('#a2hsGo');
+  if (go) go.onclick = async () => {
+    el.remove();
+    localStorage.setItem('a2hs_dismissed', '1');
+    if (deferredInstall) { deferredInstall.prompt(); deferredInstall = null; }
+  };
+}
+
+function initMobile() {
+  if (isStandalone()) document.documentElement.classList.add('standalone');
+  watchTables();
+  // تُستدعى مع كل تنقّل (إعادة بناء الهيكل)، والدعوة تظهر مرة واحدة في الجلسة
+  if (!window.__a2hsScheduled) { window.__a2hsScheduled = true; setTimeout(maybeShowInstallCard, 4000); }
+}

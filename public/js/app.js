@@ -189,6 +189,32 @@ function canSee(item) {
   return item.roles === '*' || item.roles.includes(State.user.role);
 }
 
+// ---- القائمة الجانبية على الجوال (ستارة + قفل تمرير الخلفية) ----
+function toggleDrawer(force) {
+  const sb = document.getElementById('sidebar');
+  const sc = document.getElementById('drawerScrim');
+  if (!sb) return;
+  const open = force === undefined ? !sb.classList.contains('open') : force;
+  sb.classList.toggle('open', open);
+  if (sc) sc.classList.toggle('show', open);
+  document.body.style.overflow = open ? 'hidden' : '';
+}
+function closeDrawer() { toggleDrawer(false); }
+
+// ---- شريط التبويب السفلي: أهم أربع وجهات + «المزيد» يفتح القائمة ----
+function tabbarHtml(view) {
+  const items = NAV.flatMap((g) => g.items).filter(canSee);
+  const primary = ['dashboard', 'meetings', 'tasks', 'evaluations', 'students', 'users']
+    .map((k) => items.find((i) => i.key === k)).filter(Boolean).slice(0, 4);
+  if (!primary.length) return '';
+  const short = { dashboard: 'الرئيسية', meetings: 'المحاضر', tasks: 'المهام', evaluations: 'التقييم', students: 'الطلاب', users: 'المستخدمون' };
+  return `<nav class="tabbar" aria-label="تنقّل سريع">
+    ${primary.map((it) => `<a href="#/${it.key}" class="${view === it.key ? 'active' : ''}">
+      ${icon(it.ico, 21)}<span>${short[it.key] || it.label}</span></a>`).join('')}
+    <button type="button" id="tabMore" aria-label="المزيد">${icon('menu', 21)}<span>المزيد</span></button>
+  </nav>`;
+}
+
 function renderShell(view, rest) {
   const u = State.user;
   const navHtml = NAV.map((g) => {
@@ -201,9 +227,16 @@ function renderShell(view, rest) {
 
   app().innerHTML = `
     <div class="layout">
+      <div class="drawer-scrim" id="drawerScrim"></div>
       <aside class="sidebar" id="sidebar">
         <div class="brand"><div class="mark">م</div><div class="name">المجلس التربوي<small>منصة المحاضر والتقييم</small></div></div>
         <nav class="nav">${navHtml}</nav>
+        <div class="nav-group-title only-mobile">حسابي</div>
+        <div class="nav only-mobile" style="flex:0">
+          <a href="#" id="profileBtnM"><span class="ico">${icon('pen', 18)}</span>توقيعي</a>
+          <a href="#" id="devicesBtnM"><span class="ico">${icon('key', 18)}</span>أجهزتي</a>
+          <a href="#" id="pwBtnM"><span class="ico">${icon('lock', 18)}</span>تغيير كلمة المرور</a>
+        </div>
         <div class="userbox">
           <div class="av">${esc(initials(u.name))}</div>
           <div class="meta"><b>${esc(u.name)}</b><span>${esc(ROLE_AR[u.role] || u.role)}${u.stage ? ' — ' + STAGE_AR[u.stage] : ''}</span></div>
@@ -223,12 +256,14 @@ function renderShell(view, rest) {
             <button class="btn-ghost btn-sm" id="bellBtn">${icon('bell', 18)}<span id="notifBadge" class="badge" style="display:none;position:absolute;top:-6px;inset-inline-start:-6px;background:var(--danger);color:#fff;border-radius:20px;padding:0 6px;font-size:11px"></span></button>
             <div id="notifPanel" style="display:none;position:absolute;top:110%;inset-inline-start:0;width:320px;max-height:400px;overflow:auto;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);z-index:60"></div>
           </div>
-          <button class="btn-ghost btn-sm" id="profileBtn">توقيعي</button>
-          <button class="btn-ghost btn-sm" id="devicesBtn">${icon('key', 16)} أجهزتي</button>
-          <button class="btn-ghost btn-sm" id="pwBtn">تغيير كلمة المرور</button>
+          <button class="btn-ghost btn-sm only-mobile" id="gsMobileBtn" aria-label="بحث">${icon('search', 18)}</button>
+          <button class="btn-ghost btn-sm only-desktop" id="profileBtn">توقيعي</button>
+          <button class="btn-ghost btn-sm only-desktop" id="devicesBtn">${icon('key', 16)} أجهزتي</button>
+          <button class="btn-ghost btn-sm only-desktop" id="pwBtn">تغيير كلمة المرور</button>
         </div>
         <div class="content" id="content"><div class="spinner"></div></div>
       </div>
+      ${tabbarHtml(view)}
     </div>`;
 
   document.getElementById('logoutBtn').onclick = async () => {
@@ -236,12 +271,22 @@ function renderShell(view, rest) {
     State.user = null; State.pendingShown = false; document.querySelectorAll('.pending-pop').forEach((el) => el.remove());
     location.hash = ''; route();
   };
-  document.getElementById('pwBtn').onclick = () => renderChangePassword(false);
-  document.getElementById('profileBtn').onclick = () => profileSignature();
-  document.getElementById('devicesBtn').onclick = () => myDevicesDialog();
-  document.getElementById('menuToggle').onclick = () => document.getElementById('sidebar').classList.toggle('open');
+  const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = (e) => { e.preventDefault(); fn(); }; };
+  on('pwBtn', () => renderChangePassword(false));
+  on('pwBtnM', () => { closeDrawer(); renderChangePassword(false); });
+  on('profileBtn', () => profileSignature());
+  on('profileBtnM', () => { closeDrawer(); profileSignature(); });
+  on('devicesBtn', () => myDevicesDialog());
+  on('devicesBtnM', () => { closeDrawer(); myDevicesDialog(); });
+  on('menuToggle', () => toggleDrawer());
+  on('drawerScrim', () => closeDrawer());
+  on('gsMobileBtn', () => openMobileSearch());
+  on('tabMore', () => toggleDrawer());
+  // اختيار وجهة من القائمة يغلقها — وإلا بقيت الستارة فوق الصفحة الجديدة
+  document.querySelectorAll('#sidebar .nav a[href^="#/"]').forEach((a) => a.addEventListener('click', closeDrawer));
   setupNotifications();
   setupGlobalSearch();
+  initMobile();
 
   // تنبيه العناصر المنتظرة — مرة واحدة عند فتح الصفحة/الدخول
   if (!State.pendingShown) { State.pendingShown = true; setTimeout(showPendingPopup, 500); }

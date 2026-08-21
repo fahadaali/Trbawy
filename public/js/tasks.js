@@ -75,7 +75,7 @@ function taskTable(actions, allowComplete) {
       <td>${esc(a.text)}${Number(a.carried_count) > 1 ? ` <span class="tag tag-gold">رُحِّل ${arNum(a.carried_count)} مرات</span>` : ''}</td>
       <td>${esc(a.assignees || '—')}</td>
       <td><span class="tag ${PRIORITY_COLOR[a.priority] || 'tag-gray'}">${esc(PRIORITY_AR[a.priority] || '')}</span></td>
-      <td>${a.due_date ? esc(a.due_date) : '—'}</td>
+      <td>${fmtDate(a.due_date)}</td>
       <td>${statusTag(a.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</td>
       <td>${miniBar(a.progress)}</td>
       <td>${delayTag(a)}</td>
@@ -115,7 +115,7 @@ async function loadPerformance() {
         <td dir="ltr" style="text-align:right">${esc(a.display_number)}</td>
         <td>${esc(a.text)}</td><td>${esc(a.assignees || '—')}</td>
         <td dir="ltr" style="text-align:right">${esc(a.meeting_number || '—')}</td>
-        <td>${a.due_date ? esc(a.due_date) : '—'}</td>
+        <td>${fmtDate(a.due_date)}</td>
         <td>${a.overdue_days ? `<span class="tag tag-red">${arCount(a.overdue_days, ['يومًا واحدًا', 'يومين', 'أيام', 'يومًا'])}</span>` : '<span class="muted">—</span>'}</td>
         <td>${arNum(a.carried_count || 0)}</td>
         <td>${miniBar(a.progress)}</td></tr>`).join('')}</tbody></table></div>` : '';
@@ -209,7 +209,7 @@ async function taskDetail(id, onBack) {
       <p>${esc(a.text)}</p>
       <div class="row-2 mt">
         <div><span class="muted">الأولوية:</span> ${esc(PRIORITY_AR[a.priority] || '')}</div>
-        <div><span class="muted">الاستحقاق:</span> ${a.due_date ? esc(a.due_date) : '—'}</div>
+        <div><span class="muted">الاستحقاق:</span> ${fmtDate(a.due_date)}</div>
         <div><span class="muted">الحالة:</span> ${statusTag(a.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</div>
         <div><span class="muted">نسبة الإنجاز:</span> ${arNum(a.progress)}٪</div>
         <div><span class="muted">المحضر المنشئ:</span> ${d.meeting ? esc(d.meeting.display_number) : '—'}</div>
