@@ -14,6 +14,7 @@ import { shortCode } from '../lib/crypto';
 import { notifyMany } from '../lib/notify';
 import { sanitizeHtml } from '../lib/sanitize';
 import { computeFollowups, getFollowups, freezeFollowups } from '../lib/followups';
+import { assigneesJson } from '../lib/people';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -203,8 +204,7 @@ app.get('/:id', async (c) => {
   // القرارات/المهام المنشأة في هذا المحضر (مع أسماء المسؤولين)
   const actions = await c.env.DB.prepare(
     `SELECT a.id, a.type, a.display_number, a.text, a.status, a.priority, a.due_date, a.progress, a.completed_at,
-            (SELECT GROUP_CONCAT(u.name, '، ') FROM action_assignees aa JOIN users u ON u.id = aa.user_id
-              WHERE aa.action_item_id = a.id) AS assignees
+            ${assigneesJson('a')} AS assignees
        FROM action_items a WHERE a.source_meeting_id = ? ORDER BY a.id`,
   ).bind(id).all();
 

@@ -73,7 +73,7 @@ function taskTable(actions, allowComplete) {
       <td>${esc(ACTION_TYPE_AR[a.type] || a.type)}</td>
       <td dir="ltr" style="text-align:right">${esc(a.display_number)}</td>
       <td>${esc(a.text)}${Number(a.carried_count) > 1 ? ` <span class="tag tag-gold">رُحِّل ${arNum(a.carried_count)} مرات</span>` : ''}</td>
-      <td>${esc(a.assignees || '—')}</td>
+      <td>${personChips(a.assignees)}</td>
       <td><span class="tag ${PRIORITY_COLOR[a.priority] || 'tag-gray'}">${esc(PRIORITY_AR[a.priority] || '')}</span></td>
       <td>${fmtDate(a.due_date)}</td>
       <td>${statusTag(a.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</td>
@@ -94,7 +94,7 @@ async function loadPerformance() {
   const tone = (v) => (v >= 80 ? 'stat-ok' : v >= 50 ? 'stat-warn' : 'stat-bad');
 
   const rows = d.board.map((r) => `<tr>
-    <td><b>${esc(r.name)}</b><div class="muted" style="font-size:12px">${esc(ROLE_AR[r.role] || r.role)}</div></td>
+    <td>${personChips([{ n: r.name, c: r.color }])}<div class="muted" style="font-size:12px">${esc(ROLE_AR[r.role] || r.role)}</div></td>
     <td>${arNum(r.total)}</td>
     <td>${arNum(r.done)}</td>
     <td>${r.overdue ? `<span class="tag tag-red">${arNum(r.overdue)}</span>` : arNum(0)}</td>
@@ -113,7 +113,7 @@ async function loadPerformance() {
         <th>الاستحقاق</th><th>التأخر</th><th>مرات الترحيل</th><th>الإنجاز</th></tr></thead>
       <tbody>${d.stalled.map((a) => `<tr>
         <td dir="ltr" style="text-align:right">${esc(a.display_number)}</td>
-        <td>${esc(a.text)}</td><td>${esc(a.assignees || '—')}</td>
+        <td>${esc(a.text)}</td><td>${personChips(a.assignees)}</td>
         <td dir="ltr" style="text-align:right">${esc(a.meeting_number || '—')}</td>
         <td>${fmtDate(a.due_date)}</td>
         <td>${a.overdue_days ? `<span class="tag tag-red">${arCount(a.overdue_days, ['يومًا واحدًا', 'يومين', 'أيام', 'يومًا'])}</span>` : '<span class="muted">—</span>'}</td>
@@ -215,7 +215,7 @@ async function taskDetail(id, onBack) {
         <div><span class="muted">المحضر المنشئ:</span> ${d.meeting ? esc(d.meeting.display_number) : '—'}</div>
         <div><span class="muted">تاريخ الإنجاز:</span> ${a.completed_at ? fmtDateTime(a.completed_at) : '—'}</div>
       </div>
-      <p class="mt"><span class="muted">المسؤولون:</span> ${d.assignees.map((x) => esc(x.name)).join('، ') || '—'}</p>
+      <p class="mt"><span class="muted">المسؤولون:</span> ${personChips(d.assignees.map((x) => ({ n: x.name, c: x.color })))}</p>
       ${a.completion_note ? `<p class="muted">ملاحظة الإنجاز: ${esc(a.completion_note)}</p>` : ''}
       <h4 class="mt">مرفقات إثبات الإنجاز</h4>
       <ul style="padding-inline-start:18px">${attList || '<li class="muted">لا مرفقات</li>'}</ul>

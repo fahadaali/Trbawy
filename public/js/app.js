@@ -253,7 +253,7 @@ function renderShell(view, rest) {
           </div>
           <div class="spacer"></div>
           <div class="bell-wrap">
-            <button class="btn-ghost btn-sm" id="bellBtn">${icon('bell', 18)}<span id="notifBadge" class="badge" style="display:none;position:absolute;top:-6px;inset-inline-start:-6px;background:var(--danger);color:#fff;border-radius:20px;padding:0 6px;font-size:11px"></span></button>
+            <button class="btn-ghost btn-sm" id="bellBtn">${icon('bell', 18)}<span id="notifBadge" class="notif-count" hidden></span></button>
             <div id="notifPanel" class="notif-panel" style="display:none"></div>
           </div>
           <button class="btn-ghost btn-sm only-mobile" id="gsMobileBtn" aria-label="بحث">${icon('search', 18)}</button>
@@ -381,8 +381,8 @@ async function refreshNotifBadge() {
     setAppBadge(unread);                     // شارة أيقونة التطبيق على الشاشة الرئيسية
     const b = document.getElementById('notifBadge');
     if (!b) return;
-    if (unread > 0) { b.textContent = arNum(unread); b.style.display = 'inline-block'; }
-    else b.style.display = 'none';
+    b.textContent = unread > 0 ? arNum(unread) : '';
+    b.hidden = !(unread > 0);
   } catch {}
 }
 
@@ -604,6 +604,14 @@ const ACTION_AR = {
 };
 let USERS_SHOW_DELETED = false;
 
+// لوحة ألوان التمييز — مطابقة لـ PERSON_PALETTE في الخادم (src/lib/people.ts).
+// بعيدة عن ألوان الحالة (أخضر منجَز، ذهبي جارٍ، أحمر متأخر) حتى لا يختلط لون
+// الشخص بلون حالة البند.
+const PERSON_PALETTE = [
+  '#2c6e9b', '#7a4fa3', '#b0468a', '#0f766e', '#b45309', '#4d7c0f',
+  '#9d174d', '#1e40af', '#6d28d9', '#0e7490', '#7c2d12', '#475569',
+];
+
 VIEWS.users = async () => {
   setTitle('المستخدمون والصلاحيات');
   content().innerHTML = '<div class="spinner"></div>';
@@ -626,7 +634,7 @@ VIEWS.users = async () => {
          <button class="btn-ghost btn-sm" data-del="${u.id}">حذف</button>`;
     return `
       <tr${u.deleted_at ? ' style="opacity:.6"' : ''}>
-        <td><b>${esc(u.name)}</b></td>
+        <td>${personChips([{ n: u.name, c: u.color }])}</td>
         <td dir="ltr" style="text-align:right">${esc(u.email)}</td>
         <td>${esc(ROLE_AR[u.role] || u.role)}</td>
         <td>${u.stage ? esc(STAGE_AR[u.stage]) : '—'}</td>
@@ -653,8 +661,8 @@ VIEWS.users = async () => {
 
   const find = (id) => data.users.find((x) => x.id == id);
   document.getElementById('showDeleted').onchange = (e) => { USERS_SHOW_DELETED = e.target.checked; VIEWS.users(); };
-  document.getElementById('addUser').onclick = () => userForm(null);
-  content().querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => userForm(find(b.dataset.edit)));
+  document.getElementById('addUser').onclick = () => userForm(null, data.users);
+  content().querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => userForm(find(b.dataset.edit), data.users));
   content().querySelectorAll('[data-reset]').forEach((b) => b.onclick = () => resetUserPassword(b.dataset.reset));
   content().querySelectorAll('[data-history]').forEach((b) => b.onclick = () => roleHistoryModal(find(b.dataset.history)));
   content().querySelectorAll('[data-toggle]').forEach((b) => {
@@ -821,8 +829,13 @@ async function roleHistoryModal(user) {
   });
 }
 
-function userForm(existing) {
+function userForm(existing, allUsers) {
   const isEdit = !!existing;
+  // الألوان المحجوزة لغير هذا المستخدم: نُعلِّمها حتى لا يتكرّر لونان فيضيع
+  // الغرض من التمييز السريع.
+  const taken = new Set((allUsers || [])
+    .filter((u) => !u.deleted_at && (!existing || u.id !== existing.id))
+    .map((u) => String(u.color || '').toLowerCase()));
   const roleOpts = Object.entries(ROLE_AR).map(([v, l]) =>
     `<option value="${v}" ${existing && existing.role === v ? 'selected' : ''}>${l}</option>`).join('');
   const body = `
@@ -839,24 +852,37 @@ function userForm(existing) {
           <option value="middle" ${existing && existing.stage === 'middle' ? 'selected' : ''}>المتوسطة</option>
         </select></div>
     </div>
+    <div class="field"><label>لون التمييز</label>
+      <div class="swatches" id="uf_colors">
+        ${PERSON_PALETTE.map((c) => `<button type="button" class="swatch${existing && (existing.color || '').toLowerCase() === c ? ' on' : ''}${taken.has(c) ? ' taken' : ''}"
+          data-color="${c}" style="background:${c}" title="${taken.has(c) ? 'مستعمل لشخص آخر' : 'لون متاح'}"></button>`).join('')}
+      </div>
+      <p class="hint">لون ثابت للشخص في كل المحاضر وكل المجالس — يميّز مهامه بلمحة بصر.
+        الدائرة المعلَّمة بنقطة لونٌ مستعمل لشخص آخر.</p>
+      <div class="mt"><span class="muted" style="font-size:12px">معاينة:</span>
+        <span id="uf_preview">${personChips([{ n: existing ? existing.name : 'الاسم', c: existing && existing.color }])}</span></div>
+    </div>
     ${isEdit ? '<p class="hint">تغيير الدور أو المرحلة يعرض تقرير أثر قبل التنفيذ. التعليق والحذف من أزرار الصف.</p>'
              : '<p class="hint">سيُنشأ الحساب بكلمة المرور الافتراضية <b>1234</b> مع إلزام التغيير عند أول دخول.</p>'}`;
 
-  openModal({
+  const modal = openModal({
     title: isEdit ? 'تعديل مستخدم' : 'مستخدم جديد',
     body,
     buttons: [
-      { label: 'حفظ', onClick: async (cl, overlay) => {
-        const name = overlay.querySelector('#uf_name').value.trim();
-        const role = overlay.querySelector('#uf_role').value;
-        const stage = overlay.querySelector('#uf_stage').value || null;
+      { label: 'حفظ', onClick: async (cl, ov) => {
+        const name = ov.querySelector('#uf_name').value.trim();
+        const role = ov.querySelector('#uf_role').value;
+        const stage = ov.querySelector('#uf_stage').value || null;
+        const picked = ov.querySelector('#uf_colors .swatch.on');
+        const color = picked ? picked.dataset.color : null;
         try {
           if (!isEdit) {
-            await API.post('/users', { name, role, stage, email: overlay.querySelector('#uf_email').value.trim() });
+            await API.post('/users', { name, role, stage, color, email: ov.querySelector('#uf_email').value.trim() });
             cl(); toast('تم الحفظ', 'ok'); VIEWS.users();
             return;
           }
-          // تغيير الدور أو المرحلة يمرّ بتقرير الأثر
+          // اللون يُحفظ أولًا: تغيير الدور يفتح تقرير الأثر ويغادر هذا النموذج
+          if (color && color !== (existing.color || '')) await API.patch('/users/' + existing.id, { color });
           if (role !== existing.role || (stage || null) !== (existing.stage || null)) {
             cl();
             return userAction(existing, 'role_change', { role, stage, name });
@@ -864,12 +890,30 @@ function userForm(existing) {
           await API.patch('/users/' + existing.id, { name });
           cl(); toast('تم الحفظ', 'ok'); VIEWS.users();
         } catch (err) {
-          overlay.querySelector('#ufErr').innerHTML = `<div class="form-error">${esc(err.message)}</div>`;
+          ov.querySelector('#ufErr').innerHTML = `<div class="form-error">${esc(err.message)}</div>`;
         }
       }},
       { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
     ],
   });
+
+  // اختيار اللون: واحد فقط، مع معاينة حيّة للشارة كما ستظهر في المحاضر
+  const scope = (modal && modal.overlay) || document;
+  const preview = () => {
+    const on = scope.querySelector('#uf_colors .swatch.on');
+    const nameEl = scope.querySelector('#uf_name');
+    scope.querySelector('#uf_preview').innerHTML =
+      personChips([{ n: (nameEl && nameEl.value.trim()) || 'الاسم', c: on && on.dataset.color }]);
+  };
+  scope.querySelectorAll('#uf_colors .swatch').forEach((b) => {
+    b.onclick = () => {
+      scope.querySelectorAll('#uf_colors .swatch').forEach((x) => x.classList.remove('on'));
+      b.classList.add('on');
+      preview();
+    };
+  });
+  const nameInput = scope.querySelector('#uf_name');
+  if (nameInput) nameInput.addEventListener('input', preview);
 }
 
 function resetUserPassword(id) {

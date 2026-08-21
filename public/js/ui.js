@@ -433,6 +433,36 @@ function delayTag(a) {
   return '<span class="muted">—</span>';
 }
 
+// ---------- تمييز الأشخاص بلون ثابت ----------
+// اللون محفوظ على المستخدم (users.color) فيبقى نفسه في كل المحاضر وكل المجالس،
+// فيُعرف صاحب المهمة بلمحة بصر لا بقراءة سرد الأسماء.
+const PERSON_FALLBACK = '#475569';
+function personTint(hex, alpha) {
+  const h = /^#[0-9a-fA-F]{6}$/.test(String(hex || '')) ? hex : PERSON_FALLBACK;
+  const n = parseInt(h.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+/** شارة شخص واحد: إطار منحنٍ بلونه وخلفية فاتحة منه. */
+function personChip(name, color) {
+  const c = /^#[0-9a-fA-F]{6}$/.test(String(color || '')) ? color : PERSON_FALLBACK;
+  return `<span class="who" style="color:${c};background:${personTint(c, 0.13)};border-color:${personTint(c, 0.42)}">${esc(name)}</span>`;
+}
+/**
+ * خلية المسؤولين. تقبل ما يرسله الخادم: مصفوفة JSON ‏[{n,c}] أو مصفوفة
+ * جاهزة [{name,color}] أو نصًّا مسرودًا من واجهة قديمة.
+ */
+function personChips(value) {
+  let list = value;
+  if (typeof value === 'string') {
+    const t = value.trim();
+    if (!t) return '<span class="muted">—</span>';
+    if (t.startsWith('[')) { try { list = JSON.parse(t); } catch { list = null; } }
+    if (!Array.isArray(list)) list = t.split(/[،,]/).map((n) => ({ n: n.trim() })).filter((x) => x.n);
+  }
+  if (!Array.isArray(list) || !list.length) return '<span class="muted">—</span>';
+  return `<span class="whos">${list.map((p) => personChip(p.n ?? p.name ?? '', p.c ?? p.color)).join('')}</span>`;
+}
+
 // توافق العدد والمعدود: يوم واحد · يومان · ٣ أيام · ١٥ يومًا
 function arCount(n, [one, two, few, many]) {
   n = Number(n);
@@ -563,8 +593,17 @@ function fmtDate(d) {
  */
 function stackTables(root) {
   (root || document).querySelectorAll('table.tbl').forEach((tbl) => {
+    // جدول كثيف الأعمدة لا يسعه عرض البطاقة، فتُضغط أعمدته حتى تصير كلمة في كل
+    // سطر. غلاف بتمرير أفقي يعيد للأعمدة عرضها الطبيعي بدل عصر النص.
+    if (!tbl.parentElement.classList.contains('t-scroll')) {
+      const wrap = document.createElement('div');
+      wrap.className = 't-scroll';
+      tbl.parentElement.insertBefore(wrap, tbl);
+      wrap.appendChild(tbl);
+    }
     const heads = [...tbl.querySelectorAll('thead th')].map((th) => th.textContent.trim());
     if (!heads.length) return;                       // جدول بلا ترويسة يُترك كما هو
+    if (heads.length >= 7) tbl.classList.add('wide'); // كثيف الأعمدة: يستحق حدًّا أدنى للعرض
     tbl.classList.add('stack');
     tbl.querySelectorAll('tbody tr').forEach((tr) => {
       [...tr.children].forEach((td, i) => {

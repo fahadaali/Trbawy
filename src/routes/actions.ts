@@ -7,6 +7,7 @@ import { councilScope, withinAccessWindow, isOpenAction, canEditDraft, isPreside
 import { getCouncil, nextActionNumber, formatActionNumber } from '../lib/meetings';
 import { notify, notifyMany } from '../lib/notify';
 import { recomputeDelay, assigneeStats, overallStats, stalledActions } from '../lib/taskmetrics';
+import { assigneesJson } from '../lib/people';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -26,7 +27,7 @@ async function meetingWriterOf(env: Env, meetingId: number): Promise<number | nu
 }
 async function assigneesOf(env: Env, id: number) {
   const r = await env.DB.prepare(
-    `SELECT aa.user_id, u.name FROM action_assignees aa JOIN users u ON u.id = aa.user_id WHERE aa.action_item_id = ?`,
+    `SELECT aa.user_id, u.name, u.color FROM action_assignees aa JOIN users u ON u.id = aa.user_id WHERE aa.action_item_id = ?`,
   ).bind(id).all();
   return r.results as any[];
 }
@@ -118,8 +119,7 @@ app.get('/', async (c) => {
     `SELECT DISTINCT a.id, a.type, a.council_id, a.display_number, a.text, a.priority, a.due_date,
             a.status, a.progress, a.completed_at, a.source_meeting_id,
             a.delay_days, a.carried_count, a.first_due_date,
-            (SELECT GROUP_CONCAT(us.name, '، ') FROM action_assignees ax
-               JOIN users us ON us.id = ax.user_id WHERE ax.action_item_id = a.id) AS assignees,
+            ${assigneesJson('a')} AS assignees,
             CASE WHEN a.status NOT IN ('done','cancelled') AND a.due_date IS NOT NULL AND a.due_date < date('now')
                  THEN CAST(julianday(date('now')) - julianday(date(a.due_date)) AS INTEGER) ELSE 0 END AS overdue_days,
             co.name AS council_name, co.type AS council_type,

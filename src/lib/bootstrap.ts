@@ -5,6 +5,7 @@ import { hashPassword } from './crypto';
 import { SCHEMA_STATEMENTS } from './schema';
 import { addMissingColumns, backfillRolePeriods, backfillActionMetrics } from './migrate';
 import { backfillFollowupLedger } from './followups';
+import { backfillPersonColors } from './people';
 
 let checkedThisIsolate = false;
 
@@ -45,6 +46,7 @@ export async function ensureBootstrap(env: Env): Promise<void> {
   if (seeded) {
     await backfillActionMetrics(env);
     await backfillFollowupLedger(env);
+    await backfillPersonColors(env);
   }
 
   if (!seeded) await seed(env);

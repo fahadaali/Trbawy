@@ -7,12 +7,14 @@
 //   التعثّر       = بند متعثر الحالة، أو متأخر عن استحقاقه اليوم، أو رُحِّل لأكثر من محضر.
 //   نسبة الالتزام = ٦٠٪ من نسبة الإنجاز + ٤٠٪ من دقة التوقيت.
 import type { Env } from '../types';
+import { assigneesJson } from './people';
 
 export interface AssigneeStats {
   user_id: number;
   name: string;
   role: string;
   stage: string | null;
+  color: string | null;
   total: number;
   done: number;
   open: number;
@@ -79,7 +81,7 @@ const AGGREGATES = `
 
 const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 100) : 0);
 
-function shape(r: any): Omit<AssigneeStats, 'user_id' | 'name' | 'role' | 'stage'> {
+function shape(r: any): Omit<AssigneeStats, 'user_id' | 'name' | 'role' | 'stage' | 'color'> {
   const done = r.done ?? 0, total = r.total ?? 0;
   const onTime = r.on_time ?? 0, late = r.late ?? 0;
   const completion = pct(done, total);
@@ -102,7 +104,7 @@ function shape(r: any): Omit<AssigneeStats, 'user_id' | 'name' | 'role' | 'stage
 export async function assigneeStats(env: Env, f: StatsFilter): Promise<AssigneeStats[]> {
   const { sql, binds } = whereOf(f);
   const rows = (await env.DB.prepare(
-    `SELECT u.id AS user_id, u.name, u.role, u.stage, ${AGGREGATES}
+    `SELECT u.id AS user_id, u.name, u.role, u.stage, u.color, ${AGGREGATES}
        FROM action_assignees aa
        JOIN action_items a ON a.id = aa.action_item_id
        JOIN meetings sm ON sm.id = a.source_meeting_id
@@ -112,7 +114,7 @@ export async function assigneeStats(env: Env, f: StatsFilter): Promise<AssigneeS
       ORDER BY u.name`,
   ).bind(...binds).all<any>()).results;
   return rows.map((r) => ({
-    user_id: r.user_id, name: r.name, role: r.role, stage: r.stage, ...shape(r),
+    user_id: r.user_id, name: r.name, role: r.role, stage: r.stage, color: r.color, ...shape(r),
   }));
 }
 
@@ -143,8 +145,7 @@ export async function stalledActions(env: Env, f: StatsFilter, limit = 10) {
             a.carried_count, sm.display_number AS meeting_number,
             CASE WHEN a.due_date IS NOT NULL AND a.due_date < date('now')
                  THEN CAST(julianday(date('now')) - julianday(date(a.due_date)) AS INTEGER) ELSE 0 END AS overdue_days,
-            (SELECT GROUP_CONCAT(u.name, '، ') FROM action_assignees aa
-               JOIN users u ON u.id = aa.user_id WHERE aa.action_item_id = a.id) AS assignees
+            ${assigneesJson('a')} AS assignees
        FROM action_items a JOIN meetings sm ON sm.id = a.source_meeting_id
       WHERE ${where.join(' AND ')}
       ORDER BY overdue_days DESC, a.carried_count DESC, a.due_date

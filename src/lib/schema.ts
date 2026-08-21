@@ -12,6 +12,7 @@ export const SCHEMA_STATEMENTS: string[] = [
                          ('president','vice_president','first_supervisor','team_member','system_admin')),
   stage                TEXT    CHECK (stage IN ('secondary','middle')),
   signature_image      TEXT,                       -- مفتاح R2 لصورة التوقيع
+  color                TEXT,                       -- لون تمييز الشخص في المحاضر والمهام
   must_change_password INTEGER NOT NULL DEFAULT 1,  -- إلزام التغيير عند أول دخول
   is_active            INTEGER NOT NULL DEFAULT 1,  -- 0 = معلَّق (تعليق قابل للرجوع)
   suspended_at         TEXT,                       -- وقت التعليق

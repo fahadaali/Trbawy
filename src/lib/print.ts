@@ -16,6 +16,7 @@ import { qrSvg } from './qr';
 import { sanitizeHtml } from './sanitize';
 import { getFollowups, type FollowupRow } from './followups';
 import { donut, bars, meter, kpi, arNum, type Slice } from './charts';
+import { assigneesJson, isValidColor, parsePeople, tint, type Person } from './people';
 
 const esc = (s: any) =>
   s == null ? '' : String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -69,12 +70,27 @@ function delayChip(delay: number | null | undefined, hasDue: boolean): string {
   return chip('في الموعد', 'ok');
 }
 
+// شريط الإنجاز مكدَّس رأسيًا: عرضه يتبع عرض العمود مهما ضاق، فلا يتسرّب رقمه
+// إلى الخلية المجاورة كما يحدث لو صُفَّ الشريط والرقم أفقيًا.
 function progressCell(p: number | null | undefined): string {
   const v = Math.max(0, Math.min(100, Number(p ?? 0)));
   const color = v >= 80 ? C.ok : v >= 50 ? C.warn : v > 0 ? C.gold : C.gray;
-  return `<span class="pbar"><span class="pbar-fill" style="width:${v}%;background:${color}"></span></span>
-    <span class="pbar-num">${arNum(v)}٪</span>`;
+  return `<span class="prog"><span class="pbar-num">${arNum(v)}\u066A</span>
+    <span class="pbar"><span class="pbar-fill" style="width:${v}%;background:${color}"></span></span></span>`;
 }
+
+/**
+ * شارة الشخص: إطار منحني ولون ثابت له في كل المحاضر وكل المجالس.
+ * اللون من إعدادات المستخدم، والخلفية درجة فاتحة منه — فيُعرف صاحب المهمة لمحًا.
+ */
+function personChip(p: Person): string {
+  const c = isValidColor(p.c) ? p.c : '#475569';
+  return `<span class="who" style="color:${c};background:${tint(c, 0.13)};border-color:${tint(c, 0.42)}">${esc(p.n)}</span>`;
+}
+const whoCell = (json: string | null | undefined): string => {
+  const people = parsePeople(json);
+  return people.length ? `<span class="whos">${people.map(personChip).join('')}</span>` : '<span class="muted">—</span>';
+};
 
 function roleAr(role: string): string {
   return ({ president: 'رئيس المجلس التربوي', vice_president: 'نائب الرئيس', first_supervisor: 'مشرف أول', team_member: 'عضو فريق', system_admin: 'مدير النظام' } as any)[role] || '';
@@ -91,10 +107,12 @@ function timeAr(hhmm: string | null): string {
 const dateAr = (d: string | null | undefined) =>
   (d ? `<span class="num">${arNum(String(d).slice(0, 10).replace(/-/g, '/'))}</span>` : '<span class="muted">—</span>');
 // طابع زمني كامل: التاريخ ثم الساعة، في اتجاه واحد حتى لا يُقلب ترتيبه في سياق RTL
+// التاريخ سطرًا والساعة سطرًا تحته: عمود ضيّق لا يسع الاثنين في سطر واحد،
+// وقصّهما بنقاط الحذف يضيّع معلومة موثِّقة.
 const stampAr = (t: string | null | undefined) => {
   if (!t) return '';
   const [d, hm] = String(t).split(' ');
-  return `<span class="num">${arNum(d.replace(/-/g, '/'))}${hm ? ' ' + arNum(hm.slice(0, 5)) : ''}</span>`;
+  return `<span class="num">${arNum(d.replace(/-/g, '/'))}</span>${hm ? `<span class="num tm">${arNum(hm.slice(0, 5))}</span>` : ''}`;
 };
 
 function printStyles(primary: string, font: string): string {
@@ -160,11 +178,17 @@ function printStyles(primary: string, font: string): string {
   .chip-info { background: #e8f1f8; color: ${C.info}; border: 1px solid #c6dcec; }
   .chip-gold { background: #faf3e0; color: #96751f;   border: 1px solid #ecdcb0; }
 
-  /* شريط نسبة داخل الجدول */
-  .pbar { display: inline-block; width: 28px; height: 6px; border-radius: 3px; background: #e6ebe9;
-    overflow: hidden; vertical-align: middle; }
+  /* شريط نسبة داخل الجدول — مكدَّس فلا يتجاوز عرض عموده مهما ضاق */
+  .prog { display: block; }
+  .pbar { display: block; width: 100%; height: 5px; border-radius: 3px; background: #e6ebe9; overflow: hidden; }
   .pbar-fill { display: block; height: 100%; }
-  .pbar-num { font-size: 10.5px; color: #4a5b55; margin-inline-start: 3px; }
+  .pbar-num { display: block; font-size: 10.5px; color: #4a5b55; text-align: center; line-height: 1.5; }
+
+  /* شارات الأشخاص: إطار منحنٍ ولون ثابت لكل شخص في كل المحاضر */
+  .whos { display: block; }
+  .who { display: inline-block; max-width: 100%; border: 1px solid; border-radius: 999px;
+    padding: 0 7px; margin: 1px 0 1px 3px; font-size: 10.5px; font-weight: 700; line-height: 1.75;
+    overflow-wrap: break-word; }
 
   /* لوحة المؤشرات */
   .dash { border: 1px solid #e0e6e3; border-radius: 10px; padding: 10px 12px; background: #fcfdfd;
@@ -216,10 +240,23 @@ function printStyles(primary: string, font: string): string {
 
   .sig { height: 12mm; }
   .stamp { font-style: italic; border: 1px dashed ${primary}; padding: 1px 8px; border-radius: 6px; color: ${primary}; }
-  .code { direction: ltr; font-family: monospace; font-size: 10.5px; text-align: right; white-space: nowrap; }
-  .num { direction: ltr; unicode-bidi: isolate; white-space: nowrap; display: inline-block; }
-  table.tbl td .chip, table.tbl th .chip { white-space: nowrap; font-size: 10px; padding: 1px 6px; }
-  table.tbl td { word-break: normal; overflow-wrap: break-word; }
+  /* الأرقام والرموز: اتجاه واحد لا يُقلب. داخل الجداول المثبَّتة الأعمدة يُسمح
+     لها بالانكسار على سطرين بدل أن تتسرّب خارج الخلية فتعلو نص جارتها — وهو ما
+     كان يشوّه جداول التصدير. الانكسار يحفظ المعلومة كاملة، والقصّ يضيّعها. */
+  .code { direction: ltr; font-family: monospace; font-size: 10.5px; text-align: right;
+    unicode-bidi: isolate; overflow-wrap: anywhere; }
+  .num { direction: ltr; unicode-bidi: isolate; white-space: nowrap; display: inline-block;
+    max-width: 100%; vertical-align: bottom; }
+  .num.tm { display: block; font-size: 10.5px; color: #6b7a75; }
+  table.tbl.fixed td .num { white-space: normal; overflow-wrap: anywhere; font-size: 11.5px; }
+  /* رقم البند مزيج عربي/أرقام: الخط أحادي العرض يبالغ في عرض الحروف العربية
+     فيكسر الرقم سطرين في عمود ضيّق — خط المتن يسعه في سطر واحد. */
+  table.tbl.fixed td.code { font-family: '${font}', Tahoma, sans-serif; font-size: 11px; }
+  table.tbl td .chip, table.tbl th .chip { font-size: 10px; padding: 1px 5px; max-width: 100%;
+    white-space: normal; vertical-align: middle; }
+  table.tbl td, table.tbl th { word-break: normal; overflow-wrap: break-word; }
+  /* حاجز أخير: لو طفح محتوى غير متوقّع رغم ما سبق، يُقتطع عند حدّ الخلية ولا يتداخل مع جارتها */
+  table.tbl.fixed td, table.tbl.fixed th { overflow: hidden; padding: 4px 5px; }
   .ov { color: ${C.warn}; font-weight: 700; } .muted { color: #8a9691; }
   .verify { margin-top: 14px; display: flex; align-items: center; gap: 14px; border: 1px solid #e0e6e3;
     border-radius: 10px; padding: 10px; break-inside: avoid; background: #fcfdfd; }
@@ -353,9 +390,7 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
   const agenda = (await env.DB.prepare('SELECT * FROM agenda_items WHERE meeting_id = ? ORDER BY sort_order').bind(m.id).all()).results as any[];
   // بنود هذا المحضر مع المسؤولين عنها (عمود المسؤول جزء أصيل من الجدول)
   const actions = (await env.DB.prepare(
-    `SELECT a.*,
-            (SELECT GROUP_CONCAT(u.name, '، ') FROM action_assignees aa
-               JOIN users u ON u.id = aa.user_id WHERE aa.action_item_id = a.id) AS assignees
+    `SELECT a.*, ${assigneesJson('a')} AS assignees
        FROM action_items a WHERE a.source_meeting_id = ? ORDER BY a.type, a.id`,
   ).bind(m.id).all()).results as any[];
   // جدول المتابعة: بنود المحاضر السابقة المرحَّلة إلى هذا المحضر (§٤٫٣)
@@ -386,13 +421,13 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       <td>${typeChip(f.type)}</td>
       <td class="code">${esc(f.display_number)}</td>
       <td>${esc(f.text)}</td>
-      <td>${esc(f.assignees || '—')}</td>
+      <td>${whoCell(f.assignees)}</td>
       <td>${dateAr(f.due_date)}</td>
       <td>${statusChip(f.status)}
         ${overdue ? chip(`متأخرة ${countAr(f.overdue_days, ['يومًا واحدًا', 'يومين', 'أيام', 'يومًا'])}`, 'bad')
           : f.status === 'done' ? delayChip(f.delay_days, !!f.due_date) : ''}</td>
       <td>${progressCell(f.progress)}</td>
-      <td class="center">${f.is_final ? chip('توثيق أخير', 'ok') : chip(`ترحيل ${arNum(f.carried_index ?? 1)}`, 'warn')}</td>
+      <td class="center">${f.is_final ? chip('أخير', 'ok') : chip(`ترحيل ${arNum(f.carried_index ?? 1)}`, 'warn')}</td>
     </tr>`;
   }).join('');
 
@@ -400,7 +435,7 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       <td>${typeChip(a.type)}</td>
       <td class="code">${esc(a.display_number)}</td>
       <td>${esc(a.text)}</td>
-      <td>${esc(a.assignees || '—')}</td>
+      <td>${whoCell(a.assignees)}</td>
       <td>${priorityChip(a.priority)}</td>
       <td>${dateAr(a.due_date)}</td>
       <td>${statusChip(a.status)}</td>
@@ -437,22 +472,25 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
     ${followups.length ? `<h2>متابعة بنود المحاضر السابقة</h2>
     <p class="note">البند غير المنجَز يُرحَّل إلى المحضر التالي حتى يُنجَز، ثم يظهر ظهورًا أخيرًا للتوثيق.</p>
     <div class="t-wrap"><table class="tbl fixed">
-      <colgroup><col style="width:9%" /><col style="width:12%" /><col style="width:24%" /><col style="width:13%" />
-        <col style="width:10%" /><col style="width:14%" /><col style="width:7%" /><col style="width:11%" /></colgroup>
+      <colgroup><col style="width:8%" /><col style="width:11%" /><col style="width:22%" /><col style="width:16%" />
+        <col style="width:11%" /><col style="width:16%" /><col style="width:7%" /><col style="width:9%" /></colgroup>
       <thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الاستحقاق</th>
       <th>الحالة والالتزام</th><th>الإنجاز</th><th>الترحيل</th></tr></thead>
       <tbody>${followupRows}</tbody></table></div>` : ''}
 
     ${actions.length ? `<h2>القرارات والتوصيات والمهام</h2>
     <div class="t-wrap"><table class="tbl fixed">
-      <colgroup><col style="width:9%" /><col style="width:12%" /><col style="width:26%" /><col style="width:14%" />
-        <col style="width:9%" /><col style="width:10%" /><col style="width:11%" /><col style="width:9%" /></colgroup>
+      <colgroup><col style="width:8%" /><col style="width:11%" /><col style="width:25%" /><col style="width:18%" />
+        <col style="width:9%" /><col style="width:11%" /><col style="width:11%" /><col style="width:7%" /></colgroup>
       <thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الأولوية</th>
       <th>الاستحقاق</th><th>الحالة</th><th>الإنجاز</th></tr></thead>
       <tbody>${actionRows}</tbody></table></div>` : ''}
 
     <h2>التوقيعات</h2>
-    <div class="t-wrap"><table class="tbl"><thead><tr><th>الاسم</th><th>الحالة</th><th>التوقيع</th><th>رمز التحقق</th><th>وقت التوقيع</th></tr></thead>
+    <div class="t-wrap"><table class="tbl fixed">
+      <colgroup><col style="width:26%" /><col style="width:12%" /><col style="width:22%" />
+        <col style="width:22%" /><col style="width:18%" /></colgroup>
+      <thead><tr><th>الاسم</th><th>الحالة</th><th>التوقيع</th><th>رمز التحقق</th><th>وقت التوقيع</th></tr></thead>
       <tbody>${signRows}</tbody></table></div>
     ${qr ? `<div class="verify">${qr}<div class="txt"><b>رمز التحقق من صحة المحضر</b><br />امسح الرمز أو افتح:<br /><span dir="ltr">${esc(verifyUrl)}</span></div></div>` : ''}
   </div>`;

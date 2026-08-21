@@ -264,7 +264,7 @@ async function meetingDetail(id) {
         <td>${esc(ACTION_TYPE_AR[f.type] || f.type)}</td>
         <td dir="ltr" style="text-align:right">${esc(f.display_number)}</td>
         <td>${esc(f.text)}${f.source_meeting_number ? `<div class="muted" style="font-size:12px" dir="ltr">${esc(f.source_meeting_number)}</div>` : ''}</td>
-        <td>${esc(f.assignees || '—')}</td>
+        <td>${personChips(f.assignees)}</td>
         <td>${fmtDate(f.due_date)}</td>
         <td>${statusTag(f.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</td>
         <td>${miniBar(f.progress)}</td>
@@ -865,7 +865,7 @@ function renderActionsSection(meetingId, d, canEdit) {
       ${rows.length ? `<table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th>
           <th>الأولوية</th><th>الاستحقاق</th><th>الحالة</th><th>الإنجاز</th><th></th></tr></thead>
         <tbody>${rows.map((a) => `<tr><td>${esc(ACTION_TYPE_AR[a.type] || a.type)}</td><td dir="ltr" style="text-align:right">${esc(a.display_number)}</td><td>${esc(a.text)}</td>
-          <td>${esc(a.assignees || '—')}</td>
+          <td>${personChips(a.assignees)}</td>
           <td><span class="tag ${PRIORITY_COLOR[a.priority] || 'tag-gray'}">${esc(PRIORITY_AR[a.priority] || '')}</span></td>
           <td>${fmtDate(a.due_date)}</td><td>${statusTag(a.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</td>
           <td>${miniBar(a.progress)}</td>

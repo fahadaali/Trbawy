@@ -11,6 +11,7 @@ import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import { canManageUsers } from '../permissions';
 import { DEFAULT_PASSWORD } from '../lib/bootstrap';
+import { defaultPersonColor, isValidColor } from '../lib/people';
 import {
   computeImpact, loadUserRow, normalizeStage,
   applyRoleChange, applySuspension, applyReactivation,
@@ -38,7 +39,7 @@ const truthy = (v: string | undefined) => v === '1' || v === 'true';
 app.get('/', async (c) => {
   const includeDeleted = truthy(c.req.query('include_deleted'));
   const rows = await c.env.DB.prepare(
-    `SELECT id, name, email, deleted_email, role, stage, must_change_password, is_active,
+    `SELECT id, name, email, deleted_email, role, stage, color, must_change_password, is_active,
             suspended_at, suspended_reason, deleted_at, created_at
        FROM users ${includeDeleted ? '' : 'WHERE deleted_at IS NULL'} ORDER BY deleted_at IS NOT NULL, role, name`,
   ).all<any>();
@@ -108,15 +109,22 @@ app.post('/', async (c) => {
   const exists = await c.env.DB.prepare('SELECT 1 FROM users WHERE email = ?').bind(email).first();
   if (exists) return c.json({ error: 'البريد مستخدم مسبقاً' }, 409);
 
+  if (b.color != null && b.color !== '' && !isValidColor(b.color))
+    return c.json({ error: 'اللون غير صالح (يُتوقّع #RRGGBB)' }, 400);
+
   const pw = await hashPassword(DEFAULT_PASSWORD);
   const res = await c.env.DB.prepare(
-    `INSERT INTO users (name, email, password_hash, role, stage, must_change_password, is_active)
-     VALUES (?, ?, ?, ?, ?, 1, 1)`,
+    `INSERT INTO users (name, email, password_hash, role, stage, color, must_change_password, is_active)
+     VALUES (?, ?, ?, ?, ?, ?, 1, 1)`,
   )
-    .bind(name, email, pw, role, stage)
+    .bind(name, email, pw, role, stage, isValidColor(b.color) ? b.color : null)
     .run();
 
   const id = res.meta.last_row_id as number;
+  // لون تمييز ثابت لمن لم يُختَر له لون — يبقى نفسه في كل المحاضر وكل المجالس
+  if (!isValidColor(b.color)) {
+    await c.env.DB.prepare('UPDATE users SET color = ? WHERE id = ?').bind(defaultPersonColor(id), id).run();
+  }
   // فتح فترة الدور الأولى — أساس الاطلاع التاريخي لاحقًا
   await c.env.DB.prepare(
     "INSERT INTO user_role_periods (user_id, role, stage, changed_by, note) VALUES (?, ?, ?, ?, 'إنشاء الحساب')",
@@ -175,6 +183,23 @@ app.patch('/:id', async (c) => {
   }
 
   const effects: string[] = [];
+
+  // لون التمييز: قابل للتعديل من إعدادات المستخدمين، ويسري بأثر رجعي على كل
+  // المحاضر والمهام لأنه يُقرأ من المستخدم لا يُنسخ في البنود.
+  if (b.color !== undefined) {
+    if (b.color !== null && b.color !== '' && !isValidColor(b.color))
+      return c.json({ error: 'اللون غير صالح (يُتوقّع #RRGGBB)' }, 400);
+    const color = isValidColor(b.color) ? b.color : defaultPersonColor(id);
+    if (color !== (cur as any).color) {
+      await c.env.DB.prepare("UPDATE users SET color = ?, updated_at = datetime('now') WHERE id = ?")
+        .bind(color, id).run();
+      await audit(c.env, {
+        userId: actor.id, action: 'update_user', entityType: 'user', entityId: id,
+        oldValue: { color: (cur as any).color }, newValue: { color },
+      });
+      effects.push('حُدِّث لون التمييز.');
+    }
+  }
 
   if (name !== cur.name) {
     await c.env.DB.prepare("UPDATE users SET name = ?, updated_at = datetime('now') WHERE id = ?")

@@ -20,6 +20,8 @@ const COLUMN_ADDS = [
   // مفاتيح إشعارات الدفع (تُولَّد مرة إن لم تُضبط كأسرار بيئة)
   "ALTER TABLE settings ADD COLUMN push_public_key TEXT",
   "ALTER TABLE settings ADD COLUMN push_private_key TEXT",
+  // لون تمييز الشخص في جداول المحاضر والمهام
+  "ALTER TABLE users ADD COLUMN color TEXT",
 ];
 
 /**

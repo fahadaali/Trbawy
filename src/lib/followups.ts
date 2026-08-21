@@ -9,6 +9,7 @@
 // المحضر المفتوح يُحسب جدول متابعته حيًّا، والمحضر المعتمد تُجمَّد لقطته في
 // meeting_followups فلا يتبدّل محضر مقفل بتغيّر حالة البنود لاحقًا.
 import type { Env } from '../types';
+import { assigneesJson } from './people';
 
 export interface FollowupRow {
   id: number;
@@ -23,7 +24,7 @@ export interface FollowupRow {
   delay_days: number | null;
   source_meeting_id: number;
   source_meeting_number: string | null;
-  assignees: string | null;
+  assignees: string | null;   // مصفوفة JSON: [{n: الاسم, c: اللون}]
   overdue_days: number;      // أيام التأخر عن الاستحقاق (٠ = لا تأخر) وقت هذا المحضر
   is_final: number;          // 1 = ظهور التوثيق الأخير بعد الإنجاز
   carried_index: number;     // ترتيب هذا الترحيل للبند (١ = أول ترحيل)
@@ -46,8 +47,7 @@ function boundaryOf(m: MeetingRef): string {
 // ترتيب المحاضر: تاريخ الانعقاد ثم المعرّف — «قبل هذا المحضر» يعني أسبق في هذا الترتيب.
 const EARLIER_MEETING = `(sm.greg_date < ? OR (sm.greg_date = ? AND sm.id < ?))`;
 
-const ASSIGNEES_SQL = `(SELECT GROUP_CONCAT(u.name, '، ') FROM action_assignees aa
-     JOIN users u ON u.id = aa.user_id WHERE aa.action_item_id = a.id)`;
+const ASSIGNEES_SQL = assigneesJson('a');
 
 /**
  * الحساب الحيّ لجدول المتابعة (للمحاضر التي لم تُجمَّد بعد).

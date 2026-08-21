@@ -194,6 +194,30 @@ table.tbl tr:hover td { background: #fafbfb; }
 .tag-gray { background: #eef1f0; color: var(--muted); }
 .tag-red { background: var(--danger-light); color: var(--danger); }
 
+/* شارات الأشخاص: إطار منحنٍ ولون ثابت لكل شخص، هو نفسه في كل المحاضر وكل
+   المجالس ومصدره إعدادات المستخدم — فيُعرف صاحب المهمة بلمحة بصر بدل قراءة
+   سرد أسماء يوحي بعدم الضبط. */
+.whos { display: block; }
+.who { display: inline-block; max-width: 100%; border: 1px solid; border-radius: 20px;
+  padding: 2px 9px; margin: 2px 0 2px 4px; font-size: 12.5px; font-weight: 700; line-height: 1.55;
+  overflow-wrap: break-word; }
+
+/* غلاف تمرير أفقي للجداول الكثيفة — يُركَّب تلقائيًا حول كل .tbl.
+   على الشاشات الواسعة نمنح الجدول حدًّا أدنى للعرض حتى لا تُعصر أعمدته إلى
+   كلمة في كل سطر؛ وعلى الجوال يُكدَّس الجدول أصلًا فلا حاجة للحدّ. */
+.t-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+@media (min-width: 861px) { .t-scroll > table.tbl.wide { min-width: 900px; } }
+
+/* منتقي لون التمييز في إعدادات المستخدمين */
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent;
+  box-shadow: 0 0 0 1px var(--border); cursor: pointer; padding: 0; }
+.swatch.on { border-color: var(--surface); box-shadow: 0 0 0 2px var(--text); }
+/* لون محجوز لشخص آخر: نقطة بيضاء في وسطه — الاختيار متاح لكن التكرار مقصود لا سهوًا */
+.swatch.taken::after { content: ''; display: block; width: 7px; height: 7px; margin: auto;
+  border-radius: 50%; background: #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, .25); }
+.swatch:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
 .empty { text-align: center; padding: 50px 20px; color: var(--muted); }
 .empty .ico { font-size: 40px; opacity: .4; margin-bottom: 10px; }
 
@@ -384,6 +408,17 @@ table.tbl tr:hover td { background: #fafbfb; }
 
 /* لوحة الإشعارات المنسدلة من الجرس */
 .bell-wrap { position: relative; }
+/* عدّاد غير المقروء يُرسى على الزر نفسه لا على غلافه: الغلاف يفقد تموضعه على الجوال
+   (ليصير الشريط العلوي مرجع اللوحة)، فلو اعتمدت الشارة عليه قفزت إلى زاوية الشريط
+   خارج الشاشة. الوالد المباشر هو المرجع الصحيح دائمًا. */
+#bellBtn { position: relative; }
+.notif-count {
+  position: absolute; top: -5px; inset-inline-start: -5px; min-width: 17px;
+  background: var(--danger); color: #fff; border-radius: 20px; padding: 0 5px;
+  font-size: 11px; font-weight: 700; line-height: 17px; text-align: center;
+  box-shadow: 0 0 0 2px var(--surface);
+}
+.notif-count[hidden] { display: none; }
 .notif-panel {
   position: absolute; top: 110%; inset-inline-start: 0; width: 320px; max-height: 400px;
   overflow: auto; background: var(--surface); border: 1px solid var(--border);
