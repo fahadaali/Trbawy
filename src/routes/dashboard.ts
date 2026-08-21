@@ -162,11 +162,26 @@ app.get('/summary', async (c) => {
     }
   }
 
+  // الاجتماعات القادمة التي أنا مدعوٌّ إليها. الجدولة داخل المنصة لا تكتمل بحفظ
+  // موعدٍ في محضر: تكتمل بأن يراه صاحبه أمامه قبل أن يأتي.
+  const upcoming = await c.env.DB.prepare(
+    `SELECT m.id, m.display_number, m.title, m.greg_date, m.hijri_date, m.start_time, m.end_time,
+            m.location, m.location_type, m.status, co.name AS council_name, co.type AS council_type
+       FROM meetings m
+       JOIN meeting_attendees ma ON ma.meeting_id = m.id AND ma.user_id = ? AND ma.is_guest = 0
+       JOIN councils co ON co.id = m.council_id
+      WHERE m.status IN ('invitation', 'draft')
+        AND m.greg_date IS NOT NULL AND date(m.greg_date) >= date('now')
+      ORDER BY date(m.greg_date), COALESCE(m.start_time, '99:99')
+      LIMIT 5`,
+  ).bind(u.id).all<any>();
+
   return c.json({
     my_tasks: myTasks?.n ?? 0,
     awaiting_signature: awaitingSign?.n ?? 0,
     open_cycles: openCycles?.n ?? 0,
     recent_meetings: visible,
+    upcoming_meetings: upcoming.results,
   });
 });
 

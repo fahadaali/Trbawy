@@ -1,7 +1,7 @@
 // عامل الخدمة — تخزين هيكل التطبيق للفتح السريع والعمل دون اتصال جزئيًا.
 // مهم: لا نُخزّن أي استجابة من /api أبدًا (بيانات حية وحسّاسة).
 
-const CACHE = 'tarbawi-shell-v9';
+const CACHE = 'tarbawi-shell-v10';
 const SHELL = [
   '/', '/index.html', '/css/styles.css',
   '/js/api.js', '/js/xlsx.js', '/js/ui.js', '/js/ai.js', '/js/app.js',
@@ -46,8 +46,10 @@ self.addEventListener('fetch', (e) => {
   // تجاوز كل ما هو ديناميكي أو حسّاس
   if (e.request.method !== 'GET') return;
   if (url.origin !== self.location.origin) return;
+  // ‎/ics ملفُ موعدٍ يتغيّر بتغيّر الموعد ويحمل جلسة صاحبه — تخزينُه يُسلّم موعدًا قديمًا
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/print/')
-      || url.pathname.startsWith('/verify/') || url.pathname.startsWith('/file')) return;
+      || url.pathname.startsWith('/verify/') || url.pathname.startsWith('/ics/')
+      || url.pathname.startsWith('/file')) return;
 
   // الشبكة أولًا (بمهلة) مع رجوع للمخزَّن — يضمن أحدث كود عند توفر الاتصال
   e.respondWith((async () => {

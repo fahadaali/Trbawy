@@ -593,6 +593,7 @@ VIEWS.dashboard = async () => {
       <p class="muted">${esc(ROLE_AR[u.role] || u.role)}${u.stage ? ' — المرحلة ' + STAGE_AR[u.stage] : ''}</p>
     </div></div>
     <div id="dashCards" class="grid grid-4 mt"><div class="spinner"></div></div>
+    <div id="dashUpcoming" class="mt"></div>
     <div id="dashCommit" class="mt"></div>
     <div id="dashRecent" class="mt"></div>`;
   let s;
@@ -603,7 +604,8 @@ VIEWS.dashboard = async () => {
     <div class="stat" style="cursor:pointer" onclick="nav('tasks')"><div class="v">${arNum(s.my_tasks)}</div><div class="l">مهامي المفتوحة</div></div>
     <div class="stat" style="cursor:pointer" onclick="nav('meetings')"><div class="v">${arNum(s.awaiting_signature)}</div><div class="l">محاضر بانتظار توقيعي</div></div>
     <div class="stat" style="cursor:pointer" onclick="nav('evaluations')"><div class="v">${arNum(s.open_cycles)}</div><div class="l">دورات تقييم مفتوحة</div></div>
-    <div class="stat"><div class="v">${arNum(s.recent_meetings.length)}</div><div class="l">آخر المحاضر</div></div>`;
+    <div class="stat" style="cursor:pointer" onclick="nav('meetings')"><div class="v">${arNum((s.upcoming_meetings || []).length)}</div><div class="l">اجتماعات قادمة</div></div>`;
+  renderUpcoming(s.upcoming_meetings || []);
   renderCommitmentCard();
   document.getElementById('dashRecent').innerHTML = s.recent_meetings.length ? `
     <div class="card"><div class="card-head"><h3>آخر المحاضر</h3></div>
@@ -612,6 +614,35 @@ VIEWS.dashboard = async () => {
         <td dir="ltr" style="text-align:right"><b>${esc(m.display_number)}</b></td><td>${esc(m.title || '—')}</td>
         <td>${statusTag(m.status, MEETING_STATUS_AR, MEETING_STATUS_COLOR)}</td></tr>`).join('')}</tbody></table></div>` : '';
 };
+
+/**
+ * بطاقة الاجتماعات القادمة — الموعد الذي جُدول في المنصة يُرى قبل أن يأتي،
+ * ومعه زرٌّ يضعه في تقويم الجهاز.
+ */
+function renderUpcoming(list) {
+  const box = document.getElementById('dashUpcoming');
+  if (!box) return;
+  if (!list.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `
+    <div class="card"><div class="card-head"><h3>الاجتماعات القادمة</h3><div class="spacer"></div>
+      <span class="muted" style="font-size:13px">${arCount(list.length, ['اجتماع واحد', 'اجتماعان', 'اجتماعات', 'اجتماعًا'])}</span></div>
+      <table class="tbl"><thead><tr><th>اليوم والتاريخ</th><th>الوقت</th><th>الاجتماع</th><th>المكان</th><th>التقويم</th></tr></thead>
+      <tbody>${list.map((m, i) => `<tr>
+        <td><b>${esc(dayNameAr(m.greg_date))}</b> ${fmtDate(m.greg_date)}</td>
+        <td class="nb">${m.start_time ? `${fmtTime(m.start_time)}${m.end_time ? ' — ' + fmtTime(m.end_time) : ''}` : '<span class="muted">غير محدّد</span>'}</td>
+        <td style="cursor:pointer" onclick="nav('meetings/${m.id}')">
+          <b dir="ltr" style="display:inline-block">${esc(m.display_number)}</b>
+          ${m.title ? '<div>' + esc(m.title) + '</div>' : ''}</td>
+        <td>${esc(m.location || (m.location_type === 'remote' ? 'عن بُعد' : '—'))}</td>
+        <td><button class="btn-ghost btn-sm" data-cal="${i}">${icon('calendar2', 15)} أضِف</button></td>
+      </tr>`).join('')}</tbody></table></div>`;
+  box.querySelectorAll('[data-cal]').forEach((b) => {
+    b.onclick = () => {
+      const m = list[Number(b.dataset.cal)];
+      Calendar.open(m, COUNCIL_TYPE_AR[m.council_type] || m.council_name);
+    };
+  });
+}
 
 // بطاقة التزامي بالمهام: نسبة الإنجاز ودقة التوقيت والتأخير المسجَّل — مؤشرات
 // التقييم نفسها التي تظهر في لوحة «الالتزام والأداء».
@@ -1095,7 +1126,8 @@ async function councilDetail(id) {
 
 // ---- شاشة الإشعارات الكاملة ----
 const NOTIF_TYPE_AR = {
-  '': 'كل الأنواع', meeting_invitation: 'دعوة اجتماع', awaiting_signature: 'بانتظار توقيع',
+  '': 'كل الأنواع', meeting_invitation: 'دعوة اجتماع', meeting_rescheduled: 'تغيير موعد',
+  meeting_tomorrow: 'اجتماع غدًا', meeting_today: 'اجتماع اليوم', awaiting_signature: 'بانتظار توقيع',
   meeting_approved: 'اعتماد محضر', action_assigned: 'إسناد مهمة', task_due_3: 'تذكير قبل ٣ أيام',
   task_due_today: 'تستحق اليوم', task_overdue: 'مهمة متأخرة', task_overdue_chair: 'تأخر في مجلسك',
   cycle_open: 'فتح دورة', cycle_closing: 'اقتراب إغلاق دورة', results_published: 'نشر نتائج',

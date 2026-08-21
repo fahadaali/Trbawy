@@ -70,34 +70,87 @@ app.get('/ics/meeting/:id', async (c) => {
   const council = await getCouncil(c.env, m.council_id);
   if (!(await canViewMeeting(c.env, s.user, m, council!))) return c.text('لا تملك صلاحية', 403);
 
-  // تحويل التاريخ/الوقت إلى صيغة ICS (بلا منطقة زمنية — وقت محلي عائم)
+  // الوقت «عائم» بلا منطقة زمنية عمدًا: المجلس كلّه في توقيت واحد، والوقت العائم
+  // يظهر كما كُتب على أي جهاز بلا حاجة إلى VTIMEZONE ولا خطأ في التحويل.
   const d = String(m.greg_date || '').replace(/-/g, '');
-  const t = (v: string | null, fallback: string) => (v ? String(v).replace(':', '') + '00' : fallback);
-  const dtStart = `${d}T${t(m.start_time, '090000')}`;
-  const dtEnd = `${d}T${t(m.end_time, '100000')}`;
-  const esc = (v: any) => String(v ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+  const hm = (v: string | null) => (v ? String(v).slice(0, 5).replace(':', '') + '00' : null);
+  const start = hm(m.start_time) || '090000';
+  // نهاية بلا بداية معلومة لا معنى لها، والافتراض الثابت كان يُنتج نهاية قبل البداية
+  // (بداية ١:٠٠ ونهاية ١٠:٠٠) فيرفض التقويم الحدث. فالافتراض ساعةٌ بعد البداية.
+  const end = hm(m.end_time) || addHour(start);
+  const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
   const origin = new URL(c.req.url).origin;
+  const cancelled = m.status === 'cancelled';
 
   const lines = [
     'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Tarbawi Council Platform//AR', 'CALSCALE:GREGORIAN',
-    'METHOD:PUBLISH', 'BEGIN:VEVENT',
+    // إلغاء المحضر يصل التقويمَ إلغاءً لا حدثًا جديدًا
+    `METHOD:${cancelled ? 'CANCEL' : 'PUBLISH'}`, 'BEGIN:VEVENT',
+    // المعرّف ثابت لكل اجتماع، والتسلسل يعلو بكل تعديل: إعادةُ الإضافة بعد تغيير
+    // الموعد تُحدّث الحدث القائم في التقويم بدل أن تُضيف نسخة ثانية إلى جانبه.
     `UID:meeting-${id}@tarbawi`,
-    `DTSTAMP:${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '')}`,
-    `DTSTART:${dtStart}`, `DTEND:${dtEnd}`,
-    `SUMMARY:${esc((m.title ? m.title + ' — ' : '') + council?.name)}`,
-    `DESCRIPTION:${esc('رقم المحضر: ' + m.display_number)}`,
-    `LOCATION:${esc(m.location_type === 'remote' ? (m.location || 'عن بُعد') : (m.location || 'حضوري'))}`,
+    `SEQUENCE:${icsSequence(m.updated_at)}`,
+    `DTSTAMP:${stamp}`,
+    `LAST-MODIFIED:${stamp}`,
+    `DTSTART:${d}T${start}`, `DTEND:${d}T${end}`,
+    `SUMMARY:${icsEsc((cancelled ? 'ملغى: ' : '') + (m.title ? m.title + ' — ' : '') + council?.name)}`,
+    `DESCRIPTION:${icsEsc(`رقم المحضر: ${m.display_number}\n${origin}/#/meetings/${id}`)}`,
+    `LOCATION:${icsEsc(m.location_type === 'remote' ? (m.location || 'عن بُعد') : (m.location || 'حضوري'))}`,
     `URL:${origin}/#/meetings/${id}`,
-    'BEGIN:VALARM', 'TRIGGER:-PT60M', 'ACTION:DISPLAY', 'DESCRIPTION:تذكير بالاجتماع', 'END:VALARM',
-    'END:VEVENT', 'END:VCALENDAR',
+    `STATUS:${cancelled ? 'CANCELLED' : 'CONFIRMED'}`,
   ];
-  return new Response(lines.join('\r\n'), {
+  if (!cancelled) {
+    lines.push('BEGIN:VALARM', 'TRIGGER:-PT60M', 'ACTION:DISPLAY', 'DESCRIPTION:تذكير بالاجتماع', 'END:VALARM');
+  }
+  lines.push('END:VEVENT', 'END:VCALENDAR');
+
+  // النصّ ينتهي بـ CRLF كما تنصّ RFC 5545
+  return new Response(lines.map(icsFold).join('\r\n') + '\r\n', {
     headers: {
       'Content-Type': 'text/calendar; charset=utf-8',
       'Content-Disposition': `attachment; filename="meeting-${id}.ics"`,
+      // ملفٌ يتغيّر بتغيّر الموعد فلا يُخزَّن
+      'Cache-Control': 'no-store',
     },
   });
 });
+
+/** ساعة بعد وقت ICS (HHMMSS) — لا تتجاوز نهاية اليوم. */
+function addHour(t: string): string {
+  const h = Math.min(23, Number(t.slice(0, 2)) + 1);
+  return String(h).padStart(2, '0') + t.slice(2);
+}
+
+/** تهريب المحارف ذات المعنى في ICS (RFC 5545). */
+const icsEsc = (v: any) => String(v ?? '')
+  .replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+
+/**
+ * تسلسل الحدث: دقائق منذ حقبة يونكس عند آخر تعديل. يعلو مع كل تعديل ولا يعود،
+ * وهو ما تعتمده التقاويم للتمييز بين نسخة أحدث ونسخة قديمة من الحدث نفسه.
+ */
+function icsSequence(updatedAt: string | null): number {
+  const ms = Date.parse(String(updatedAt || '').replace(' ', 'T') + 'Z');
+  return Number.isFinite(ms) ? Math.floor(ms / 60000) : 0;
+}
+
+/**
+ * طيّ السطور الطويلة (٧٥ ثمانيّة) دون كسر محرف عربي: العدّ بالبايتات لا بالمحارف،
+ * فحرفٌ عربي بايتان — والقسمة في وسطه تُنتج ملفًا لا يُقرأ.
+ */
+function icsFold(line: string): string {
+  const enc = new TextEncoder();
+  if (enc.encode(line).length <= 75) return line;
+  const out: string[] = [];
+  let cur = '', bytes = 0, limit = 75;
+  for (const ch of line) {
+    const n = enc.encode(ch).length;
+    if (bytes + n > limit) { out.push(cur); cur = ' '; bytes = 1; limit = 74; }
+    cur += ch; bytes += n;
+  }
+  if (cur) out.push(cur);
+  return out.join('\r\n');
+}
 
 // حزمة محاضر فترة معيّنة في ملف واحد
 app.get('/print/bundle', async (c) => {

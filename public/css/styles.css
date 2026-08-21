@@ -29,7 +29,9 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 a { color: var(--primary); text-decoration: none; }
-button { font-family: inherit; cursor: pointer; }
+/* color: inherit ليس تزيينًا: زرٌّ بلا لون صريح يأخذ لون النظام — وهو أزرق على
+   iOS — فتظهر أيقونته خارج هوية المنصة. */
+button { font-family: inherit; cursor: pointer; color: inherit; }
 input, select, textarea { font-family: inherit; font-size: 15px; }
 
 /* ---------- تسجيل الدخول ---------- */
@@ -330,8 +332,9 @@ table.tbl tr:hover td { background: #fafbfb; }
 .mt { margin-top: 16px; }
 .muted { color: var(--muted); }
 .center { text-align: center; }
+.nb { white-space: nowrap; }   /* «٩:٠٠ ص» لا ينكسر فيبقى «ص» وحدها في سطر */
 
-.menu-toggle { display: none; background: none; border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px; }
+.menu-toggle { display: none; background: none; color: var(--primary); border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px; }
 
 /* ---------- المحرر الغني ---------- */
 .rich { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
@@ -644,6 +647,13 @@ html.standalone body { overscroll-behavior-y: none; }
 /* تحديثُ المتصفح المدمج بالسحب لا يزاحم تحديثنا: contain تمنع تسلسل التمرير إلى
    المتصفح وتُبقي ارتداد الصفحة نفسه. */
 body { overscroll-behavior-y: contain; }
+
+/* ملخّص الموعد في نافذة «إضافة إلى التقويم» */
+.cal-when {
+  background: var(--primary-light); border-radius: 12px; padding: 12px 14px; line-height: 2;
+}
+.cal-when b { display: block; margin-bottom: 4px; }
+.cal-when .num { font-weight: 700; }
 
 /* ---------- سحب الشاشة للتحديث ---------- */
 /* حلقة تخرج من تحت الشريط العلوي مع الإصبع ثم تدور أثناء التحديث.

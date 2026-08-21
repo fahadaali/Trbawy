@@ -1,6 +1,7 @@
 // التذكيرات اليومية المجدولة (Cron): المهام والدورات.
 import type { Env } from '../types';
 import { notify } from './notify';
+import { arNum } from './charts';
 import { evaluatorProgress } from './evalprogress';
 
 // منع التكرار: هل أُرسل إشعار بنفس النوع لنفس المستخدم والرابط اليوم؟
@@ -22,7 +23,45 @@ async function assigneesOf(env: Env, actionId: number): Promise<number[]> {
 
 export async function runDailyReminders(env: Env): Promise<void> {
   await taskReminders(env);
+  await meetingReminders(env);
   await cycleClosingReminders(env);
+}
+
+/**
+ * تذكير المدعوّين بالاجتماع: غدًا، ثم صباح يومه.
+ * من جدول موعدًا في المنصة يجدها تذكّره به — ولا ينتظر أن يكون قد أضافه إلى تقويمه.
+ */
+async function meetingReminders(env: Env): Promise<void> {
+  const today = (await env.DB.prepare("SELECT date('now') AS d").first<{ d: string }>())!.d;
+  const rows = (await env.DB.prepare(
+    `SELECT m.id, m.display_number, m.title, m.greg_date, m.start_time, ma.user_id
+       FROM meetings m
+       JOIN meeting_attendees ma ON ma.meeting_id = m.id AND ma.is_guest = 0
+       JOIN users u ON u.id = ma.user_id AND u.is_active = 1 AND u.deleted_at IS NULL
+      WHERE m.status IN ('invitation', 'draft')
+        AND m.greg_date IN (date('now'), date('now','+1 day'))`,
+  ).all<any>()).results;
+
+  for (const r of rows) {
+    const isToday = r.greg_date === today;
+    const type = isToday ? 'meeting_today' : 'meeting_tomorrow';
+    const link = `#/meetings/${r.id}`;
+    if (await alreadySentToday(env, r.user_id, type, link)) continue;
+    const at = r.start_time ? ` الساعة ${hm12(r.start_time)}` : '';
+    await notify(env, {
+      userId: r.user_id, type,
+      title: isToday ? `اجتماع اليوم${at}` : `اجتماع غدًا${at}`,
+      body: `${r.display_number}${r.title ? ' — ' + r.title : ''}`,
+      link,
+    });
+  }
+}
+
+/** «٩:٣٠ ص» من "HH:MM" — نصُّ إشعارٍ يُقرأ على جوال. */
+function hm12(t: string): string {
+  const [h, mn] = String(t).split(':').map(Number);
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${arNum(h12)}:${arNum(String(mn).padStart(2, '0'))} ${h < 12 ? 'ص' : 'م'}`;
 }
 
 async function taskReminders(env: Env): Promise<void> {

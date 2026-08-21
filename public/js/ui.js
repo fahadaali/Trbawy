@@ -753,6 +753,85 @@ function initMobile() {
 
 
 // ============================================================
+// إضافة موعد الاجتماع إلى التقويم الشخصي
+// ============================================================
+//
+// طريقان يغطّيان ما يستعمله الناس: رابطٌ مباشر لتقويم قوقل، وملفُ ICS قياسي تفتحه
+// تقاويم آبل وسامسونج وأوتلوك وغيرها فتُضيف الحدث. والوقت في الاثنين «عائم» بلا
+// منطقة زمنية، فيظهر كما كُتب على أي جهاز بلا تحويلٍ يزحزحه ساعات.
+//
+// المعرّف ثابت في ملف ICS لكل اجتماع (UID) وتسلسله يعلو بكل تعديل، فمن غيّر موعده
+// ثم أعاد الإضافة وجد الحدثَ نفسه قد تحدّث، لا حدثًا ثانيًا إلى جانب الأول.
+
+const Calendar = {
+  /** حقول الموعد جاهزةً — أو null إن كان الاجتماع بلا تاريخ. */
+  fields(m, councilName) {
+    const date = String(m.greg_date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+    const hms = (t) => String(t).slice(0, 5).replace(':', '') + '00';
+    const start = m.start_time ? hms(m.start_time) : '090000';
+    // نهاية غير مذكورة = ساعة بعد البداية (لا وقتٌ ثابت قد يسبقها)
+    const end = m.end_time ? hms(m.end_time)
+      : String(Math.min(23, Number(start.slice(0, 2)) + 1)).padStart(2, '0') + start.slice(2);
+    return {
+      date, day: date.replace(/-/g, ''), start, end,
+      summary: (m.title ? m.title + ' — ' : '') + (councilName || 'اجتماع المجلس'),
+      location: m.location || (m.location_type === 'remote' ? 'عن بُعد' : 'حضوري'),
+      details: `رقم المحضر: ${m.display_number || ''}\n${location.origin}/#/meetings/${m.id}`,
+    };
+  },
+
+  googleUrl(f) {
+    return 'https://calendar.google.com/calendar/render?' + new URLSearchParams({
+      action: 'TEMPLATE',
+      text: f.summary,
+      dates: `${f.day}T${f.start}/${f.day}T${f.end}`,
+      details: f.details,
+      location: f.location,
+    }).toString();
+  },
+
+  /** نافذة الاختيار. تُستدعى من شاشة المحضر ومن بطاقة الاجتماعات القادمة وبعد الإنشاء. */
+  open(m, councilName, opts = {}) {
+    const f = this.fields(m, councilName);
+    if (!f) return toast('الاجتماع بلا تاريخ — حدّد التاريخ أولًا ثم أضِفه للتقويم', 'err');
+    const when = `${dayNameAr(f.date)} ${arNum(f.date.replace(/-/g, '/'))}`;
+    const time = m.start_time
+      ? `${fmtTime(m.start_time)}${m.end_time ? ' — ' + fmtTime(m.end_time) : ''}`
+      : 'الوقت غير محدّد — سيُضاف ٩:٠٠ ص لساعة';
+    const { overlay, close } = openModal({
+      title: opts.title || 'إضافة الموعد إلى تقويمي',
+      body: `
+        <div class="cal-when">
+          <b>${esc(f.summary)}</b>
+          <div><span class="muted">${icon('calendar2', 15)} التاريخ:</span> ${when}</div>
+          <div><span class="muted">الوقت:</span> ${esc(time)}</div>
+          <div><span class="muted">المكان:</span> ${esc(f.location)}</div>
+        </div>
+        <a class="btn btn-block mt" href="${esc(this.googleUrl(f))}" target="_blank" rel="noopener">تقويم قوقل</a>
+        <button class="btn btn-ghost btn-block mt" id="calIcs">تقويم آبل · سامسونج · أوتلوك</button>
+        <p class="hint mt">الزرّ الثاني يُنزّل ملف موعد قياسيًّا (‎.ics) يفتحه تطبيق التقويم في جهازك
+          فيضيف الموعد ومعه تذكيرٌ قبله بساعة. وإن تغيّر الموعد لاحقًا فأعِد الإضافة —
+          يُحدَّث الحدث نفسه ولا يتكرّر.</p>`,
+      buttons: [{ label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() }],
+    });
+    overlay.querySelector('#calIcs').onclick = () => {
+      window.location.href = '/ics/meeting/' + m.id;
+      setTimeout(close, 600);        // نترك المتصفح يبدأ التنزيل قبل إغلاق النافذة
+    };
+  },
+};
+
+/** اسم اليوم بالعربية من تاريخ ميلادي (YYYY-MM-DD). */
+function dayNameAr(date) {
+  try {
+    const d = new Date(date + 'T12:00:00');
+    return new Intl.DateTimeFormat('ar', { weekday: 'long' }).format(d);
+  } catch { return ''; }
+}
+
+
+// ============================================================
 // سحب الشاشة للتحديث
 // ============================================================
 //

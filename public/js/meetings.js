@@ -237,9 +237,13 @@ async function meetingCreate() {
       agenda: agenda.filter((a) => a.title.trim()),
     };
     try {
-      const { id } = await API.post('/meetings', payload);
+      const created = await API.post('/meetings', payload);
+      const councilName = document.getElementById('mc_council').selectedOptions[0].textContent;
       toast('تم إنشاء الدعوة', 'ok');
-      nav('meetings/' + id);
+      nav('meetings/' + created.id);
+      // لحظةُ الإنشاء أنسبُ ما يُضاف فيها الموعد إلى التقويم: بعدها يُنسى
+      Calendar.open({ ...payload, id: created.id, display_number: created.display_number }, councilName,
+        { title: 'أُنشئت الدعوة — أضِف موعدها إلى تقويمك' });
     } catch (err) { document.getElementById('mcErr').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
   };
 }
@@ -304,7 +308,8 @@ async function meetingDetail(id) {
   if (p.can_revert) btns.push(`<button class="btn-ghost btn-sm" id="btnRevert">إرجاع إلى المسودة</button>`);
   if (p.can_archive) btns.push(`<button class="btn-ghost btn-sm" id="btnArchive">أرشفة</button>`);
   if (p.can_print) btns.push(`<button class="btn-ghost btn-sm" id="btnPrint">${icon('print', 16)} طباعة / تصدير PDF</button>`);
-  btns.push(`<button class="btn-ghost btn-sm" id="btnIcs">${icon('calendar2', 16)} إضافة للتقويم</button>`);
+  if (p.can_edit) btns.push(`<button class="btn-ghost btn-sm" id="btnWhen">${icon('calendar2', 16)} تغيير الموعد</button>`);
+  btns.push(`<button class="btn-ghost btn-sm" id="btnIcs">${icon('calendar2', 16)} أضِف إلى تقويمي</button>`);
   if (State.aiEnabled) btns.push(aiBtn('btnAiSummary', 'ملخّص تنفيذي'));
   if (canCreateForCouncil(d.council)) btns.push(`<button class="btn-ghost btn-sm" id="btnDup">${icon('copy', 16)} نسخ كمحضر جديد</button>`);
   if (p.can_amend) btns.push(`<button class="btn-ghost btn-sm" id="btnAmend">${icon('meetings', 16)} محضر تصويب/ملحق</button>`);
@@ -395,7 +400,8 @@ async function meetingDetail(id) {
     try { await API.post(`/meetings/${id}/sign`); toast('تم التوقيع', 'ok'); reload(); } catch (err) { toast(err.message, 'err'); }
   }));
   bind('btnPrint', () => window.open(`/print/meeting/${id}?print=1`, '_blank'));
-  bind('btnIcs', () => { window.location.href = `/ics/meeting/${id}`; });
+  bind('btnIcs', () => Calendar.open(m, COUNCIL_TYPE_AR[d.council.type] || d.council.name));
+  bind('btnWhen', () => rescheduleDialog(id, m, d));
   bind('btnDup', () => confirmModal('نسخ كمحضر جديد',
     'سيُنشأ محضر جديد (دعوة) بنفس البنود والحضور والترويسة، برقم جديد. متابعة؟', async () => {
       try { const r = await API.post(`/meetings/${id}/duplicate`, {}); toast('تم إنشاء نسخة: ' + r.display_number, 'ok'); nav('meetings/' + r.id); }
@@ -1052,6 +1058,63 @@ function adjustCompletionDate(actionId, onDone) {
 }
 
 function bind(elId, fn) { const el = document.getElementById(elId); if (el) el.onclick = fn; }
+
+/**
+ * تغيير موعد الاجتماع.
+ * مفصولٌ عن «تعديل الترويسة» لأنه أكثر ما يُحتاج إليه وحده: الموعد يتبدّل قبل
+ * الاجتماع وبعده، ومن غيّره يحتاج أمرين معًا — أن يُبلَّغ الأعضاء، وأن يُحدَّث
+ * الموعد في تقويمه. فيُعرضان هنا في مسار واحد بدل نموذج ترويسة كامل.
+ */
+function rescheduleDialog(id, m, d) {
+  const councilName = COUNCIL_TYPE_AR[d.council.type] || d.council.name;
+  const { overlay } = openModal({
+    title: 'تغيير موعد الاجتماع',
+    body: `
+      <div id="rsErr"></div>
+      <div class="row-2">
+        <div class="field"><label>التاريخ الميلادي</label><input type="date" id="rs_greg" value="${esc(m.greg_date || '')}" /></div>
+        <div class="field"><label>التاريخ الهجري</label><input id="rs_hijri" value="${esc(m.hijri_date || '')}" readonly style="background:#f0f2f1" /></div>
+      </div>
+      <div class="row-2">
+        <div class="field"><label>وقت البداية</label><input id="rs_start" value="${m.start_time ? esc(fmtTime(m.start_time)) : ''}" placeholder="٩:٣٠ ص" /></div>
+        <div class="field"><label>وقت النهاية</label><input id="rs_end" value="${m.end_time ? esc(fmtTime(m.end_time)) : ''}" placeholder="١٠:٤٥ ص" /></div>
+      </div>
+      <p class="hint">صيغ الوقت المقبولة: ٩:٣٠ ص · 9:30 م · 0930 — واتركه فارغًا لمسحه.
+        يُبلَّغ أعضاء المجلس بالموعد الجديد فور الحفظ، ويبقى الموعد قابلًا للتغيير قبل
+        الاجتماع وبعده ما دام المحضر غير مقفل.</p>`,
+    buttons: [
+      { label: 'حفظ الموعد', onClick: async (cl, ov) => {
+        const err = (msg) => ov.querySelector('#rsErr').innerHTML = `<div class="form-error">${esc(msg)}</div>`;
+        const greg = ov.querySelector('#rs_greg').value;
+        if (!greg) return err('حدّد تاريخ الاجتماع');
+        const start = parseTimeInput(ov.querySelector('#rs_start').value);
+        const end = parseTimeInput(ov.querySelector('#rs_end').value);
+        if (start === undefined) return err('صيغة وقت البداية غير مفهومة — مثال: ٩:٣٠ ص');
+        if (end === undefined) return err('صيغة وقت النهاية غير مفهومة — مثال: ١٠:٤٥ ص');
+        if (start && end && end <= start) return err('وقت النهاية يجب أن يكون بعد وقت البداية');
+
+        const payload = {};
+        const put = (k, v, cur) => { if (v !== (cur ?? null)) payload[k] = v; };
+        put('greg_date', greg, m.greg_date);
+        put('hijri_date', ov.querySelector('#rs_hijri').value, m.hijri_date);
+        put('start_time', start, m.start_time);
+        put('end_time', end, m.end_time);
+        if (!Object.keys(payload).length) { cl(); return toast('الموعد كما هو — لا تغيير'); }
+        try {
+          await API.patch('/meetings/' + id, payload);
+          cl();
+          toast('حُفظ الموعد الجديد وأُبلغ الأعضاء', 'ok');
+          meetingDetail(id);
+          // التقويم لا يعرف بالتغيير حتى يُعاد إليه: نعرضه فورًا لا لاحقًا
+          Calendar.open({ ...m, ...payload, id }, councilName, { title: 'حدّث الموعد في تقويمك' });
+        } catch (ex) { err(ex.message); }
+      } },
+      { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
+    ],
+  });
+  const g = overlay.querySelector('#rs_greg');
+  g.onchange = () => { overlay.querySelector('#rs_hijri').value = hijriFromGreg(g.value); };
+}
 
 function editHeader(id, m, d) {
   const members = d.attendees.filter((a) => !a.is_guest);

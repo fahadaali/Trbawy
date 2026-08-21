@@ -11,6 +11,7 @@ import {
 import { getCouncil, nextMeetingNumber, formatDisplayNumber, currentAcademicYear } from '../lib/meetings';
 import { hijriYear } from '../lib/hijri';
 import { shortCode } from '../lib/crypto';
+import { arNum } from '../lib/charts';
 import { notifyMany } from '../lib/notify';
 import { sanitizeHtml } from '../lib/sanitize';
 import { computeFollowups, getFollowups, freezeFollowups } from '../lib/followups';
@@ -395,8 +396,33 @@ app.patch('/:id', async (c) => {
        location_type=?, location=?, writer_id=?, updated_at=datetime('now') WHERE id=?`,
   ).bind(f.title, f.hijri_date, f.greg_date, f.start_time, f.end_time, f.location_type, f.location, f.writer_id, id).run();
   await audit(c.env, { userId: c.get('user').id, action: 'update_meeting', entityType: 'meeting', entityId: id, newValue: f });
+
+  // تغيّر الموعد خبرٌ يعني الأعضاء لا تفصيلًا داخليًّا: من لم يبلغه التغيير حضر
+  // في الموعد القديم. ولذلك يُبلَّغ هنا لا في الواجهة — أيًّا كان الطريق الذي غُيّر منه.
+  const when = (x: any) => `${x.greg_date}|${x.start_time || ''}|${x.end_time || ''}`;
+  if (when(f) !== when(m) && m.status !== 'cancelled') {
+    const rows = await c.env.DB.prepare(
+      `SELECT ma.user_id FROM meeting_attendees ma JOIN users u ON u.id = ma.user_id
+        WHERE ma.meeting_id = ? AND ma.is_guest = 0 AND u.is_active = 1 AND u.deleted_at IS NULL`,
+    ).bind(id).all<{ user_id: number }>();
+    await notifyMany(c.env, rows.results.map((r) => r.user_id).filter((uid) => uid !== c.get('user').id), {
+      type: 'meeting_rescheduled',
+      title: 'تغيّر موعد الاجتماع',
+      body: `${m.display_number} — الموعد الجديد: ${arDateTime(f.greg_date, f.start_time)}`,
+      link: `#/meetings/${id}`,
+    });
+  }
   return c.json({ ok: true });
 });
+
+/** «٢٠٢٦/٠٩/٣٠ الساعة ٩:٣٠ ص» — لنصّ إشعارٍ يقرؤه عضو على جواله. */
+function arDateTime(date: string | null, time: string | null): string {
+  const d = arNum(String(date || '').slice(0, 10).replace(/-/g, '/'));
+  if (!time) return d;
+  const [h, mn] = String(time).split(':').map(Number);
+  const h12 = h % 12 === 0 ? 12 : h % 12;
+  return `${d} الساعة ${arNum(h12)}:${arNum(String(mn).padStart(2, '0'))} ${h < 12 ? 'ص' : 'م'}`;
+}
 
 // ---- استبدال بنود جدول الأعمال (تحرير جماعي من نافذة «تعديل البنود») ----
 app.put('/:id/agenda', async (c) => {
