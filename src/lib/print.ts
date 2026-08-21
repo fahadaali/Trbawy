@@ -427,7 +427,7 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
         ${overdue ? chip(`متأخرة ${countAr(f.overdue_days, ['يومًا واحدًا', 'يومين', 'أيام', 'يومًا'])}`, 'bad')
           : f.status === 'done' ? delayChip(f.delay_days, !!f.due_date) : ''}</td>
       <td>${progressCell(f.progress)}</td>
-      <td class="center">${f.is_final ? chip('أخير', 'ok') : chip(`ترحيل ${arNum(f.carried_index ?? 1)}`, 'warn')}</td>
+      <td class="center">${f.is_final ? chip('توثيق أخير', 'ok') : chip(`ترحيل ${arNum(f.carried_index ?? 1)}`, 'warn')}</td>
     </tr>`;
   }).join('');
 
@@ -472,8 +472,8 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
     ${followups.length ? `<h2>متابعة بنود المحاضر السابقة</h2>
     <p class="note">البند غير المنجَز يُرحَّل إلى المحضر التالي حتى يُنجَز، ثم يظهر ظهورًا أخيرًا للتوثيق.</p>
     <div class="t-wrap"><table class="tbl fixed">
-      <colgroup><col style="width:8%" /><col style="width:11%" /><col style="width:22%" /><col style="width:16%" />
-        <col style="width:11%" /><col style="width:16%" /><col style="width:7%" /><col style="width:9%" /></colgroup>
+      <colgroup><col style="width:8%" /><col style="width:11%" /><col style="width:22%" /><col style="width:15%" />
+        <col style="width:11%" /><col style="width:15%" /><col style="width:7%" /><col style="width:11%" /></colgroup>
       <thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الاستحقاق</th>
       <th>الحالة والالتزام</th><th>الإنجاز</th><th>الترحيل</th></tr></thead>
       <tbody>${followupRows}</tbody></table></div>` : ''}
