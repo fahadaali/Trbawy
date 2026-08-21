@@ -79,20 +79,3 @@ export function kpi(value: string | number, label: string, tone: 'ok' | 'warn' |
     ${sub ? `<div class="kpi-s">${esc(sub)}</div>` : ''}
   </div>`;
 }
-
-/** مخطط أعمدة زمني بسيط (اتجاه عبر المحاضر). */
-export function columns(points: { label: string; value: number }[], color: string, unit = ''): string {
-  if (!points.length) return '';
-  const W = 520, H = 150, pad = 26, bw = Math.min(46, (W - 2 * pad) / points.length - 8);
-  const max = Math.max(1, ...points.map((p) => p.value));
-  const x = (i: number) => W - pad - (i + 1) * ((W - 2 * pad) / points.length) + ((W - 2 * pad) / points.length - bw) / 2;
-  const cols = points.map((p, i) => {
-    const h = Math.round((p.value / max) * (H - 2 * pad));
-    const y = H - pad - h;
-    return `<rect x="${x(i).toFixed(1)}" y="${y}" width="${bw.toFixed(1)}" height="${h}" rx="3" fill="${color}" />
-      <text x="${(x(i) + bw / 2).toFixed(1)}" y="${y - 4}" text-anchor="middle" class="cl-v">${arNum(p.value)}${esc(unit)}</text>
-      <text x="${(x(i) + bw / 2).toFixed(1)}" y="${H - pad + 13}" text-anchor="middle" class="cl-l">${esc(p.label)}</text>`;
-  }).join('');
-  return `<svg viewBox="0 0 ${W} ${H}" class="cols" role="img">
-    <line x1="${pad}" y1="${H - pad}" x2="${W - pad}" y2="${H - pad}" stroke="#dbe3e0" />${cols}</svg>`;
-}

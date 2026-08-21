@@ -187,9 +187,7 @@ function printStyles(primary: string, font: string): string {
   table.tbl { width: 100%; border-collapse: collapse; margin: 6px 0 10px; }
   table.tbl th, table.tbl td { border: 1px solid #dbe3e0; padding: 4px 6px; text-align: right;
     font-size: 11px; vertical-align: middle; }
-  /* عنوان العمود كلمة اصطلاحية: يلتفّ عند المسافات ولا يُقصّ في منتصف الكلمة */
-  table.tbl th { background: ${primary}; color: #fff; font-weight: 700; font-size: 10px;
-    overflow-wrap: normal; hyphens: none; }
+  table.tbl th { background: ${primary}; color: #fff; font-weight: 700; font-size: 10px; }
   table.tbl tbody tr:nth-child(even) td { background: #f7faf9; }
   table.tbl tbody tr.row-bad td { background: #fdf1ef; }
   table.tbl tbody tr.row-ok  td { background: #f1f9f4; }
@@ -221,8 +219,7 @@ function printStyles(primary: string, font: string): string {
   /* شارات الأشخاص: إطار منحنٍ ولون ثابت لكل شخص في كل المحاضر */
   .whos { display: block; }
   .who { display: inline-block; max-width: 100%; border: 1px solid; border-radius: 999px;
-    padding: 0 6px; margin: 1px 0 1px 3px; font-size: 10px; font-weight: 700; line-height: 1.7;
-    overflow-wrap: break-word; }
+    padding: 0 6px; margin: 1px 0 1px 3px; font-size: 10px; font-weight: 700; line-height: 1.7; }
 
   /* لوحة المؤشرات */
   .dash { border: 1px solid #e0e6e3; border-radius: 10px; padding: 8px 10px; background: #fcfdfd;
@@ -290,11 +287,15 @@ function printStyles(primary: string, font: string): string {
   table.tbl td .chip, table.tbl th .chip { font-size: 9.5px; padding: 1px 5px; max-width: 100%;
     white-space: normal; vertical-align: middle; }
   table.tbl td { word-break: normal; overflow-wrap: break-word; }
-  /* عنوان العمود يلتفّ عند المسافات فقط ولا يُقصّ في منتصف الكلمة. هذه القاعدة
-     **بعد** قاعدة الخلايا عمدًا: هي مساوية لها في الأولوية، والمتأخّرة تغلب. */
-  table.tbl th { word-break: keep-all; overflow-wrap: normal; hyphens: none; }
-  /* الشارة كلمة واحدة قصيرة: لا تُكسر في منتصفها، والأعمدة معايَرة لتسعها */
-  table.tbl td .chip, table.tbl th .chip, .who { word-break: keep-all; overflow-wrap: normal; }
+  /* قواعد الكسر مجموعة هنا وحدها — كانت موزّعة على موضعين فغلب المتأخّر المتقدّم
+     بصمت (وهو ما عطّل حماية عناوين الأعمدة مرة). موضعها بعد قاعدة الخلايا مقصود:
+     الأولوية متساوية والمتأخّرة تغلب.
+       • عنوان العمود والشارة: كلمة اصطلاحية قصيرة لا تُكسر في منتصفها،
+         والأعمدة معايَرة لتسعها بهامش يحتمل خطًّا أعرض بالثلث.
+       • اسم الشخص: بيانات مفتوحة الطول، فالكسر عند الضرورة أهون من قصّ حروفه. */
+  table.tbl th, table.tbl td .chip, table.tbl th .chip {
+    word-break: keep-all; overflow-wrap: normal; hyphens: none; }
+  .who { word-break: normal; overflow-wrap: break-word; }
   /* حاجز أخير: لو طفح محتوى غير متوقّع رغم ما سبق، يُقتطع عند حدّ الخلية ولا يتداخل مع جارتها */
   table.tbl.fixed td, table.tbl.fixed th { overflow: hidden; padding: 4px 5px; }
   .ov { color: ${C.warn}; font-weight: 700; } .muted { color: #8a9691; }

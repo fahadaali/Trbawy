@@ -485,7 +485,7 @@ table.tbl tr:hover td { background: #fafbfb; }
 html { -webkit-text-size-adjust: 100%; }
 body { overflow-x: hidden; }
 * { -webkit-tap-highlight-color: rgba(31, 111, 84, .12); }
-.main, .content, .card, .card-body { min-width: 0; }
+.content, .card, .card-body { min-width: 0; }   /* .main مضبوط أصلًا عند تعريفه */
 
 /* شريط التبويب السفلي وستارة القائمة وعناصر الجوال — تظهر في الجوال وحده */
 .tabbar, .drawer-scrim, .only-mobile { display: none; }
@@ -551,7 +551,6 @@ body { overflow-x: hidden; }
   }
   .tabbar a.active { color: var(--primary); }
   .tabbar a.active .ic-svg { transform: translateY(-1px); }
-  .tabbar .tb-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--primary); }
 
   /* النوافذ المنبثقة تصبح ورقة سفلية */
   .modal-overlay { padding: 0; align-items: end; }

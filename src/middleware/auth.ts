@@ -73,10 +73,3 @@ export async function requirePasswordChanged(c: Ctx, next: Next) {
   await next();
 }
 
-export function requireRole(...roles: string[]) {
-  return async (c: Ctx, next: Next) => {
-    const user = c.get('user');
-    if (!roles.includes(user.role)) return c.json({ error: 'لا تملك صلاحية لهذه العملية' }, 403);
-    await next();
-  };
-}

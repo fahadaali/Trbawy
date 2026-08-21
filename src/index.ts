@@ -22,11 +22,19 @@ import { createBackup } from './lib/backup';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
-// تهيئة تلقائية عند أول تشغيل (المجالس والمستخدمون)
-app.use('/api/*', async (c, next) => {
+// تهيئة تلقائية عند أول تشغيل (المجالس والمستخدمون).
+// تشمل الصفحات المُخدَّمة من الخادم أيضًا: عزلة جديدة قد يصلها رابط تحقّق مطبوع
+// أو رابط طباعة قبل أي طلب واجهة، فتقرأ عمودًا لم تُنشئه ترقيةٌ لم تُشغَّل بعد.
+// (الحارس داخل ensureBootstrap يجعل ما بعد المرة الأولى فحصًا لقيمة منطقية.)
+const bootstrapFirst = async (c: any, next: any) => {
   await ensureBootstrap(c.env);
   await next();
-});
+};
+app.use('/api/*', bootstrapFirst);
+app.use('/print/*', bootstrapFirst);
+app.use('/verify/*', bootstrapFirst);
+app.use('/ics/*', bootstrapFirst);
+app.use('/file', bootstrapFirst);
 
 // فحص الصحة
 app.get('/api/health', (c) => c.json({ ok: true, app: c.env.APP_NAME }));

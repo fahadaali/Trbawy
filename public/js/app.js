@@ -932,13 +932,21 @@ VIEWS.councils = async () => {
   try { data = await API.get('/councils'); }
   catch (err) { return renderError(err); }
 
-  content().innerHTML = `<div class="grid grid-3">${data.councils.map((c) => `
+  // شبكة فارغة بلا رسالة تعني شاشة بيضاء بلا تفسير — ومدير النظام مثلًا لا عضوية
+  // له في أي مجلس فلا يرى شيئًا. نُبيّن السبب بدل الصمت.
+  content().innerHTML = data.councils.length
+    ? `<div class="grid grid-3">${data.councils.map((c) => `
     <div class="card"><div class="card-body">
       <div class="tag tag-green" style="margin-bottom:10px">${esc(COUNCIL_TYPE_AR[c.type] || c.type)}</div>
       <h3 style="margin-bottom:4px">${esc(c.name)}</h3>
       <p class="muted" style="font-size:13px">بادئة الترقيم: ${esc(c.number_prefix)}</p>
       <button class="btn-ghost btn-sm mt" data-view="${c.id}">التفاصيل والأعضاء</button>
-    </div></div>`).join('')}</div>`;
+    </div></div>`).join('')}</div>`
+    : `<div class="card"><div class="empty"><div class="ico">${icon('councils', 42)}</div>
+        <p>لا مجالس ضمن اطلاعك</p>
+        <p class="muted" style="font-size:13px">الاطلاع على المجلس يكون بعضويته أو رئاسته.
+          ${State.user.role === 'system_admin' ? 'مدير النظام يدير الحسابات والهوية والنسخ الاحتياطي، ولا يطّلع على محتوى المجالس.' : 'راجع رئيس المجلس لإضافتك عضوًا.'}</p>
+      </div></div>`;
 
   content().querySelectorAll('[data-view]').forEach((b) =>
     b.onclick = () => councilDetail(b.dataset.view));
