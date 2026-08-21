@@ -119,10 +119,16 @@ function transferStudent(s, onDone) {
 function importStudents(onDone) {
   const { overlay } = openModal({
     title: 'استيراد الطلاب',
-    body: `<p class="muted">حمّل القالب، عبّئه، ثم ارفعه للمعاينة قبل الحفظ.</p>
-      <div class="row"><a class="btn-ghost btn-sm" href="/api/students/template">تنزيل القالب</a>
-        <input type="file" id="imp_file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" /></div>
-      <p class="hint">يقبل ملفات Excel ‎(.xlsx)‎ وCSV.</p>
+    body: `<p class="muted">حمّل القالب، عبّئه، ثم ارفعه للمعاينة قبل الحفظ. القالب فيه صفوف
+        تمثيلية تُحذف ويُكتب مكانها طلابك.</p>
+      <div class="row"><a class="btn btn-ghost btn-sm" href="/api/students/template">تنزيل القالب</a></div>
+      <input type="file" class="mt" id="imp_file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+      <p class="hint">الإلزامي: <code dir="ltr">national_id</code> (رقم الهوية) · <code dir="ltr">name</code> (الاسم) ·
+        <code dir="ltr">stage</code> (المرحلة). والاختياري: الصف · الفصل · الحالة · ملاحظات.<br>
+        المرحلة: <b>secondary</b> أو <b>middle</b> (وتُقبل «ثانوي» و«متوسط»).
+        الحالة: نشط · منقول · منسحب · متخرج.<br>
+        يقبل ملفات Excel ‎(.xlsx)‎ وCSV، والترويسة بالعربية أو بالإنجليزية.<br>
+        <b>تنبيه:</b> الاستيراد يُضيف طلابًا جددًا فقط — ومن كان رقم هويته مسجَّلًا يُتخطّى ولا تُعدَّل بياناته.</p>
       <div id="imp_preview" class="mt"></div>`,
     buttons: [
       { label: 'حفظ الصفوف الصحيحة', class: '', onClick: async (cl, ov) => {
@@ -146,7 +152,7 @@ function importStudents(onDone) {
       overlay.querySelector('#imp_preview').innerHTML = `
         <div class="row"><span class="tag tag-green">صحيح: ${arNum(p.valid)}</span><span class="tag tag-red">خطأ: ${arNum(p.invalid)}</span><span class="tag tag-gray">الإجمالي: ${arNum(p.total)}</span></div>
         <table class="tbl mt"><thead><tr><th>الصف</th><th>الهوية</th><th>الاسم</th><th>المرحلة</th><th>الأخطاء</th></tr></thead>
-        <tbody>${p.report.map((r) => `<tr style="${r.errors.length ? 'background:#fdecea' : ''}"><td>${arNum(r.row)}</td><td dir="ltr" style="text-align:right">${esc(r.national_id)}</td><td>${esc(r.name)}</td><td>${esc(STAGE_AR[r.stage] || r.stage)}</td><td class="tag-red">${r.errors.map(esc).join('، ') || '✓'}</td></tr>`).join('')}</tbody></table>`;
+        <tbody>${p.report.map((r) => `<tr style="${r.errors.length ? 'background:#fdecea' : ''}"><td>${arNum(r.row)}</td><td dir="ltr" style="text-align:right">${esc(r.national_id)}</td><td>${esc(r.name)}</td><td>${esc(STAGE_AR[r.stage] || r.stage)}</td><td class="${r.errors.length ? 'tag-red' : 'ok-cell'}">${r.errors.map(esc).join('، ') || '✓'}</td></tr>`).join('')}</tbody></table>`;
     } catch (err) { overlay.querySelector('#imp_preview').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; overlay._csv = null; }
   };
 }

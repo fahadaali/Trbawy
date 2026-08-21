@@ -9,7 +9,7 @@ import {
 import { weightedForEvaluation } from '../lib/evalcalc';
 import { evaluationTargets, resultTargets } from '../lib/evaltargets';
 import { evaluatorProgress } from '../lib/evalprogress';
-import { csvCell, parseCsv } from '../lib/csv';
+import { csvCell, parseCsv, colOf, matchAlias, toEnDigits } from '../lib/csv';
 import { notifyMany } from '../lib/notify';
 import { currentAcademicYear } from '../lib/meetings';
 
@@ -17,6 +17,27 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
 
 const TARGET_TYPES = ['students', 'team_members', 'first_supervisors'];
+
+// ما يُكتب في ملف الاستيراد مكان رمز الفئة — فمن يعبّئ القالب يكتب بالعربية غالبًا
+const TARGET_ALIASES: Record<string, string[]> = {
+  students: ['الطلاب', 'طلاب', 'الطالب', 'طالب'],
+  team_members: ['أعضاء الفرق', 'اعضاء الفرق', 'عضو فريق', 'الفرق', 'أعضاء الفريق'],
+  first_supervisors: ['المشرفون الأوائل', 'المشرفين الأوائل', 'مشرف أول', 'المشرف الأول', 'الأوائل'],
+};
+
+// قالب المعايير: صفوف تمثيلية لكل فئة، أوزانها تجمع ١٠٠ داخل الفئة الواحدة —
+// ليرى المستخدم الرموز المقبولة وتوزيع الأوزان بدل أن يستنتجهما.
+const CRITERIA_TEMPLATE_ROWS = [
+  ['first_supervisors', 'القيادة والتخطيط', 'وضوح الخطة ومتابعتها', '34'],
+  ['first_supervisors', 'المتابعة والإنجاز', 'إنجاز ما أُسند في وقته', '33'],
+  ['first_supervisors', 'التواصل والتطوير', 'التواصل مع الفريق وتطوير العمل', '33'],
+  ['team_members', 'الأداء المهني', 'إتقان العمل المسند', '40'],
+  ['team_members', 'الالتزام والحضور', 'الحضور والانضباط', '30'],
+  ['team_members', 'التعاون وروح الفريق', 'المشاركة ومساندة الزملاء', '30'],
+  ['students', 'الالتزام والانضباط', 'المواظبة والسلوك', '35'],
+  ['students', 'التفاعل مع الأنشطة', 'المشاركة في الأنشطة الصفية', '30'],
+  ['students', 'التحصيل والمثابرة', 'المستوى الدراسي والاجتهاد', '35'],
+];
 const TARGET_TYPE_AR: Record<string, string> = {
   students: 'الطلاب', team_members: 'أعضاء الفرق', first_supervisors: 'المشرفون الأوائل',
 };
@@ -76,6 +97,19 @@ app.get('/criteria/export', async (c) => {
   });
 });
 
+// قالب المعايير جاهزًا للتعبئة (بيانات تمثيلية تُستبدل بالحقيقية)
+app.get('/criteria/template', async () => {
+  const header = 'target_type,name,description,weight';
+  const body = CRITERIA_TEMPLATE_ROWS.map((r) => r.map(csvCell).join(',')).join('\n');
+  return new Response('﻿' + header + '\n' + body + '\n', {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="criteria_template.csv"',
+      'Cache-Control': 'no-store',
+    },
+  });
+});
+
 // استيراد المعايير من CSV (يستبدل قوالب الفئات الواردة في الملف)
 app.post('/criteria/import', async (c) => {
   if (!canManageCriteria(c.get('user'))) return c.json({ error: 'لا تملك صلاحية' }, 403);
@@ -85,20 +119,27 @@ app.post('/criteria/import', async (c) => {
   const rows = parseCsv(csv);
   if (rows.length < 2) return c.json({ error: 'الملف فارغ' }, 400);
   const header = rows[0].map((h) => h.trim());
-  const ci = { tt: header.indexOf('target_type'), name: header.indexOf('name'), desc: header.indexOf('description'), weight: header.indexOf('weight') };
-  if (ci.tt < 0 || ci.name < 0 || ci.weight < 0) return c.json({ error: 'الأعمدة الإلزامية: target_type, name, weight' }, 400);
+  const ci = {
+    tt: colOf(header, ['target_type', 'الفئة', 'فئة', 'الفئة المستهدفة', 'النوع']),
+    name: colOf(header, ['name', 'المعيار', 'الاسم', 'اسم المعيار']),
+    desc: colOf(header, ['description', 'الوصف', 'وصف', 'ملاحظات']),
+    weight: colOf(header, ['weight', 'الوزن', 'النسبة', 'الدرجة']),
+  };
+  if (ci.tt < 0 || ci.name < 0 || ci.weight < 0)
+    return c.json({ error: 'الأعمدة الإلزامية: target_type (الفئة) · name (المعيار) · weight (الوزن)' }, 400);
 
   const report: any[] = [];
   const valid: any[] = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    const tt = (r[ci.tt] || '').trim();
+    const tt = matchAlias((r[ci.tt] || '').trim(), TARGET_ALIASES);
     const name = (r[ci.name] || '').trim();
-    const weight = Number((r[ci.weight] || '').trim());
+    // الوزن قد يُكتب بأرقام هندية أو بعلامة نسبة — والمقصود واحد
+    const weight = Number(toEnDigits((r[ci.weight] || '').trim()).replace(/[٪%\s]/g, ''));
     const errors: string[] = [];
-    if (!TARGET_TYPES.includes(tt)) errors.push('الفئة غير صالحة');
+    if (!tt) errors.push('الفئة غير صالحة (students/الطلاب · team_members/أعضاء الفرق · first_supervisors/المشرفون الأوائل)');
     if (!name) errors.push('الاسم ناقص');
-    if (isNaN(weight) || weight < 0 || weight > 100) errors.push('الوزن غير صالح');
+    if (isNaN(weight) || weight < 0 || weight > 100) errors.push('الوزن غير صالح (٠–١٠٠)');
     const rec = { target_type: tt, name, description: ci.desc >= 0 ? (r[ci.desc] || '').trim() : '', weight };
     report.push({ row: i + 1, ...rec, errors });
     if (!errors.length) valid.push(rec);

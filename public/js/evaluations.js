@@ -130,9 +130,15 @@ async function criteriaManager() {
 function importCriteria(onDone) {
   const { overlay } = openModal({
     title: 'استيراد المعايير',
-    body: `<p class="muted">الأعمدة: <code dir="ltr">target_type,name,description,weight</code>. يستبدل معايير الفئات الواردة. صدّر أولًا للاطلاع على الصيغة.</p>
-      <input type="file" id="ci_file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
-      <p class="hint">يقبل ملفات Excel ‎(.xlsx)‎ وCSV.</p>
+    body: `<p class="muted">حمّل القالب، عبّئه، ثم ارفعه للمعاينة قبل الحفظ.</p>
+      <div class="row"><a class="btn btn-ghost btn-sm" href="/api/eval/criteria/template">تنزيل القالب</a>
+        <a class="btn btn-ghost btn-sm" href="/api/eval/criteria/export">تصدير المعايير الحالية</a></div>
+      <input type="file" class="mt" id="ci_file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+      <p class="hint">الأعمدة: <code dir="ltr">target_type,name,description,weight</code> — وتُقبل بالعربية:
+        الفئة · المعيار · الوصف · الوزن.<br>
+        الفئات: <b>students</b> (الطلاب) · <b>team_members</b> (أعضاء الفرق) · <b>first_supervisors</b> (المشرفون الأوائل).
+        والوزن رقم بين ٠ و١٠٠.<br>
+        يقبل ملفات Excel ‎(.xlsx)‎ وCSV. <b>تنبيه:</b> الاستيراد يستبدل معايير الفئات الواردة في الملف.</p>
       <div id="ci_preview" class="mt"></div>`,
     buttons: [
       { label: 'حفظ', onClick: async (cl, ov) => {
@@ -155,7 +161,7 @@ function importCriteria(onDone) {
       overlay._valid = p.valid;
       overlay.querySelector('#ci_preview').innerHTML = `<div class="row"><span class="tag tag-green">صحيح: ${arNum(p.valid)}</span><span class="tag tag-red">خطأ: ${arNum(p.invalid)}</span></div>
         <table class="tbl mt"><thead><tr><th>الصف</th><th>الفئة</th><th>المعيار</th><th>الوزن</th><th>الأخطاء</th></tr></thead>
-        <tbody>${p.report.map((r) => `<tr style="${r.errors.length ? 'background:#fdecea' : ''}"><td>${arNum(r.row)}</td><td>${esc(TARGET_TYPE_AR[r.target_type] || r.target_type)}</td><td>${esc(r.name)}</td><td>${arNum(r.weight)}</td><td class="tag-red">${r.errors.map(esc).join('، ') || '✓'}</td></tr>`).join('')}</tbody></table>`;
+        <tbody>${p.report.map((r) => `<tr style="${r.errors.length ? 'background:#fdecea' : ''}"><td>${arNum(r.row)}</td><td>${esc(TARGET_TYPE_AR[r.target_type] || r.target_type)}</td><td>${esc(r.name)}</td><td>${arNum(r.weight)}</td><td class="${r.errors.length ? 'tag-red' : 'ok-cell'}">${r.errors.map(esc).join('، ') || '✓'}</td></tr>`).join('')}</tbody></table>`;
     } catch (err) { overlay.querySelector('#ci_preview').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; overlay._csv = null; }
   };
 }

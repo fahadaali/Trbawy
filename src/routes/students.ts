@@ -5,13 +5,25 @@ import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import { canManageStudents, isPresident, isVice } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
-import { csvCell, parseCsv } from '../lib/csv';
+import { csvCell, parseCsv, colOf, matchAlias, toEnDigits } from '../lib/csv';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
 
 const STAGES = ['secondary', 'middle'];
 const STATUSES = ['active', 'transferred', 'withdrawn', 'graduated'];
+
+// ما يُكتب في ملف الاستيراد مكان القيمة القياسية — عربيًّا كان أو إنجليزيًّا
+const STAGE_ALIASES: Record<string, string[]> = {
+  secondary: ['ثانوي', 'ثانوية', 'الثانوية', 'المرحلة الثانوية', 'sec'],
+  middle: ['متوسط', 'متوسطة', 'المتوسطة', 'المرحلة المتوسطة', 'mid', 'intermediate'],
+};
+const STATUS_ALIASES: Record<string, string[]> = {
+  active: ['نشط', 'نشطة', 'على رأس العمل', 'مستمر'],
+  transferred: ['منقول', 'منقولة', 'نقل'],
+  withdrawn: ['منسحب', 'منسحبة', 'انسحاب'],
+  graduated: ['متخرج', 'متخرجة', 'خريج', 'تخرج'],
+};
 
 // نطاق الاطلاع على الطلاب
 function studentScopeStage(u: User): 'secondary' | 'middle' | 'all' | null {
@@ -100,9 +112,27 @@ app.post('/:id/transfer', async (c) => {
 });
 
 // ---- قالب الاستيراد ----
+// قالب يُنزَّل ويُعبَّأ. صفوفه بيانات تمثيلية تُحذف وتُكتب مكانها الحقيقية —
+// وُضعت لتُري المستخدم القيم المقبولة في كل عمود بدل أن يخمّنها.
+const STUDENT_TEMPLATE_ROWS = [
+  ['1010101010', 'عبدالله محمد الغامدي', 'secondary', 'أول ثانوي', 'أ', 'active', ''],
+  ['1020202020', 'سارة أحمد القحطاني', 'secondary', 'ثالث ثانوي', 'ب', 'active', 'متفوقة'],
+  ['1030303030', 'خالد سعد المطيري', 'middle', 'ثاني متوسط', 'أ', 'active', ''],
+  ['1040404040', 'نورة عبدالعزيز الدوسري', 'middle', 'ثالث متوسط', 'ج', 'transferred', 'نُقلت إلى مدرسة أخرى'],
+];
+
 app.get('/template', async () => {
-  const csv = '﻿national_id,name,stage,grade,class,status,notes\n1010101010,اسم الطالب,secondary,أول ثانوي,أ,active,\n';
-  return new Response(csv, { headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="students_template.csv"' } });
+  const header = 'national_id,name,stage,grade,class,status,notes';
+  const body = STUDENT_TEMPLATE_ROWS.map((r) => r.map(csvCell).join(',')).join('\n');
+  // الأعمدة الإلزامية: national_id, name, stage — والمرحلة secondary أو middle
+  // (وتُقبل «ثانوي» و«متوسط»)، والحالة active/transferred/withdrawn/graduated.
+  return new Response('﻿' + header + '\n' + body + '\n', {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': 'attachment; filename="students_template.csv"',
+      'Cache-Control': 'no-store',
+    },
+  });
 });
 
 // ---- تصدير ----
@@ -129,10 +159,18 @@ app.post('/import', async (c) => {
   const rows = parseCsv(csv);
   if (rows.length < 2) return c.json({ error: 'الملف فارغ أو بلا صفوف بيانات' }, 400);
   const header = rows[0].map((h) => h.trim());
-  const idx = (name: string) => header.indexOf(name);
-  const cols = { national_id: idx('national_id'), name: idx('name'), stage: idx('stage'), grade: idx('grade'), class: idx('class'), status: idx('status'), notes: idx('notes') };
+  // تُقبل الترويسة بالإنجليزية كما في القالب، أو بالعربية لمن ترجمها في إكسل
+  const cols = {
+    national_id: colOf(header, ['national_id', 'id', 'رقم الهوية', 'الهوية', 'رقم الهوية الوطنية', 'السجل المدني']),
+    name: colOf(header, ['name', 'الاسم', 'اسم الطالب']),
+    stage: colOf(header, ['stage', 'المرحلة']),
+    grade: colOf(header, ['grade', 'الصف']),
+    class: colOf(header, ['class', 'الفصل', 'الشعبة']),
+    status: colOf(header, ['status', 'الحالة']),
+    notes: colOf(header, ['notes', 'ملاحظات', 'ملاحظة']),
+  };
   if (cols.national_id < 0 || cols.name < 0 || cols.stage < 0)
-    return c.json({ error: 'الأعمدة الإلزامية مفقودة: national_id, name, stage' }, 400);
+    return c.json({ error: 'الأعمدة الإلزامية مفقودة: national_id (رقم الهوية) · name (الاسم) · stage (المرحلة)' }, 400);
 
   // أرقام الهوية الموجودة
   const existing = new Set((await c.env.DB.prepare('SELECT national_id FROM students').all<any>()).results.map((r: any) => r.national_id));
@@ -142,13 +180,17 @@ app.post('/import', async (c) => {
 
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    const nid = (r[cols.national_id] || '').trim();
+    // الهوية تُطبَّع: أرقام هندية إلى لاتينية، وتُزال المسافات والشرطات — وإلا
+    // بدا الرقم نفسه رقمين مختلفين فأفلت التكرار من الفحص
+    const nid = toEnDigits((r[cols.national_id] || '').trim()).replace(/[\s-]/g, '');
     const name = (r[cols.name] || '').trim();
-    const stage = (r[cols.stage] || '').trim();
+    const rawStage = (r[cols.stage] || '').trim();
+    const stage = matchAlias(rawStage, STAGE_ALIASES);
     const errors: string[] = [];
     if (!nid) errors.push('رقم الهوية ناقص');
+    else if (!/^\d+$/.test(nid)) errors.push('رقم الهوية يجب أن يكون أرقامًا');
     if (!name) errors.push('الاسم ناقص');
-    if (!STAGES.includes(stage)) errors.push('المرحلة غير صالحة (secondary/middle)');
+    if (!stage) errors.push('المرحلة غير صالحة (secondary/ثانوي أو middle/متوسط)');
     if (nid && (existing.has(nid) || seen.has(nid))) errors.push('رقم هوية مكرر');
     if (stage && !canManageStudents(u, stage as any)) errors.push('لا تملك صلاحية على هذه المرحلة');
     if (nid) seen.add(nid);
@@ -156,7 +198,7 @@ app.post('/import', async (c) => {
       national_id: nid, name, stage,
       grade: cols.grade >= 0 ? (r[cols.grade] || '').trim() : '',
       class: cols.class >= 0 ? (r[cols.class] || '').trim() : '',
-      status: cols.status >= 0 && STATUSES.includes((r[cols.status] || '').trim()) ? (r[cols.status] || '').trim() : 'active',
+      status: (cols.status >= 0 && matchAlias((r[cols.status] || '').trim(), STATUS_ALIASES)) || 'active',
       notes: cols.notes >= 0 ? (r[cols.notes] || '').trim() : '',
     };
     report.push({ row: i + 1, ...rec, errors });

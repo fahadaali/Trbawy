@@ -66,6 +66,10 @@ app.onError((err, c) => {
 // صفحات مُخدَّمة من الخادم: /verify، /print، /file
 app.route('/', pageRoutes);
 
+// مسار API غير معروف يُردّ بـ٤٠٤ صريحة: بدونها يبتلعه الرجوعُ إلى الواجهة
+// فيتلقّى العميل صفحة HTML برمز ٢٠٠ مكان بياناته، ويبدو الخطأ نجاحًا غامضًا.
+app.all('/api/*', (c) => c.json({ error: 'المسار غير موجود' }, 404));
+
 // ما عدا ذلك تُقدَّم الواجهة الأمامية عبر الأصول الثابتة (SPA fallback في wrangler.toml)
 app.all('*', async (c) => {
   return c.env.ASSETS.fetch(c.req.raw);

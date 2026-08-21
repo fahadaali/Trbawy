@@ -134,10 +134,26 @@ function rowsToCsv(rows) {
   return rows.map((r) => r.map(cell).join(',')).join('\n');
 }
 
+/**
+ * نصّ ملف CSV بالترميز الصحيح.
+ * إكسل على ويندوز يحفظ «CSV» بترميز النظام (windows-1256 عربيًّا) لا بـUTF-8،
+ * فتصل الأسماء العربية حروفًا مشوّهة. نقرأ أولًا UTF-8، فإن ظهرت محارف بديلة (‏�‏)
+ * أعدنا القراءة بـwindows-1256 — والملف السليم لا يتأثّر بهذه المحاولة.
+ */
+async function csvText(file) {
+  const buf = await file.arrayBuffer();
+  const utf8 = new TextDecoder('utf-8').decode(buf);
+  if (!utf8.includes('\uFFFD')) return utf8;
+  try {
+    const cp1256 = new TextDecoder('windows-1256').decode(buf);
+    return cp1256.includes('\uFFFD') ? utf8 : cp1256;
+  } catch { return utf8; }
+}
+
 // يقبل .xlsx أو .csv ويُرجع نص CSV في الحالتين
 async function fileToCsv(file) {
   const isXlsx = /\.xlsx$/i.test(file.name) ||
     file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
-  if (!isXlsx) return await file.text();
+  if (!isXlsx) return await csvText(file);
   return rowsToCsv(await readXlsxRows(file));
 }
