@@ -12,7 +12,7 @@ async function boot() {
   } catch {
     State.user = null;
   }
-  if (State.user) { await applyBranding(); await loadAiStatus(); }
+  if (State.user) { await applyBranding(); await loadAiStatus(); Push.syncSilently(); }
   window.addEventListener('hashchange', route);
   route();
 }
@@ -254,7 +254,7 @@ function renderShell(view, rest) {
           <div class="spacer"></div>
           <div style="position:relative">
             <button class="btn-ghost btn-sm" id="bellBtn">${icon('bell', 18)}<span id="notifBadge" class="badge" style="display:none;position:absolute;top:-6px;inset-inline-start:-6px;background:var(--danger);color:#fff;border-radius:20px;padding:0 6px;font-size:11px"></span></button>
-            <div id="notifPanel" style="display:none;position:absolute;top:110%;inset-inline-start:0;width:320px;max-height:400px;overflow:auto;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow);z-index:60"></div>
+            <div id="notifPanel" class="notif-panel" style="display:none"></div>
           </div>
           <button class="btn-ghost btn-sm only-mobile" id="gsMobileBtn" aria-label="بحث">${icon('search', 18)}</button>
           <button class="btn-ghost btn-sm only-desktop" id="profileBtn">توقيعي</button>
@@ -378,6 +378,7 @@ function setupGlobalSearch() {
 async function refreshNotifBadge() {
   try {
     const { unread } = await API.get('/notifications');
+    setAppBadge(unread);                     // شارة أيقونة التطبيق على الشاشة الرئيسية
     const b = document.getElementById('notifBadge');
     if (!b) return;
     if (unread > 0) { b.textContent = arNum(unread); b.style.display = 'inline-block'; }
@@ -398,12 +399,14 @@ function setupNotifications() {
       const { notifications } = await API.get('/notifications');
       panel.innerHTML = `<div style="padding:10px;border-bottom:1px solid var(--border);display:flex;align-items:center">
           <b style="flex:1">الإشعارات</b><button class="btn-ghost btn-sm" id="markAll">تعليم الكل كمقروء</button></div>
+        <div id="pushRow" style="padding:9px 12px;border-bottom:1px solid var(--border);background:#fbfdfc"></div>
         ${notifications.length ? notifications.map((n) => `
           <a href="${esc(n.link || '#')}" data-nid="${n.id}" style="display:block;padding:10px 12px;border-bottom:1px solid #f0f2f1;${n.is_read ? '' : 'background:#f0f7f4'}">
             <b style="font-size:13px">${esc(n.title)}</b>
             <div class="muted" style="font-size:12px">${esc(n.body || '')}</div>
             <div class="muted" style="font-size:11px">${fmtDateTime(n.created_at)}</div></a>`).join('')
           : '<div class="empty" style="padding:24px">لا إشعارات</div>'}`;
+      renderPushRow(panel.querySelector('#pushRow'));
       panel.querySelector('#markAll').onclick = async (ev) => { ev.preventDefault(); ev.stopPropagation(); await API.post('/notifications/read-all'); panel.style.display = 'none'; refreshNotifBadge(); };
       panel.querySelectorAll('[data-nid]').forEach((a) => a.onclick = async () => { try { await API.post(`/notifications/${a.dataset.nid}/read`); } catch {} refreshNotifBadge(); });
     } catch (err) { panel.innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
@@ -418,6 +421,103 @@ function setupNotifications() {
   }
   panel.onclick = (e) => e.stopPropagation();
   refreshNotifBadge();
+}
+
+// ---- بطاقة إشعارات الأجهزة في شاشة الإشعارات ----
+async function renderPushCard() {
+  const box = document.getElementById('pushBody');
+  if (!box) return;
+  const st = await Push.state();
+  let devices = [];
+  try { devices = (await API.get('/notifications/push/devices')).devices; } catch {}
+
+  const banner = {
+    on: ['tag-green', 'الإشعارات مفعّلة على هذا الجهاز — ستصلك تنبيهات المحاضر والتوقيعات والمهام حتى والتطبيق مغلق.'],
+    off: ['tag-gold', 'الإشعارات غير مفعّلة على هذا الجهاز.'],
+    denied: ['tag-red', 'حجبتَ الإشعارات لهذا الموقع. فعّلها من إعدادات المتصفح (إعدادات الموقع ← الإشعارات) ثم أعد المحاولة.'],
+    unsupported: ['tag-gray', 'هذا المتصفح لا يدعم إشعارات الدفع.'],
+    'ios-install': ['tag-gold', 'على آيفون تصل الإشعارات للتطبيق المضاف إلى الشاشة الرئيسية فقط: افتح قائمة المشاركة في سفاري ← «إضافة إلى الشاشة الرئيسية»، ثم افتح التطبيق من الأيقونة وفعّل الإشعارات من هنا.'],
+  }[st.state] || ['tag-gray', ''];
+
+  const devRows = devices.map((d) => `<tr>
+      <td>${esc(deviceName(d.user_agent))}${d.is_standalone ? ' <span class="tag tag-green">تطبيق مثبَّت</span>' : ''}
+        ${st.endpoint === d.endpoint ? ' <span class="tag tag-gold">هذا الجهاز</span>' : ''}</td>
+      <td>${fmtDateTime(d.created_at)}</td>
+      <td>${d.last_used_at ? fmtDateTime(d.last_used_at) : '<span class="muted">—</span>'}</td>
+    </tr>`).join('');
+
+  box.innerHTML = `
+    <div class="tag ${banner[0]}" style="display:block;padding:10px;line-height:1.8">${esc(banner[1])}</div>
+    <div class="row mt">
+      ${st.state === 'on'
+        ? `<button class="btn-ghost btn-sm" id="pcOff">إيقاف الإشعارات على هذا الجهاز</button>
+           <button class="btn btn-sm" id="pcTest">${icon('bell', 15)} إشعار تجريبي</button>`
+        : st.state === 'off' ? `<button class="btn btn-sm" id="pcOn">${icon('bell', 15)} تفعيل الإشعارات على هذا الجهاز</button>` : ''}
+    </div>
+    ${devices.length ? `<h4 class="mt" style="font-size:14px">الأجهزة المسجَّلة (${arNum(devices.length)})</h4>
+      <table class="tbl"><thead><tr><th>الجهاز</th><th>سُجِّل</th><th>آخر إشعار</th></tr></thead><tbody>${devRows}</tbody></table>`
+      : '<p class="muted mt">لا توجد أجهزة مسجَّلة بعد.</p>'}`;
+
+  const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
+  on('pcOn', async () => {
+    try { await Push.enable(); toast('فُعّلت الإشعارات على هذا الجهاز', 'ok'); } catch (err) { toast(err.message, 'err'); }
+    renderPushCard();
+  });
+  on('pcOff', async () => {
+    try { await Push.disable(); toast('أُوقفت الإشعارات على هذا الجهاز', 'ok'); } catch (err) { toast(err.message, 'err'); }
+    renderPushCard();
+  });
+  on('pcTest', async () => {
+    try { await API.post('/notifications/push/test'); toast('أُرسل الإشعار التجريبي', 'ok'); }
+    catch (err) { toast(err.message, 'err'); }
+  });
+}
+
+// اسم مقروء للجهاز من ترويسة المتصفح
+function deviceName(ua) {
+  const s = String(ua || '');
+  const os = /iPhone/.test(s) ? 'آيفون' : /iPad/.test(s) ? 'آيباد' : /Android/.test(s) ? 'أندرويد'
+    : /Mac OS X/.test(s) ? 'ماك' : /Windows/.test(s) ? 'ويندوز' : /Linux/.test(s) ? 'لينكس' : 'جهاز';
+  const br = /CriOS|Chrome/.test(s) ? 'كروم' : /FxiOS|Firefox/.test(s) ? 'فايرفوكس'
+    : /Edg/.test(s) ? 'إيدج' : /Safari/.test(s) ? 'سفاري' : '';
+  return br ? `${os} · ${br}` : os;
+}
+
+// ---- إشعارات هذا الجهاز: سطر مختصر داخل لوحة الجرس ----
+async function renderPushRow(box) {
+  if (!box) return;
+  const st = await Push.state();
+  const texts = {
+    on: ['إشعارات هذا الجهاز مفعّلة', 'إيقاف'],
+    off: ['فعّل إشعارات هذا الجهاز', 'تفعيل'],
+    denied: ['الإشعارات محجوبة من إعدادات المتصفح', ''],
+    unsupported: ['هذا المتصفح لا يدعم إشعارات الدفع', ''],
+    'ios-install': ['على آيفون: أضف المنصة إلى الشاشة الرئيسية لتفعيل الإشعارات', ''],
+  };
+  const [label, btn] = texts[st.state] || texts.off;
+  box.innerHTML = `<div style="display:flex;align-items:center;gap:8px">
+      <span style="flex:1;font-size:12.5px;color:${st.state === 'on' ? 'var(--success)' : 'var(--muted)'}">${esc(label)}</span>
+      ${btn ? `<button class="btn-ghost btn-sm" id="pushToggle">${btn}</button>` : ''}
+    </div>`;
+  const t = box.querySelector('#pushToggle');
+  if (t) t.onclick = async (ev) => {
+    ev.preventDefault(); ev.stopPropagation();
+    t.disabled = true;
+    try {
+      if (st.state === 'on') { await Push.disable(); toast('أُوقفت إشعارات هذا الجهاز', 'ok'); }
+      else { await Push.enable(); toast('فُعّلت إشعارات هذا الجهاز', 'ok'); }
+    } catch (err) { toast(err.message, 'err'); }
+    renderPushRow(box);
+  };
+}
+
+// عامل الخدمة يطلب فتح رابط الإشعار حين لا يستطيع التنقّل بنفسه
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data && e.data.type === 'navigate' && e.data.link) {
+      location.hash = e.data.link.startsWith('#') ? e.data.link : '#/' + e.data.link;
+    }
+  });
 }
 
 function setTitle(t) { const el = document.getElementById('pageTitle'); if (el) el.textContent = t; }
@@ -903,7 +1003,9 @@ VIEWS.notifications = async () => {
   setTitle('الإشعارات');
   notifOffset = 0;
   content().innerHTML = `
-    <div class="card"><div class="card-head"><h3>الإشعارات</h3><div class="spacer"></div>
+    <div class="card" id="pushCard"><div class="card-head"><h3>${icon('bell', 17)} إشعارات الأجهزة</h3></div>
+      <div class="card-body" id="pushBody"><div class="spinner"></div></div></div>
+    <div class="card mt"><div class="card-head"><h3>الإشعارات</h3><div class="spacer"></div>
       <select id="nfType" style="padding:8px 11px;border:1px solid var(--border);border-radius:8px">
         ${Object.entries(NOTIF_TYPE_AR).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select>
       <label class="check-inline"><input type="checkbox" id="nfUnread" /> غير المقروء فقط</label>
@@ -912,6 +1014,8 @@ VIEWS.notifications = async () => {
       <div id="nfList" class="card-body"></div>
       <div class="card-body center"><button class="btn-ghost btn-sm" id="nfMore">تحميل المزيد</button></div>
     </div>`;
+
+  renderPushCard();
 
   const load = async (reset) => {
     if (reset) { notifOffset = 0; document.getElementById('nfList').innerHTML = ''; }

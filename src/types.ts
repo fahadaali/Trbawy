@@ -7,6 +7,10 @@ export interface Env {
   APP_NAME: string;
   RESEND_API_KEY?: string;
   MAIL_FROM?: string;
+  // إشعارات الدفع (VAPID) — إن لم تُضبط كأسرار وُلِّدت مرة وحُفظت في الإعدادات
+  VAPID_PUBLIC_KEY?: string;
+  VAPID_PRIVATE_KEY?: string;
+  VAPID_SUBJECT?: string;
   // Workers AI — قد يكون غير مُهيّأ (تُعطَّل مزايا الذكاء الاصطناعي عندها بلطف)
   AI?: { run: (model: string, input: any) => Promise<any> };
 }

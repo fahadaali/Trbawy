@@ -381,6 +381,21 @@ table.tbl tr:hover td { background: #fafbfb; }
 }
 .chip:hover { background: var(--primary); color: #fff; }
 
+/* لوحة الإشعارات المنسدلة من الجرس */
+.notif-panel {
+  position: absolute; top: 110%; inset-inline-start: 0; width: 320px; max-height: 400px;
+  overflow: auto; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; box-shadow: var(--shadow); z-index: 60;
+}
+/* على الجوال تملأ عرض الشاشة: لوحة ٣٢٠ بكسل معلَّقة في الشريط العلوي كانت تدفع
+   الصفحة أفقيًا وتُخرج المحتوى عن الإطار */
+@media (max-width: 860px) {
+  .notif-panel {
+    position: fixed; top: calc(56px + var(--safe-t)); inset-inline: 10px;
+    width: auto; max-height: 70vh;
+  }
+}
+
 /* أرقام ذات اتجاه معزول (تواريخ ومعرّفات) — لا تنقلب داخل النص العربي */
 .num { direction: ltr; unicode-bidi: isolate; white-space: nowrap; display: inline-block; }
 

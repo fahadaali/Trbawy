@@ -354,6 +354,8 @@ CREATE TABLE settings (
   primary_color  TEXT    DEFAULT '#1f6f54',
   font_family    TEXT    DEFAULT 'Tajawal',
   current_academic_year TEXT,                  -- السنة الدراسية الحالية
+  push_public_key  TEXT,                       -- مفتاح VAPID العام (يُولَّد مرة إن لم يُضبط كسرّ بيئة)
+  push_private_key TEXT,                       -- مفتاح VAPID الخاص
   updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -405,3 +407,21 @@ CREATE TABLE meeting_followups (
   PRIMARY KEY (meeting_id, action_item_id)
 );
 CREATE INDEX idx_mfollowups_action ON meeting_followups(action_item_id);
+
+-- ------------------------------------------------------------
+-- اشتراكات إشعارات الدفع (Web Push) — جهاز واحد لكل صف.
+-- endpoint فريد: المتصفح يمنح كل تثبيت عنوانه، فتكرار الاشتراك يُحدِّث الصف نفسه.
+-- ------------------------------------------------------------
+CREATE TABLE push_subscriptions (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint     TEXT    NOT NULL UNIQUE,
+  p256dh       TEXT    NOT NULL,               -- المفتاح العام للمتصفح
+  auth         TEXT    NOT NULL,               -- سرّ الاشتراك
+  user_agent   TEXT,
+  is_standalone INTEGER NOT NULL DEFAULT 0,    -- 1 = مُثبَّت على الشاشة الرئيسية (آيفون)
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+  last_used_at TEXT,
+  fail_count   INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_push_subs_user ON push_subscriptions(user_id);

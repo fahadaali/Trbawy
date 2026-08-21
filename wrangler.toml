@@ -34,3 +34,10 @@ crons = ["0 5 * * *"]
 [vars]
 APP_NAME = "منصة المجلس التربوي"
 # متغيرات البريد تُضاف كأسرار: wrangler secret put RESEND_API_KEY
+#
+# إشعارات الدفع (Web Push) تعمل تلقائيًا: يُولَّد زوج مفاتيح VAPID عند أول طلب ويُحفظ
+# في جدول الإعدادات. ولتثبيت المفاتيح خارج القاعدة (مستحسن للإنتاج) اضبطها كأسرار:
+#   wrangler secret put VAPID_PUBLIC_KEY     # النقطة العامة بترميز base64url
+#   wrangler secret put VAPID_PRIVATE_KEY    # المُركّبة d من JWK
+#   wrangler secret put VAPID_SUBJECT        # mailto:admin@example.com
+# تغيير المفاتيح يُبطل اشتراكات الأجهزة القائمة (تُسجَّل من جديد عند فتح التطبيق).

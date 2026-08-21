@@ -648,9 +648,155 @@ function maybeShowInstallCard() {
   };
 }
 
+/**
+ * دعوة لتفعيل الإشعارات داخل التطبيق المثبَّت.
+ * على آيفون لا تُمنح الإشعارات إلا للتطبيق المضاف للشاشة الرئيسية، فبعد التثبيت
+ * لا شيء يُذكّر المستخدم بتفعيلها — هذه البطاقة هي التذكير، وتظهر مرة واحدة.
+ */
+function maybeShowPushCard() {
+  if (!isStandalone() || !Push.supported()) return;
+  if (Push.permission() !== 'default') return;
+  if (localStorage.getItem('push_prompt_dismissed') === '1') return;
+  if (document.querySelector('.a2hs')) return;
+  const el = document.createElement('div');
+  el.className = 'a2hs';
+  el.innerHTML = `
+    <div class="ic">${icon('bell', 22)}</div>
+    <div class="tx"><b>فعّل الإشعارات</b>
+      تصلك تنبيهات الدعوات والتوقيعات والمهام المستحقة حتى والتطبيق مغلق.
+      <div style="margin-top:8px"><button class="btn btn-sm" id="pushGo">تفعيل الآن</button></div>
+    </div>
+    <button class="x" id="pushX" aria-label="إخفاء">&times;</button>`;
+  document.body.appendChild(el);
+  el.querySelector('#pushX').onclick = () => { localStorage.setItem('push_prompt_dismissed', '1'); el.remove(); };
+  el.querySelector('#pushGo').onclick = async () => {
+    localStorage.setItem('push_prompt_dismissed', '1');
+    try { await Push.enable(); toast('فُعّلت الإشعارات على هذا الجهاز', 'ok'); }
+    catch (err) { toast(err.message, 'err'); }
+    el.remove();
+  };
+}
+
 function initMobile() {
   if (isStandalone()) document.documentElement.classList.add('standalone');
   watchTables();
-  // تُستدعى مع كل تنقّل (إعادة بناء الهيكل)، والدعوة تظهر مرة واحدة في الجلسة
-  if (!window.__a2hsScheduled) { window.__a2hsScheduled = true; setTimeout(maybeShowInstallCard, 4000); }
+  // تُستدعى مع كل تنقّل (إعادة بناء الهيكل)، والدعوات تظهر مرة واحدة في الجلسة
+  if (!window.__a2hsScheduled) {
+    window.__a2hsScheduled = true;
+    setTimeout(() => { maybeShowInstallCard(); maybeShowPushCard(); }, 4000);
+  }
+}
+
+
+// ============================================================
+// إشعارات الدفع على الجهاز (متصفح الجوال وتطبيق الشاشة الرئيسية)
+// ============================================================
+//
+// قاعدة آيفون: iOS لا يمنح إذن الإشعارات لصفحة في سفاري — يمنحه فقط للتطبيق
+// المضاف إلى الشاشة الرئيسية (iOS 16.4 فأحدث). لذلك نُرشد مستخدم آيفون للتثبيت
+// أولًا بدل عرض زر لا يعمل.
+
+const Push = {
+  supported() {
+    return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  },
+  // آيفون في سفاري (غير مثبَّت): الإشعارات غير متاحة حتى يُضاف للشاشة الرئيسية
+  iosNeedsInstall() { return isIOS() && !isStandalone(); },
+  permission() { return ('Notification' in window) ? Notification.permission : 'default'; },
+
+  async registration() {
+    if (!('serviceWorker' in navigator)) return null;
+    try { return await navigator.serviceWorker.ready; } catch { return null; }
+  },
+
+  async current() {
+    const reg = await this.registration();
+    if (!reg || !reg.pushManager) return null;
+    try { return await reg.pushManager.getSubscription(); } catch { return null; }
+  },
+
+  /** حالة الإشعارات على هذا الجهاز — تُستعمل لرسم الزر ونصّه. */
+  async state() {
+    if (!this.supported()) {
+      return { state: this.iosNeedsInstall() ? 'ios-install' : 'unsupported' };
+    }
+    if (this.iosNeedsInstall()) return { state: 'ios-install' };
+    const perm = this.permission();
+    if (perm === 'denied') return { state: 'denied' };
+    const sub = await this.current();
+    if (sub && perm === 'granted') return { state: 'on', endpoint: sub.endpoint };
+    return { state: 'off' };
+  },
+
+  /** تفعيل الإشعارات — يجب استدعاؤها من نقرة مستخدم (شرط iOS و Safari). */
+  async enable() {
+    if (!this.supported()) throw new Error('هذا المتصفح لا يدعم إشعارات الدفع');
+    if (this.iosNeedsInstall()) throw new Error('على آيفون: أضف المنصة إلى الشاشة الرئيسية أولًا ثم فعّل الإشعارات من داخل التطبيق');
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') throw new Error('لم يُمنح إذن الإشعارات لهذا الجهاز');
+
+    const { key, enabled } = await API.get('/notifications/push/key');
+    if (!enabled || !key) throw new Error('الإشعارات غير مُهيّأة على الخادم');
+    const reg = await this.registration();
+    if (!reg) throw new Error('عامل الخدمة غير جاهز — أعد تحميل الصفحة');
+
+    let sub = await reg.pushManager.getSubscription();
+    // اشتراك قائم بمفتاح خادم مختلف لا يصلح — نُلغيه ونشترك من جديد
+    if (sub && !this.sameKey(sub, key)) { try { await sub.unsubscribe(); } catch {} sub = null; }
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) });
+    }
+    await this.register(sub);
+    return sub;
+  },
+
+  sameKey(sub, key) {
+    try {
+      const cur = sub.options && sub.options.applicationServerKey;
+      if (!cur) return true;
+      const a = new Uint8Array(cur), b = b64ToBytes(key);
+      return a.length === b.length && a.every((v, i) => v === b[i]);
+    } catch { return true; }
+  },
+
+  async register(sub) {
+    const json = sub.toJSON ? sub.toJSON() : sub;
+    await API.post('/notifications/push/subscribe', {
+      endpoint: json.endpoint, keys: json.keys, standalone: isStandalone(),
+    });
+  },
+
+  async disable() {
+    const sub = await this.current();
+    if (sub) {
+      try { await API.post('/notifications/push/unsubscribe', { endpoint: sub.endpoint }); } catch {}
+      try { await sub.unsubscribe(); } catch {}
+    }
+  },
+
+  /** مزامنة صامتة عند الإقلاع: جهاز مأذون له يبقى مسجَّلًا على الخادم. */
+  async syncSilently() {
+    try {
+      if (!this.supported() || this.permission() !== 'granted') return;
+      const sub = await this.current();
+      if (sub) await this.register(sub);
+    } catch { /* غير حرج */ }
+  },
+};
+
+// مفتاح الخادم يصل بترميز base64url ويحتاجه المتصفح كبايتات
+function b64ToBytes(s) {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4);
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// شارة العدد على أيقونة التطبيق (الشاشة الرئيسية) — تُحدَّث مع شارة الجرس
+function setAppBadge(n) {
+  try {
+    if (!('setAppBadge' in navigator)) return;
+    if (n > 0) navigator.setAppBadge(n); else navigator.clearAppBadge();
+  } catch { /* غير مدعوم */ }
 }

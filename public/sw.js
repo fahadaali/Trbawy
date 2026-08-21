@@ -1,7 +1,7 @@
 // عامل الخدمة — تخزين هيكل التطبيق للفتح السريع والعمل دون اتصال جزئيًا.
 // مهم: لا نُخزّن أي استجابة من /api أبدًا (بيانات حية وحسّاسة).
 
-const CACHE = 'tarbawi-shell-v6';
+const CACHE = 'tarbawi-shell-v7';
 const SHELL = [
   '/', '/index.html', '/css/styles.css',
   '/js/api.js', '/js/xlsx.js', '/js/ui.js', '/js/ai.js', '/js/app.js',
@@ -69,5 +69,70 @@ self.addEventListener('fetch', (e) => {
       }
       return new Response('غير متصل', { status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
     }
+  })());
+});
+
+// ============================================================
+// إشعارات الدفع
+// ============================================================
+
+// حمولة الدفع معمّاة ومقروءة هنا فقط. أي إخفاق في قراءتها لا يمنع عرض إشعار عام،
+// فالمتصفح يُلزم عامل الخدمة بإظهار إشعار مرئي لكل رسالة دفع تصله.
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { title: 'إشعار جديد' }; }
+  const title = d.title || 'منصة المجلس التربوي';
+  const options = {
+    body: d.body || '',
+    icon: '/icons/icon-192.png',
+    badge: '/icons/icon-192.png',
+    lang: 'ar',
+    dir: 'rtl',
+    tag: d.type || 'tarbawi',          // نوع واحد لا يتراكم عشرات المرات
+    renotify: true,
+    data: { link: d.link || '#/notifications' },
+    timestamp: Date.now(),
+  };
+  e.waitUntil((async () => {
+    await self.registration.showNotification(title, options);
+    // شارة العدد على أيقونة التطبيق في الشاشة الرئيسية
+    if (typeof d.unread === 'number' && 'setAppBadge' in self.navigator) {
+      try { d.unread > 0 ? await self.navigator.setAppBadge(d.unread) : await self.navigator.clearAppBadge(); } catch {}
+    }
+  })());
+});
+
+// النقر على الإشعار: نُركّز نافذة مفتوحة إن وُجدت بدل فتح نسخة ثانية
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const link = (e.notification.data && e.notification.data.link) || '#/notifications';
+  const target = new URL('/' + (link.startsWith('#') ? link : '#/' + link), self.location.origin).href;
+  e.waitUntil((async () => {
+    const clientList = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+    for (const client of clientList) {
+      if (new URL(client.url).origin !== self.location.origin) continue;
+      await client.focus();
+      if ('navigate' in client) { try { await client.navigate(target); } catch {} }
+      else client.postMessage({ type: 'navigate', link });
+      return;
+    }
+    await self.clients.openWindow(target);
+  })());
+});
+
+// تدوير مفاتيح الاشتراك من المتصفح: نُعيد تسجيل الاشتراك الجديد بصمت
+self.addEventListener('pushsubscriptionchange', (e) => {
+  e.waitUntil((async () => {
+    try {
+      const appKey = e.oldSubscription && e.oldSubscription.options && e.oldSubscription.options.applicationServerKey;
+      const sub = e.newSubscription || await self.registration.pushManager.subscribe({
+        userVisibleOnly: true, applicationServerKey: appKey,
+      });
+      await fetch('/api/notifications/push/subscribe', {
+        method: 'POST', credentials: 'same-origin',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sub.toJSON ? sub.toJSON() : sub),
+      });
+    } catch (err) { /* يُعاد التسجيل عند فتح التطبيق */ }
   })());
 });

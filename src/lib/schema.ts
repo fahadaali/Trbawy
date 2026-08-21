@@ -270,6 +270,8 @@ export const SCHEMA_STATEMENTS: string[] = [
   primary_color  TEXT    DEFAULT '#1f6f54',
   font_family    TEXT    DEFAULT 'Tajawal',
   current_academic_year TEXT,                  -- السنة الدراسية الحالية
+  push_public_key  TEXT,
+  push_private_key TEXT,
   updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 )`,
   `CREATE TABLE IF NOT EXISTS meeting_comments (
@@ -304,4 +306,17 @@ export const SCHEMA_STATEMENTS: string[] = [
   PRIMARY KEY (meeting_id, action_item_id)
 )`,
   `CREATE INDEX IF NOT EXISTS idx_mfollowups_action ON meeting_followups(action_item_id)`,
+  `CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  endpoint     TEXT    NOT NULL UNIQUE,
+  p256dh       TEXT    NOT NULL,
+  auth         TEXT    NOT NULL,
+  user_agent   TEXT,
+  is_standalone INTEGER NOT NULL DEFAULT 0,
+  created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+  last_used_at TEXT,
+  fail_count   INTEGER NOT NULL DEFAULT 0
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id)`,
 ];

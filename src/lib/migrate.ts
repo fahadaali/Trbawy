@@ -17,6 +17,9 @@ const COLUMN_ADDS = [
   "ALTER TABLE action_items ADD COLUMN carried_count INTEGER NOT NULL DEFAULT 0",
   "ALTER TABLE action_items ADD COLUMN last_carried_meeting_id INTEGER",
   "ALTER TABLE meetings ADD COLUMN followups_frozen_at TEXT",
+  // مفاتيح إشعارات الدفع (تُولَّد مرة إن لم تُضبط كأسرار بيئة)
+  "ALTER TABLE settings ADD COLUMN push_public_key TEXT",
+  "ALTER TABLE settings ADD COLUMN push_private_key TEXT",
 ];
 
 /**
