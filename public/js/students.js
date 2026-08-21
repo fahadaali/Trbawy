@@ -5,13 +5,17 @@ const STUDENT_STATUS_COLOR = { active: 'tag-green', transferred: 'tag-gold', wit
 VIEWS.students = async () => {
   setTitle('سجل الطلاب');
   content().innerHTML = '<div class="spinner"></div>';
-  const canManage = ['president', 'first_supervisor'].includes(State.user.role);
+  // الأزرار تتبع الحاصل لا الدور وحده: من مُنح استثناءً يراها، ومن مُنع لا يراها
+  const roleManages = ['president', 'first_supervisor'].includes(State.user.role);
+  const canAdd = may('students.add', roleManages);
+  const canEdit = may('students.edit', roleManages);
+  const canManage = canAdd || canEdit;
   const isPres = State.user.role === 'president';
 
   content().innerHTML = `
     <div class="card"><div class="card-head"><h3>سجل الطلاب</h3><div class="spacer"></div>
-      ${canManage ? '<button class="btn btn-sm" id="addStudent">+ طالب</button>' : ''}
-      ${canManage ? '<button class="btn-ghost btn-sm" id="importBtn">استيراد Excel/CSV</button>' : ''}
+      ${canAdd ? '<button class="btn btn-sm" id="addStudent">+ طالب</button>' : ''}
+      ${canAdd ? '<button class="btn-ghost btn-sm" id="importBtn">استيراد Excel/CSV</button>' : ''}
       <a class="btn-ghost btn-sm" href="/api/students/export">تصدير</a>
     </div>
     <div class="card-body">
@@ -43,7 +47,7 @@ VIEWS.students = async () => {
           <td><a href="#" data-hist="${s.id}"><b>${esc(s.name)}</b></a></td>
           <td>${esc(STAGE_AR[s.stage] || s.stage)}</td><td>${esc(s.grade || '—')}</td><td>${esc(s.class || '—')}</td>
           <td>${statusTag(s.status, STUDENT_STATUS_AR, STUDENT_STATUS_COLOR)}</td>
-          <td class="row">${canManage ? `<button class="btn-ghost btn-sm" data-edit="${s.id}">تعديل</button><button class="btn-ghost btn-sm" data-transfer="${s.id}">نقل</button>` : ''}</td>
+          <td class="row">${canEdit ? `<button class="btn-ghost btn-sm" data-edit="${s.id}">تعديل</button><button class="btn-ghost btn-sm" data-transfer="${s.id}">نقل</button>` : ''}</td>
         </tr>`).join('')}</tbody></table>` : `<div class="empty"><div class="ico">${icon('students', 42)}</div><p>لا يوجد طلاب</p></div>`;
       box.querySelectorAll('[data-hist]').forEach((a) => a.onclick = (e) => { e.preventDefault(); studentHistory(a.dataset.hist); });
       box.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => studentForm(students.find((x) => x.id == b.dataset.edit), load));
@@ -52,7 +56,7 @@ VIEWS.students = async () => {
   };
   document.getElementById('fApply').onclick = load;
   onEnter('fQ', load); onEnter('fGrade', load);
-  if (canManage) {
+  if (canAdd) {
     document.getElementById('addStudent').onclick = () => studentForm(null, load);
     document.getElementById('importBtn').onclick = () => importStudents(load);
   }
