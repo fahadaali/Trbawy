@@ -156,20 +156,20 @@ function printStyles(primary: string, font: string): string {
      القرارات والمهام الجديدة، ثم التوقيعات — كلٌّ يبدأ من رأس صفحة ويمتدّ إلى
      ما يحتاجه. وداخل القسم يبقى العنوان ملازمًا لجدوله (h2 { break-after: avoid })
      فلا يقع عنوان في ذيل صفحة وبياناته في التالية.
-     وكل قسم **صفٌّ مستقلّ** في جدول الإطار: صفوف متعدّدة تجعل المحرّك يكرّر صفّ
-     الترويسة على كل صفحة — خلية واحدة عملاقة لا تكفي في بعض المحركات. */
-  .sec { break-before: page; page-break-before: always; }
+     والقسم عنصر كتليّ (div) لا صفّ جدول: قطعُ الصفحة قبل صفّ tr تتجاهله بعض
+     المحركات فتلتحم الأقسام كلها — وهو ما وقع في تصدير حقيقي. وتكرار الترويسة
+     على كل صفحة لا يستحق التضحية بتقسيم الأقسام. */
+  .sec { break-before: page; page-break-before: always; padding-bottom: 9px; }
   .sec:first-child, .sec.sec-open { break-before: auto; page-break-before: auto; }
-  .sec > td { padding: 0 0 9px; }
-  .sec > td > h2:first-child { margin-top: 0; }
+  .sec > h2:first-child { margin-top: 0; }
   /* علامة انتهاء القسم: حدّ سفليّ على صندوق القسم نفسه. زخرفةُ الصندوق لا
      تُولّد صفحة أبدًا، بخلاف عنصر مستقلّ — وقد دُفع عنصر الفاصل وحده إلى صفحة
      كاملة فارغة في تصدير حقيقي. */
-  .sec > td { border-bottom: 1.5px solid ${primary}38;
+  .sec { border-bottom: 1.5px solid ${primary}38;
     border-image: linear-gradient(to left, transparent, ${primary}66 22%, ${primary}66 78%, transparent) 1; }
-  .sec:last-child > td { border-bottom: 0; padding-bottom: 0; }
+  .sec:last-child { border-bottom: 0; padding-bottom: 0; }
   /* رأس الجدول يتكرّر على كل صفحة يمتدّ إليها الجدول */
-  .sec > td > .t-wrap { break-before: avoid; page-break-before: avoid; }
+  .sec > .t-wrap { break-before: avoid; page-break-before: avoid; }
 
   /* العناوين */
   h1 { font-size: 18px; text-align: center; color: ${primary}; margin: 0 0 2px; }
@@ -344,7 +344,7 @@ function printStyles(primary: string, font: string): string {
     padding: 11px 16px; min-height: 44px; border: 1px solid ${primary}; cursor: pointer;
   }
   .pactions .prim { background: ${primary}; color: #fff; }
-  .pactions .sec { background: #fff; color: ${primary}; }
+  .pactions .alt { background: #fff; color: ${primary}; }
   .pactions .hint { flex-basis: 100%; text-align: center; font-size: 11.5px; color: #6b7a75; }
   @media print { .pactions { display: none !important; } }`;
 }
@@ -491,9 +491,9 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       <td>${progressCell(a.progress)}</td>
     </tr>`).join('');
 
-  // كل قسم صفٌّ في جدول الإطار. أول صفّ في المحضر المفرد يفتح بلا قطع صفحة،
+  // كل قسم عنصر مستقلّ يبدأ من رأس صفحة. أول قسم في المحضر المفرد يفتح بلا قطع،
   // وفي الحزمة يبدأ كل محضر تالٍ من صفحة جديدة (brk).
-  return `<tr class="sec${brk ? '' : ' sec-open'}"><td>
+  return `<div class="sec${brk ? '' : ' sec-open'}">
     <h1>محضر اجتماع ${finalized ? '' : '(مسودة)'}</h1>
     <div class="center"><span class="subnum">${esc(m.display_number)}</span></div>
     ${m.title ? `<p class="center" style="font-weight:700;margin:6px 0 0">${esc(m.title)}</p>` : ''}
@@ -516,14 +516,14 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       ${attendees.filter((a) => !a.is_guest).map((a) => `<tr><td>${esc(a.user_name)}</td><td>${esc(roleAr(a.user_role))}</td><td>${attChip(a.attendance_status)}</td></tr>`).join('')}
       ${guests.map((g) => `<tr><td>${esc(g.guest_name)} ${chip('ضيف', 'info')}</td><td>${esc(g.guest_title || '')}</td><td>${attChip('present')}</td></tr>`).join('')}
     </tbody></table></div>
-    </td></tr>
+    </div>
 
-    <tr class="sec"><td>
+    <div class="sec">
     <h2>جدول الأعمال والبنود</h2>
     <ol class="agenda">${agenda.map((it) => `<li><b>${esc(it.title)}</b>${it.body ? `<div class="body-rich">${sanitizeHtml(it.body)}</div>` : ''}</li>`).join('') || '<li>—</li>'}</ol>
-    </td></tr>
+    </div>
 
-    ${followups.length ? `<tr class="sec"><td>
+    ${followups.length ? `<div class="sec">
     <h2>متابعة بنود المحاضر السابقة</h2>
     <p class="note">البند غير المنجَز يُرحَّل إلى المحضر التالي حتى يُنجَز، ثم يظهر ظهورًا أخيرًا للتوثيق.</p>
     <div class="t-wrap"><table class="tbl fixed">
@@ -532,9 +532,9 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       <thead><tr><th>النوع</th><th>الرقم</th><th>البند</th><th>المسؤول</th><th>الاستحقاق</th>
       <th>الحالة</th><th>الإنجاز</th><th>الترحيل</th></tr></thead>
       <tbody>${followupRows}</tbody></table></div>
-    </td></tr>` : ''}
+    </div>` : ''}
 
-    ${actions.length ? `<tr class="sec"><td>
+    ${actions.length ? `<div class="sec">
     <h2>القرارات والتوصيات والمهام</h2>
     <div class="t-wrap"><table class="tbl fixed">
       <colgroup><col style="width:11%" /><col style="width:11%" /><col style="width:21%" /><col style="width:16%" />
@@ -542,9 +542,9 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       <thead><tr><th>النوع</th><th>الرقم</th><th>البند</th><th>المسؤول</th><th>الأولوية</th>
       <th>الاستحقاق</th><th>الحالة</th><th>الإنجاز</th></tr></thead>
       <tbody>${actionRows}</tbody></table></div>
-    </td></tr>` : ''}
+    </div>` : ''}
 
-    <tr class="sec"><td>
+    <div class="sec">
     <h2>التوقيعات</h2>
     <div class="t-wrap"><table class="tbl fixed">
       <colgroup><col style="width:26%" /><col style="width:12%" /><col style="width:22%" />
@@ -552,7 +552,7 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       <thead><tr><th>الاسم</th><th>الحالة</th><th>التوقيع</th><th>رمز التحقق</th><th>وقت التوقيع</th></tr></thead>
       <tbody>${signRows}</tbody></table></div>
     ${qr ? `<div class="verify">${qr}<div class="txt"><b>رمز التحقق من صحة المحضر</b><br />امسح الرمز أو افتح:<br /><span dir="ltr">${esc(verifyUrl)}</span></div></div>` : ''}
-    </td></tr>`;
+    </div>`;
 }
 
 const attChip = (s: string) =>
@@ -576,7 +576,7 @@ ${watermark}
     <thead><tr><td>
       <div class="page-head"><span class="org">${esc(settings.header_text || settings.org_name || '')}</span>${logoImg}</div>
     </td></tr></thead>
-    <tbody>${bodies}</tbody>
+    <tbody><tr><td>${bodies}</td></tr></tbody>
     <tfoot><tr><td>
       <div class="page-foot"><span>${esc(settings.footer_text || settings.org_name || '')}</span><span class="doc" dir="ltr">${esc(footerRight)}</span></div>
     </td></tr></tfoot>
@@ -584,7 +584,7 @@ ${watermark}
 </div>
 <div class="pactions">
   <button type="button" class="prim" id="btnPrint">${esc('طباعة / حفظ PDF')}</button>
-  <button type="button" class="sec" id="btnShare" hidden>مشاركة الرابط</button>
+  <button type="button" class="alt" id="btnShare" hidden>مشاركة الرابط</button>
   <span class="hint" id="printHint"></span>
 </div>
 <script>
@@ -643,7 +643,7 @@ export async function renderBundleHtml(
   ).bind(councilId, from, to).all()).results as any[];
 
   if (!meetings.length) {
-    return shell(settings, primary, 'حزمة محاضر', `<tr class="sec sec-open"><td><h1>حزمة محاضر</h1><p class="center muted">لا توجد محاضر معتمدة في هذه الفترة.</p></td></tr>`, logoUri, wmUri);
+    return shell(settings, primary, 'حزمة محاضر', `<div class="sec sec-open"><h1>حزمة محاضر</h1><p class="center muted">لا توجد محاضر معتمدة في هذه الفترة.</p></div>`, logoUri, wmUri);
   }
   const blocks: string[] = [];
   for (let i = 0; i < meetings.length; i++) blocks.push(await meetingContentBlock(env, meetings[i], origin, i > 0));
@@ -698,7 +698,7 @@ export async function renderStudentReportHtml(
     ? `<div class="banner" style="color:${C.bad};background:#fdecea;border:1px solid #f5c9c2">تنبيه: أداء متدنٍّ (أقل من ٣)</div>`
     : alert === 'declining' ? `<div class="banner banner-warn">تنبيه: تراجع عن الدورة السابقة</div>` : '';
 
-  const body = `<tr class="sec sec-open"><td>
+  const body = `<div class="sec sec-open">
     <h1>بطاقة تقرير الطالب</h1>
     <div class="center"><span class="subnum">${esc(student.name)}</span></div>
     ${alertHtml}
@@ -719,7 +719,7 @@ export async function renderStudentReportHtml(
     <div class="t-wrap"><table class="tbl"><thead><tr><th>الدورة</th><th>نتيجته</th><th>متوسط صفه</th><th>متوسط مرحلته</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="4">لا توجد نتائج منشورة</td></tr>'}</tbody></table></div>
     ${student.notes ? `<h2>ملاحظات</h2><p>${esc(student.notes)}</p>` : ''}
-  </td></tr>`;
+  </div>`;
 
   return shell(settings, primary, `تقرير: ${student.name}`, body, logoUri, wmUri);
 }
