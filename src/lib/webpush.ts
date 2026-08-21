@@ -124,8 +124,27 @@ async function encryptPayload(sub: PushSubscriptionKeys, plaintext: Uint8Array):
 
 export interface PushResult {
   ok: boolean;
-  status: number;
+  status: number;  // ٠ = لم يصل الطلب إلى الخدمة أصلًا (شبكة أو مهلة)
   gone: boolean;   // اشتراك بطل (404/410) — يُحذف من القاعدة
+  detail?: string; // ما قالته الخدمة عند الرفض — وهو كل ما نملكه للتشخيص
+}
+
+/**
+ * سبب الرفض كما نطقت به الخدمة، مقتضبًا. ردودها أسطر قصيرة:
+ * أبل `{"reason":"BadJwtToken"}`، وفَيَربيس `{"error":{"message":"…"}}`،
+ * وموزيلا `{"errno":109,"message":"…"}` — فنلتقط الحقل الدالّ ونترك الباقي.
+ */
+async function refusalReason(res: Response): Promise<string | undefined> {
+  try {
+    const text = (await res.text()).trim().replace(/\s+/g, ' ');
+    if (!text) return undefined;
+    try {
+      const j: any = JSON.parse(text);
+      const r = j?.reason || j?.message || j?.error?.message || j?.error?.status;
+      if (r) return String(r).slice(0, 160);
+    } catch { /* ليس JSON — نأخذ النص كما هو */ }
+    return text.slice(0, 160);
+  } catch { return undefined; }
 }
 
 /** إرسال رسالة دفع واحدة إلى اشتراك واحد. */
@@ -152,10 +171,18 @@ export async function sendPush(
       body: body as BodyInit,
       signal: ctl.signal,
     });
-    return { ok: res.ok, status: res.status, gone: res.status === 404 || res.status === 410 };
-  } catch (e) {
+    const out: PushResult = {
+      ok: res.ok, status: res.status, gone: res.status === 404 || res.status === 410,
+    };
+    if (!res.ok) out.detail = await refusalReason(res);
+    return out;
+  } catch (e: any) {
     console.error('push send failed (non-fatal)', e);
-    return { ok: false, status: 0, gone: false };
+    return {
+      ok: false, status: 0, gone: false,
+      detail: e?.name === 'AbortError' ? 'انتهت المهلة قبل ردّ الخدمة'
+        : String(e?.message || e).slice(0, 160),
+    };
   } finally {
     clearTimeout(timer);
   }
@@ -165,32 +192,58 @@ export async function sendPush(
 let cachedKeys: VapidKeys | null | undefined;
 
 /**
+ * أصل الموقع كما وصل به الطلب — يصلح قيمةً لحقل `sub` في رمز VAPID.
+ * الحقل يجب أن يكون عنوان `https:` أو `mailto:` صالحًا تتعرّف به خدمةُ الدفع على
+ * صاحب الخدمة، وبعضُ الخدمات (أبل خاصة) تتشدّد فيه فترفض الرمز كلَّه إن أنكرته.
+ * فأصلُ الموقع أصدقُ من بريد متخيَّل على نطاق لا وجود له.
+ */
+let siteOrigin: string | null = null;
+export function rememberSiteOrigin(url: string): void {
+  if (siteOrigin) return;
+  try {
+    const o = new URL(url).origin;
+    if (o.startsWith('https://')) siteOrigin = o;
+  } catch { /* عنوان غير صالح — نتركه */ }
+}
+
+/** إسقاط المفاتيح المخبّأة ليُعاد قراءتها من القاعدة (بعد رفض الخدمة اعتمادها). */
+export function forgetVapidKeys(): void { cachedKeys = undefined; }
+
+/**
  * مفاتيح الدفع لهذا النشر.
  * الأفضلية لأسرار البيئة (VAPID_*)، وإلا تُولَّد مرة واحدة وتُحفظ في الإعدادات
  * حتى تعمل الإشعارات دون خطوات إعداد يدوية. تغيير المفاتيح يُبطل الاشتراكات القائمة.
  */
 export async function getVapidKeys(env: Env): Promise<VapidKeys | null> {
   if (cachedKeys !== undefined) return cachedKeys;
-  const subject = env.VAPID_SUBJECT || 'mailto:no-reply@tarbawi.local';
+  const subject = env.VAPID_SUBJECT || siteOrigin || 'mailto:no-reply@tarbawi.local';
   if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) {
     cachedKeys = { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY, subject };
     return cachedKeys;
   }
   try {
-    const row = await env.DB.prepare(
+    const read = () => env.DB.prepare(
       'SELECT push_public_key AS pub, push_private_key AS prv FROM settings WHERE id = 1',
     ).first<{ pub: string | null; prv: string | null }>();
+    const row = await read();
     if (row?.pub && row?.prv) {
       cachedKeys = { publicKey: row.pub, privateKey: row.prv, subject };
       return cachedKeys;
     }
+    // التوليد الأول قد يتسابق عليه طلبان فيولّد كلٌّ زوجًا. نكتب بلا استبدال ثم
+    // نقرأ ما استقرّ في القاعدة فنتّفق على زوج واحد: زوجان مختلفان يعنيان أن
+    // المتصفح اشترك بمفتاح والخادمَ يوقّع بغيره — فتُرفض كل الإشعارات بلا استثناء.
     const fresh = await generateVapidKeys(subject);
     await env.DB.prepare(
       `INSERT INTO settings (id, push_public_key, push_private_key) VALUES (1, ?, ?)
-       ON CONFLICT(id) DO UPDATE SET push_public_key = excluded.push_public_key,
-                                     push_private_key = excluded.push_private_key`,
+       ON CONFLICT(id) DO UPDATE SET
+         push_public_key  = COALESCE(settings.push_public_key,  excluded.push_public_key),
+         push_private_key = COALESCE(settings.push_private_key, excluded.push_private_key)`,
     ).bind(fresh.publicKey, fresh.privateKey).run();
-    cachedKeys = fresh;
+    const stored = await read();
+    cachedKeys = stored?.pub && stored?.prv
+      ? { publicKey: stored.pub, privateKey: stored.prv, subject }
+      : fresh;
     return cachedKeys;
   } catch (e) {
     console.error('vapid keys unavailable', e);

@@ -424,6 +424,10 @@ function setupNotifications() {
 }
 
 // ---- بطاقة إشعارات الأجهزة في شاشة الإشعارات ----
+// آخر إخفاق للإشعار التجريبي يبقى معروضًا في البطاقة: التنبيه المنبثق يزول قبل أن
+// يُقرأ، والسطر التقني هو ما يُنقل عند طلب المساعدة.
+let lastPushFail = null;
+
 async function renderPushCard() {
   const box = document.getElementById('pushBody');
   if (!box) return;
@@ -454,6 +458,11 @@ async function renderPushCard() {
            <button class="btn btn-sm" id="pcTest">${icon('bell', 15)} إشعار تجريبي</button>`
         : st.state === 'off' ? `<button class="btn btn-sm" id="pcOn">${icon('bell', 15)} تفعيل الإشعارات على هذا الجهاز</button>` : ''}
     </div>
+    ${lastPushFail ? `<div class="tag tag-red" style="display:block;padding:10px;line-height:1.8;margin-top:10px">
+        ${esc(lastPushFail.error)}
+        ${lastPushFail.detail ? `<div style="font-size:12px;margin-top:6px;opacity:.85;direction:ltr;text-align:left">${esc(lastPushFail.detail)}</div>` : ''}
+        ${lastPushFail.code === 'stale' ? '<div class="row mt"><button class="btn btn-sm" id="pcFix">أعِد تسجيل هذا الجهاز</button></div>' : ''}
+      </div>` : ''}
     ${devices.length ? `<h4 class="mt" style="font-size:14px">الأجهزة المسجَّلة (${arNum(devices.length)})</h4>
       <table class="tbl"><thead><tr><th>الجهاز</th><th>سُجِّل</th><th>آخر إشعار</th></tr></thead><tbody>${devRows}</tbody></table>`
       : '<p class="muted mt">لا توجد أجهزة مسجَّلة بعد.</p>'}`;
@@ -474,13 +483,29 @@ async function renderPushCard() {
     btn.innerHTML = '<span class="spinner spinner-inline"></span> جارٍ الإرسال…';
     try {
       const r = await API.post('/notifications/push/test');
+      lastPushFail = null;
       toast(r.sent > 1 ? `أُرسل الإشعار إلى ${arNum(r.sent)} أجهزة — إن لم يصلك خلال ثوانٍ فراجع إعدادات الإشعارات في نظامك`
         : 'أُرسل الإشعار — إن لم يصلك خلال ثوانٍ فراجع إعدادات الإشعارات في نظامك', 'ok');
     } catch (err) {
       toast(err.message, 'err');
-      // الاشتراك المنتهي يُحذف في الخادم، فنُحدّث البطاقة ليظهر زرّ التفعيل من جديد
-      if (err.status === 502 || err.status === 400) renderPushCard();
+      // السبب يبقى في البطاقة بعد ذهاب التنبيه، ومعه زرّ العلاج إن كان التسجيل بطل
+      lastPushFail = { error: err.message, detail: err.data && err.data.detail, code: err.data && err.data.code };
     } finally { btn.disabled = false; btn.innerHTML = html; }
+    // الاشتراك المنتهي يُحذف في الخادم، وآخر إشعار يتحدّث عند النجاح
+    renderPushCard();
+  });
+  on('pcFix', async (e) => {
+    const btn = e.currentTarget, html = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner spinner-inline"></span> جارٍ إعادة التسجيل…';
+    try {
+      await Push.reregister();
+      lastPushFail = null;
+      toast('أُعيد تسجيل هذا الجهاز — جرّب «إشعار تجريبي» الآن', 'ok');
+    } catch (err) {
+      toast(err.message, 'err');
+    } finally { btn.disabled = false; btn.innerHTML = html; }
+    renderPushCard();
   });
 }
 

@@ -40,4 +40,6 @@ APP_NAME = "منصة المجلس التربوي"
 #   wrangler secret put VAPID_PUBLIC_KEY     # النقطة العامة بترميز base64url
 #   wrangler secret put VAPID_PRIVATE_KEY    # المُركّبة d من JWK
 #   wrangler secret put VAPID_SUBJECT        # mailto:admin@example.com
+# وبلا VAPID_SUBJECT يُستعمل أصل الموقع نفسه (https://…) — وبعض خدمات الدفع تتشدّد
+# في هذا الحقل فترفض الإشعارات كلها إن لم يكن عنوانًا صالحًا.
 # تغيير المفاتيح يُبطل اشتراكات الأجهزة القائمة (تُسجَّل من جديد عند فتح التطبيق).

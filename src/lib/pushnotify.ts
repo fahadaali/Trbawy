@@ -2,7 +2,7 @@
 // الإشعار داخل المنصة يبقى المصدر الموثوق؛ والدفع أفضل-جهد: أي إخفاق يُتجاوَز
 // ولا يُعطّل العملية التي أطلقته.
 import type { Env } from '../types';
-import { getVapidKeys, sendPush, type PushSubscriptionKeys } from './webpush';
+import { getVapidKeys, forgetVapidKeys, sendPush, type PushSubscriptionKeys } from './webpush';
 
 export interface PushMessage {
   title: string;
@@ -19,12 +19,18 @@ interface SubRow extends PushSubscriptionKeys { id: number; user_id: number }
  * تتجاهلها)، لكنه يعني «الإشعار التجريبي» الذي وظيفته كلها أن يقول ما جرى:
  * إعلانُ النجاح دائمًا يترك المستخدم أمام زرّ «لا يحدث عنده شيء».
  */
+export interface PushFailure {
+  host: string;      // خدمة الدفع التي رفضت (web.push.apple.com مثلًا)
+  status: number;    // رمز ردّها، و٠ إن لم يصلها الطلب
+  detail?: string;   // نصّ سببها كما هو
+}
 export interface PushDelivery {
   subscriptions: number;   // أجهزة مسجَّلة وُجدت
   sent: number;            // قبلتها خدمة الدفع
   failed: number;          // رفضتها أو تعذّر الوصول
   gone: number;            // اشتراك منتهٍ حُذف (٤٠٤/٤١٠)
   reason?: 'no-users' | 'no-subscriptions' | 'no-keys' | 'error';
+  failures?: PushFailure[];  // ما قالته الخدمة عن كل رفض — بلا هذا نبقى نخمّن
 }
 const EMPTY = (reason: PushDelivery['reason']): PushDelivery =>
   ({ subscriptions: 0, sent: 0, failed: 0, gone: 0, reason });
@@ -62,11 +68,23 @@ export async function pushToUsers(env: Env, userIds: number[], msg: PushMessage)
     // تنظيف الاشتراكات الباطلة (جهاز أُزيل التطبيق منه أو انتهت صلاحيته)
     const gone: number[] = [];
     const failed: number[] = [];
+    const failures: PushFailure[] = [];
+    const hostOf = (endpoint: string) => { try { return new URL(endpoint).host; } catch { return '—'; } };
     results.forEach((r, i) => {
-      if (r.status !== 'fulfilled') { failed.push(subs[i].id); return; }
+      if (r.status !== 'fulfilled') {
+        failed.push(subs[i].id);
+        failures.push({ host: hostOf(subs[i].endpoint), status: 0, detail: String((r as any).reason?.message || (r as any).reason).slice(0, 160) });
+        return;
+      }
       if (r.value.gone) gone.push(subs[i].id);
-      else if (!r.value.ok) failed.push(subs[i].id);
+      else if (!r.value.ok) {
+        failed.push(subs[i].id);
+        failures.push({ host: hostOf(subs[i].endpoint), status: r.value.status, detail: r.value.detail });
+      }
     });
+    // رفضُ الاعتماد (٤٠١/٤٠٣) قد يعني مفتاحًا مخبّأً في هذه النسخة غير الذي في
+    // القاعدة، فنُسقط المخبَّأ لتُقرأ المفاتيح من جديد في المحاولة التالية.
+    if (failures.some((f) => f.status === 401 || f.status === 403)) forgetVapidKeys();
     const stmts = [];
     if (gone.length) {
       stmts.push(env.DB.prepare(`DELETE FROM push_subscriptions WHERE id IN (${gone.map(() => '?').join(',')})`).bind(...gone));
@@ -86,7 +104,10 @@ export async function pushToUsers(env: Env, userIds: number[], msg: PushMessage)
       ).bind(...okIds));
     }
     if (stmts.length) await env.DB.batch(stmts);
-    return { subscriptions: subs.length, sent: okIds.length, failed: failed.length, gone: gone.length };
+    return {
+      subscriptions: subs.length, sent: okIds.length, failed: failed.length, gone: gone.length,
+      ...(failures.length ? { failures } : {}),
+    };
   } catch (e) {
     console.error('push notify failed (non-fatal)', e);
     return EMPTY('error');

@@ -830,6 +830,12 @@ const Push = {
     });
   },
 
+  /** إعادة تسجيل هذا الجهاز من الصفر — علاجُ اشتراكٍ بطل أو مفتاحٍ لم يعد مطابقًا. */
+  async reregister() {
+    await this.disable();
+    return await this.enable();
+  },
+
   async disable() {
     const sub = await this.current();
     if (sub) {
@@ -842,8 +848,19 @@ const Push = {
   async syncSilently() {
     try {
       if (!this.supported() || this.permission() !== 'granted') return;
-      const sub = await this.current();
-      if (sub) await this.register(sub);
+      const reg = await this.registration();
+      if (!reg || !reg.pushManager) return;
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) return;
+      // مفتاح الخادم قد يتبدّل (إعادة تهيئة أو توليد جديد)، والاشتراك القديم يبقى
+      // يبدو «مفعَّلًا» بينما ترفض خدمةُ الدفع كل إشعار. نكتشفه هنا ونشترك من جديد
+      // بلا إزعاج — والإذن ممنوح أصلًا فلا حاجة إلى نقرة.
+      const { key, enabled } = await API.get('/notifications/push/key');
+      if (enabled && key && !this.sameKey(sub, key)) {
+        try { await sub.unsubscribe(); } catch {}
+        sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) });
+      }
+      await this.register(sub);
     } catch { /* غير حرج */ }
   },
 };

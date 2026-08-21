@@ -2,6 +2,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from './types';
 import { ensureBootstrap } from './lib/bootstrap';
+import { rememberSiteOrigin } from './lib/webpush';
 
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
@@ -27,6 +28,8 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 // أو رابط طباعة قبل أي طلب واجهة، فتقرأ عمودًا لم تُنشئه ترقيةٌ لم تُشغَّل بعد.
 // (الحارس داخل ensureBootstrap يجعل ما بعد المرة الأولى فحصًا لقيمة منطقية.)
 const bootstrapFirst = async (c: any, next: any) => {
+  // أصل الموقع يُعرَف من الطلب وحده، ورمز VAPID يحتاجه ليُعرّف مالك الخدمة
+  rememberSiteOrigin(c.req.url);
   await ensureBootstrap(c.env);
   await next();
 };

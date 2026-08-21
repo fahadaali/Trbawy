@@ -5,6 +5,7 @@ import type { Env, Variables } from '../types';
 import { requireAuth } from '../middleware/auth';
 import { getVapidKeys, b64uDecode } from '../lib/webpush';
 import { pushToUsers } from '../lib/pushnotify';
+import { arNum } from '../lib/charts';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth);
@@ -91,13 +92,35 @@ app.post('/push/test', async (c) => {
   });
   if (r.sent > 0) return c.json({ ok: true, ...r });
 
-  // لم يقبلها أحد: نفسّر السبب بدقّة بدل الصمت
-  const error = r.reason === 'no-keys'
-    ? 'مفاتيح الدفع غير مهيّأة على الخادم — راجع مدير النظام'
-    : r.gone > 0
-      ? 'انتهت صلاحية تسجيل هذا الجهاز (يحدث بعد إعادة تثبيت التطبيق أو تحديث النظام). أوقف الإشعارات ثم فعّلها من جديد.'
-      : 'تعذّر تسليم الإشعار إلى خدمة الدفع. أعد المحاولة، وإن تكرّر فأوقف الإشعارات وفعّلها من جديد.';
-  return c.json({ error, ...r }, 502);
+  // لم يقبلها أحد: نقول ما قالته خدمة الدفع نفسها. «تعذّر التسليم» وحدها لا تُصلح
+  // شيئًا — أهي مفاتيح لا تُطابق، أم اشتراك بطل، أم شبكة لم تصل؟
+  const f = r.failures?.[0];
+  const svc = f?.host || 'خدمة الدفع';
+  const reEnable = 'أوقف الإشعارات على هذا الجهاز ثم فعّلها من جديد.';
+  // الرمز يقرأه العميل: `stale` وحده يُصلحه إعادةُ تسجيل الجهاز، فيُظهر زرّها
+  let code = 'refused';
+  let error = 'تعذّر تسليم الإشعار إلى خدمة الدفع. أعد المحاولة، وإن تكرّر فأوقف الإشعارات وفعّلها من جديد.';
+  if (r.reason === 'no-keys') {
+    code = 'no-keys';
+    error = 'مفاتيح الدفع غير مهيّأة على الخادم — راجع مدير النظام';
+  } else if (r.gone > 0) {
+    code = 'stale';
+    error = `انتهت صلاحية تسجيل هذا الجهاز (يحدث بعد إعادة تثبيت التطبيق أو تحديث النظام). ${reEnable}`;
+  } else if (f && (f.status === 401 || f.status === 403)) {
+    code = 'stale';
+    error = `رفضت ${svc} اعتماد المنصة: تسجيل هذا الجهاز لم يعد مطابقًا لمفاتيح الخادم. ${reEnable}`;
+  } else if (f && f.status === 0) {
+    code = 'unreachable';
+    error = `لم يصل الطلب إلى ${svc} — تعذّر الاتصال أو انتهت المهلة. أعد المحاولة بعد قليل.`;
+  } else if (f && f.status === 429) {
+    error = `تجاوزنا حدّ الإرسال لدى ${svc} — أعد المحاولة بعد قليل.`;
+  } else if (f) {
+    // رفضٌ لا تُصلحه إعادةُ تسجيل: خلل في الطلب نفسه أو في الخدمة، والسطر التقني هو الدليل
+    error = `ردّت ${svc} برفض الإشعار (الرمز ${arNum(f.status)}). أعد المحاولة، وإن تكرّر فأبلغ مدير النظام بالسطر التقني أدناه.`;
+  }
+  // سطر تقني يُعرض كما هو ليُنقل عند الحاجة: الخدمة · الرمز · نصّ سببها
+  const detail = f ? [f.host, f.status || 'لا ردّ', f.detail].filter(Boolean).join(' · ') : undefined;
+  return c.json({ error, detail, code, ...r }, 502);
 });
 
 app.get('/', async (c) => {
