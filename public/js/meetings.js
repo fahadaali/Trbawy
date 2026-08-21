@@ -130,7 +130,14 @@ async function meetingCreate() {
         <div class="row-2">
           <div class="field"><label>المجلس</label><select id="mc_council">${creatable.map((c) => `<option value="${c.id}">${esc(COUNCIL_TYPE_AR[c.type] || c.name)}</option>`).join('')}</select>
             <div class="hint">رقم المحضر المتوقع: <b id="mc_preview">—</b></div></div>
-          <div class="field"><label>عنوان الاجتماع (اختياري)</label><input id="mc_title" placeholder="مثل: الاجتماع الدوري الأول" /></div>
+          <div class="field"><label>عنوان الاجتماع (اختياري)</label><input id="mc_title" placeholder="مثل: الاجتماع الدوري الأول" />
+            <div class="hint">موضوع الاجتماع أو تسميته — <b>وليس مكانه</b>. يظهر تحت رقم المحضر.</div></div>
+        </div>
+        <div class="row-2">
+          <div class="field"><label>نوع المكان</label><select id="mc_loctype"><option value="in_person">حضوري</option><option value="remote">عن بُعد</option></select></div>
+          <div class="field"><label>مكان الاجتماع <span class="muted">(مطلوب)</span></label>
+            <input id="mc_loc" placeholder="أين عُقد؟ مثل: قاعة الاجتماعات — الدور الأول" />
+            <div class="hint">يظهر في خانة «المكان» بترويسة المحضر، ولا يُعدَّل بعد الاعتماد.</div></div>
         </div>
         <div class="row-2">
           <div class="field"><label>التاريخ الميلادي</label><input type="date" id="mc_greg" value="${today}" /></div>
@@ -140,11 +147,6 @@ async function meetingCreate() {
           <div class="field"><label>وقت البداية</label><input id="mc_start" placeholder="٩:٣٠ ص" />
             <div class="hint">اكتبه بأي صيغة (٩:٣٠ ص · 0930)، أو اتركه واستخدم مؤقّت الاجتماع لاحقًا.</div></div>
           <div class="field"><label>وقت النهاية</label><input id="mc_end" placeholder="١٠:٤٥ ص" /></div>
-        </div>
-        <div class="row-2">
-          <div class="field"><label>نوع المكان</label><select id="mc_loctype"><option value="in_person">حضوري</option><option value="remote">عن بُعد</option></select></div>
-          <div class="field"><label>المكان / رابط الاجتماع <span class="muted">(مطلوب)</span></label>
-            <input id="mc_loc" placeholder="مثال: قاعة الاجتماعات — الدور الأول" /></div>
         </div>
         <div class="field"><label>الكاتب (يحرّر المسودة فقط)</label><select id="mc_writer"></select></div>
 
@@ -342,7 +344,7 @@ async function meetingDetail(id) {
           <div><span class="muted">المجلس:</span> ${esc(COUNCIL_TYPE_AR[d.council.type] || d.council.name)}</div>
           <div><span class="muted">التاريخ الهجري:</span> ${esc(m.hijri_date || '—')}</div>
           <div><span class="muted">التاريخ الميلادي:</span> ${fmtDate(m.greg_date)}</div>
-          <div><span class="muted">المكان:</span> ${m.location ? esc(m.location) + ' ' : ''}<span class="tag tag-gray">${m.location_type === 'remote' ? 'عن بُعد' : 'حضوري'}</span>${m.location ? '' : ' <span class="muted">— لم يُذكر</span>'}</div>
+          <div><span class="muted">المكان:</span> ${m.location ? esc(m.location) + ' ' : ''}<span class="tag tag-gray">${m.location_type === 'remote' ? 'عن بُعد' : 'حضوري'}</span>${m.location ? '' : ' <span class="tag tag-gold">لم يُذكر المكان</span>'}</div>
         </div>
         <div id="timePanel" class="time-panel mt"></div>
         <div class="row mt">${btns.join('')}</div>
@@ -1058,7 +1060,8 @@ function editHeader(id, m, d) {
     body: `
       <p class="hint" style="margin-bottom:12px">عدّل ما تريد فقط — تُحفظ الحقول المتغيّرة وحدها وتبقى البقية كما هي.</p>
       <div id="ehErr"></div>
-      <div class="field"><label>عنوان الاجتماع</label><input id="eh_title" value="${esc(m.title || '')}" /></div>
+      <div class="field"><label>عنوان الاجتماع</label><input id="eh_title" value="${esc(m.title || '')}" />
+        <div class="hint">موضوع الاجتماع أو تسميته — <b>وليس مكانه</b>؛ المكان في حقله أدناه.</div></div>
       <div class="row-2">
         <div class="field"><label>التاريخ الميلادي</label><input type="date" id="eh_greg" value="${esc(m.greg_date || '')}" /></div>
         <div class="field"><label>التاريخ الهجري</label><input id="eh_hijri" value="${esc(m.hijri_date || '')}" readonly style="background:#f0f2f1" /></div>
@@ -1078,7 +1081,9 @@ function editHeader(id, m, d) {
       <p class="hint" style="margin:-8px 0 16px">صيغ الوقت المقبولة: ٩:٣٠ ص · 9:30 م · 0930 — واتركه فارغًا لمسحه.</p>
       <div class="row-2">
         <div class="field"><label>نوع المكان</label><select id="eh_loctype"><option value="in_person" ${m.location_type !== 'remote' ? 'selected' : ''}>حضوري</option><option value="remote" ${m.location_type === 'remote' ? 'selected' : ''}>عن بُعد</option></select></div>
-        <div class="field"><label>المكان / الرابط</label><input id="eh_loc" value="${esc(m.location || '')}" /></div>
+        <div class="field"><label>مكان الاجتماع / الرابط</label><input id="eh_loc" value="${esc(m.location || '')}"
+          placeholder="أين عُقد؟ مثل: قاعة الاجتماعات — الدور الأول" />
+          <div class="hint">يظهر في خانة «المكان» بترويسة المحضر.</div></div>
       </div>
       <div class="field"><label>كاتب المحضر</label><select id="eh_writer"><option value="">— الافتراضي —</option>${members.map((mm) => `<option value="${mm.user_id}" ${m.writer_id === mm.user_id ? 'selected' : ''}>${esc(mm.user_name)}</option>`).join('')}</select></div>`,
     buttons: [

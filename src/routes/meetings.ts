@@ -552,6 +552,15 @@ app.post('/:id/status', async (c) => {
     newStatus = 'draft';
   } else if (action === 'submit' && m.status === 'draft') {
     if (!canEditDraft(u, council!, m.writer_id)) return c.json({ error: 'لا تملك صلاحية' }, 403);
+    // آخر فرصة لاستدراك نقص في الترويسة: بعد الإرسال للتوقيعات تُقفل ولا تُعدَّل.
+    // المكان أكثر ما يُنسى لأنه يُكتب سهوًا في خانة «عنوان الاجتماع».
+    if (!String(m.location || '').trim()) {
+      return c.json({
+        error: m.location_type === 'remote'
+          ? 'أضف رابط الاجتماع أو وسيلته من «تعديل الترويسة» قبل الإرسال للتوقيعات'
+          : 'أضف مكان الاجتماع من «تعديل الترويسة» قبل الإرسال للتوقيعات — لا يُعدَّل بعد الإرسال',
+      }, 409);
+    }
     newStatus = 'awaiting_signatures';
   } else if (action === 'revert' && m.status === 'awaiting_signatures') {
     // إرجاع إلى المسودة لتصحيح خطأ قبل الاعتماد — تُلغى التوقيعات والتجاوزات.

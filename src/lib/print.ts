@@ -503,7 +503,8 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       <tr><th>المجلس</th><td>${esc(council?.name)}</td><th>التاريخ الهجري</th><td>${esc(m.hijri_date || '')}</td></tr>
       <tr><th>التاريخ الميلادي</th><td>${dateAr(m.greg_date)}</td><th>الوقت</th><td>${esc(timeAr(m.start_time))} ${m.end_time ? '– ' + esc(timeAr(m.end_time)) : ''}</td></tr>
       <tr><th>المكان</th><td>${m.location ? esc(m.location) + ' ' : ''}${
-        chip(m.location_type === 'remote' ? 'عن بُعد' : 'حضوري', m.location_type === 'remote' ? 'info' : 'ok')}</td>
+        chip(m.location_type === 'remote' ? 'عن بُعد' : 'حضوري', m.location_type === 'remote' ? 'info' : 'ok')}${
+        m.location ? '' : ' <span class="muted">— لم يُذكر المكان</span>'}</td>
           <th>كاتب المحضر</th><td>${writer ? esc(writer.name) : '—'}</td></tr>
     </tbody></table>
 
