@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { canManageUsers } from '../permissions';
+import { canEditSettings } from '../permissions';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -18,7 +18,7 @@ app.get('/', async (c) => c.json({ settings: await getSettings(c.env) }));
 
 // تحديث الهوية البصرية (الرئيس/مدير النظام)
 app.patch('/', async (c) => {
-  if (!canManageUsers(c.get('user'))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!canEditSettings(c.get('user'))) return c.json({ error: 'لا تملك صلاحية' }, 403);
   const b = await c.req.json().catch(() => ({}));
   const cur = await getSettings(c.env);
   const f = {
@@ -44,7 +44,7 @@ app.patch('/', async (c) => {
 
 // رفع الشعار / العلامة المائية (R2)
 app.put('/asset/:kind', async (c) => {
-  if (!canManageUsers(c.get('user'))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!canEditSettings(c.get('user'))) return c.json({ error: 'لا تملك صلاحية' }, 403);
   const kind = c.req.param('kind');
   if (!['logo', 'watermark'].includes(kind)) return c.json({ error: 'نوع غير صالح' }, 400);
   const body = await c.req.arrayBuffer();

@@ -170,23 +170,34 @@ const NAV = [
     { key: 'dashboard', label: 'الصفحة الرئيسية', ico: 'home', roles: '*' },
   ]},
   { group: 'العمل التربوي', items: [
-    { key: 'meetings', label: 'المحاضر', ico: 'meetings', roles: ['president','vice_president','first_supervisor','team_member'] },
-    { key: 'tasks', label: 'المهام', ico: 'tasks', roles: ['president','vice_president','first_supervisor','team_member'] },
-    { key: 'evaluations', label: 'التقييم', ico: 'evaluations', roles: ['president','vice_president','first_supervisor','team_member'] },
-    { key: 'students', label: 'سجل الطلاب', ico: 'students', roles: ['president','vice_president','first_supervisor','team_member'] },
+    { key: 'meetings', label: 'المحاضر', ico: 'meetings', perm: 'meetings.view', roles: ['president','vice_president','first_supervisor','team_member'] },
+    { key: 'tasks', label: 'المهام', ico: 'tasks', perm: 'actions.view', roles: ['president','vice_president','first_supervisor','team_member'] },
+    { key: 'evaluations', label: 'التقييم', ico: 'evaluations', perm: 'evaluations.view', roles: ['president','vice_president','first_supervisor','team_member'] },
+    { key: 'students', label: 'سجل الطلاب', ico: 'students', perm: 'students.view', roles: ['president','vice_president','first_supervisor','team_member'] },
   ]},
   { group: 'الإدارة', items: [
-    { key: 'users', label: 'المستخدمون', ico: 'users', roles: ['president','system_admin'] },
-    { key: 'councils', label: 'المجالس', ico: 'councils', roles: ['president','vice_president','first_supervisor','team_member'] },
-    { key: 'branding', label: 'الهوية البصرية', ico: 'branding', roles: ['president','system_admin'] },
+    { key: 'users', label: 'المستخدمون', ico: 'users', perm: 'users.view', roles: ['president','system_admin'] },
+    { key: 'councils', label: 'المجالس', ico: 'councils', perm: 'councils.view', roles: ['president','vice_president','first_supervisor','team_member'] },
+    { key: 'branding', label: 'الهوية البصرية', ico: 'branding', perm: 'settings.edit', roles: ['president','system_admin'] },
     { key: 'notifications', label: 'الإشعارات', ico: 'bell', roles: '*' },
-    { key: 'audit', label: 'سجل التدقيق', ico: 'audit', roles: ['president','system_admin'] },
-    { key: 'backups', label: 'النسخ الاحتياطي', ico: 'backups', roles: ['president','system_admin'] },
+    { key: 'audit', label: 'سجل التدقيق', ico: 'audit', perm: 'audit.view', roles: ['president','system_admin'] },
+    { key: 'backups', label: 'النسخ الاحتياطي', ico: 'backups', perm: 'backups.view', roles: ['president','system_admin'] },
   ]},
 ];
 
+// وجهةٌ تُعرض إن أباحها الدور، أو أباحها استثناءٌ على هذا الحساب — والاستثناء
+// يسبق الدور في الاتجاهين: يفتح ما أغلقه ويغلق ما فتحه.
 function canSee(item) {
-  return item.roles === '*' || item.roles.includes(State.user.role);
+  const byRole = item.roles === '*' || item.roles.includes(State.user.role);
+  if (!item.perm) return byRole;
+  const ov = (State.user.perms || {})[item.perm];
+  return ov === undefined ? byRole : ov;
+}
+
+/** هل يملك المستخدم الحالي هذه العملية؟ (الاستثناء أولًا، وإلا فالأصل المُمرَّر) */
+function may(key, base) {
+  const ov = (State.user && State.user.perms || {})[key];
+  return ov === undefined ? base : ov;
 }
 
 // ---- القائمة الجانبية على الجوال (ستارة + قفل تمرير الخلفية) ----
@@ -719,7 +730,7 @@ VIEWS.users = async () => {
          <button class="btn-ghost btn-sm" data-del="${u.id}">حذف</button>`;
     return `
       <tr${u.deleted_at ? ' style="opacity:.6"' : ''}>
-        <td>${personChips([{ n: u.name, c: u.color }])}</td>
+        <td><button class="linky" data-perms="${u.id}" title="صلاحيات هذا الحساب">${personChips([{ n: u.name, c: u.color }])}</button></td>
         <td dir="ltr" style="text-align:right">${esc(u.email)}</td>
         <td>${esc(ROLE_AR[u.role] || u.role)}</td>
         <td>${u.stage ? esc(STAGE_AR[u.stage]) : '—'}</td>
@@ -757,7 +768,91 @@ VIEWS.users = async () => {
   content().querySelectorAll('[data-del]').forEach((b) => b.onclick = () => userAction(find(b.dataset.del), 'delete'));
   content().querySelectorAll('[data-restore]').forEach((b) => b.onclick = () => userAction(find(b.dataset.restore), 'restore'));
   content().querySelectorAll('[data-purge]').forEach((b) => b.onclick = () => userAction(find(b.dataset.purge), 'purge'));
+  content().querySelectorAll('[data-perms]').forEach((b) => b.onclick = () => permissionsModal(find(b.dataset.perms)));
 };
+
+// ---- نافذة صلاحيات حساب ----
+//
+// الصفوف عمليات المنصة، والأعمدة أفعالها الأربعة. المعروض هو **الحاصل**: أصلُ
+// الدور ما لم يُستثنَ. وكل خانة تخالف أصلها تُعلَّم، فيُقرأ الاستثناء بنظرة.
+// ولا يُرسل إلى الخادم إلا ما تغيّر، فالحفظ لا يكتب استثناءً لم يقصده أحد.
+async function permissionsModal(user) {
+  if (!user) return;
+  let d;
+  try { d = await API.get(`/users/${user.id}/permissions`); } catch (err) { return toast(err.message, 'err'); }
+  const ACTS = [['view', 'عرض'], ['add', 'إضافة'], ['edit', 'تعديل'], ['delete', 'حذف']];
+  const state = { ...d.effective };            // ما يراه المستخدم الآن
+  const cellId = (k) => 'pm_' + k.replace('.', '_');
+
+  const body = `
+    <p class="hint" style="margin-bottom:10px">
+      استثناءٌ على هذا الحساب وحده — <b>لا يغيّر قواعد الصلاحيات في المنصة</b>.
+      الخانة المعلَّمة <span class="tag tag-gold">استثناء</span> تخالف ما يقتضيه الدور
+      (${esc(ROLE_AR[d.user.role] || d.user.role)}${d.user.stage ? ' — ' + esc(STAGE_AR[d.user.stage]) : ''}).
+      والنطاق يبقى كما هو: مجالس المستخدم ومرحلته وحالة المحضر.
+    </p>
+    <div class="t-scroll"><table class="tbl perms-tbl"><thead><tr><th>العملية</th>
+      ${ACTS.map(([, l]) => `<th class="center">${l}</th>`).join('')}</tr></thead>
+      <tbody>${d.rows.map((r) => `<tr>
+        <td><b>${esc(r.label)}</b>${r.hint ? `<div class="muted" style="font-size:11.5px">${esc(r.hint)}</div>` : ''}</td>
+        ${ACTS.map(([a]) => {
+          const label = r.actions[a];
+          const k = `${r.key}.${a}`;
+          if (label === false || label === undefined) return '<td class="center muted" title="لا توجد هذه العملية في المنصة">—</td>';
+          return `<td class="center"><label class="pm-cell" title="${esc(label)}">
+            <input type="checkbox" data-k="${k}" ${state[k] ? 'checked' : ''} />
+            <span class="pm-flag" id="${cellId(k)}">${state[k] !== d.base[k] ? '<span class="tag tag-gold">استثناء</span>' : ''}</span>
+          </label></td>`;
+        }).join('')}
+      </tr>`).join('')}</tbody></table></div>`;
+
+  const { overlay, close } = openModal({
+    title: `صلاحيات: ${user.name}`,
+    body,
+    buttons: [
+      { label: 'حفظ', onClick: async (cl, ov) => {
+        // نرسل ما تغيّر فقط: القيمة الجديدة، أو null لإعادة الخانة إلى أصلها
+        const payload = {};
+        Object.keys(d.effective).forEach((k) => {
+          if (state[k] === d.effective[k]) return;
+          payload[k] = state[k] === d.base[k] ? null : state[k];
+        });
+        if (!Object.keys(payload).length) { cl(); return toast('لا تغييرات'); }
+        try {
+          await API.put(`/users/${user.id}/permissions`, { overrides: payload });
+          cl();
+          toast('حُفظت صلاحيات الحساب', 'ok');
+        } catch (err) { toast(err.message, 'err'); }
+      } },
+      { label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() },
+    ],
+  });
+
+  const paint = (k) => {
+    const box = overlay.querySelector(`input[data-k="${k}"]`);
+    if (box) box.checked = !!state[k];
+    const flag = overlay.querySelector('#' + cellId(k));
+    if (flag) flag.innerHTML = state[k] !== d.base[k] ? '<span class="tag tag-gold">استثناء</span>' : '';
+  };
+  overlay.querySelectorAll('input[data-k]').forEach((box) => {
+    box.onchange = () => {
+      const k = box.dataset.k;
+      const [mod, act] = k.split('.');
+      state[k] = box.checked;
+      // الاطلاع شرط ما بعده: منحُ فعلٍ يمنح العرض معه، ومنعُ العرض يمنع الأفعال
+      if (act === 'view' && !box.checked) {
+        ['add', 'edit', 'delete'].forEach((a) => {
+          const kk = `${mod}.${a}`;
+          if (kk in state && state[kk]) { state[kk] = false; paint(kk); }
+        });
+      } else if (act !== 'view' && box.checked) {
+        const kv = `${mod}.view`;
+        if (kv in state && !state[kv]) { state[kv] = true; paint(kv); }
+      }
+      paint(k);
+    };
+  });
+}
 
 // ---- تقرير الأثر ----
 function impactHtml(im) {

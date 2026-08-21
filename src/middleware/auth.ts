@@ -41,6 +41,18 @@ export async function loadSession(c: Ctx): Promise<{ user: User; sessionId: stri
     .bind(sid)
     .run();
 
+  // استثناءات الصلاحيات: قراءةٌ واحدة صغيرة مع كل طلب، فالقرار يبقى متزامنًا في
+  // كل دوال الصلاحيات بلا تمرير قاعدة البيانات إليها.
+  let perms: Record<string, boolean> | undefined;
+  try {
+    const rows = await c.env.DB.prepare('SELECT perm_key, allowed FROM user_permissions WHERE user_id = ?')
+      .bind(row.id).all<{ perm_key: string; allowed: number }>();
+    if (rows.results.length) {
+      perms = {};
+      for (const r of rows.results) perms[r.perm_key] = !!r.allowed;
+    }
+  } catch { /* الجدول يُنشأ في التهيئة — وغيابه يعني «بلا استثناءات» */ }
+
   const user: User = {
     id: row.id,
     name: row.name,
@@ -51,6 +63,7 @@ export async function loadSession(c: Ctx): Promise<{ user: User; sessionId: stri
     must_change_password: row.must_change_password,
     is_active: row.is_active,
     deleted_at: row.deleted_at ?? null,
+    perms,
   };
   return { user, sessionId: row.sid };
 }

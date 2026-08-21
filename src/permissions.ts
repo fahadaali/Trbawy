@@ -29,6 +29,73 @@ export interface CouncilScope {
   windows: ServedPeriod[];   // نوافذ الاطلاع على السجلات (تشمل الفترة الجارية)
 }
 
+// ============================================================
+// الاستثناءات على مستوى الحساب
+// ============================================================
+//
+// قواعد الأدوار أدناه هي الأصل، ولا تتغيّر. وفوقها طبقةٌ واحدة: استثناءٌ يضعه الرئيس
+// على حسابٍ بعينه فيمنحه عمليةً لا يملكها دورُه أو يمنعه عمليةً يملكها.
+//
+// القاعدة الحاكمة في كل موضع:
+//   • بلا استثناء  → السلوك كما كان قبل هذا النظام حرفًا بحرف.
+//   • منعٌ صريح   → يسبق كل شيء، ولو كان دورُه يبيحه.
+//   • منحٌ صريح   → يُفتح له الباب، **ويبقى النطاق** كما هو: مجالسه ومرحلته وحالة
+//                    المحضر. فالاستثناء يقرّر «أيّ عملية»، لا «على ماذا».
+
+/** القيمة الأصلية للعملية من الدور وحده (بلا سياق مجلس أو مرحلة). */
+export function basePerm(u: RoleStage, key: string): boolean {
+  const P = isPresident(u), V = isVice(u), F = isFirstSupervisor(u), T = isTeamMember(u), A = isAdmin(u);
+  switch (key) {
+    case 'meetings.view': return !A;
+    case 'meetings.add': return P || F;
+    case 'meetings.edit': return P || F;          // ومعهما كاتبُ المحضر المعيَّن
+    case 'meetings.delete': return P;
+
+    case 'actions.view': return !A;
+    case 'actions.add': return P || F;
+    case 'actions.edit': return !A;               // ومنها تحديث المكلَّف لتقدّمه
+
+    case 'students.view': return !A;
+    case 'students.add': return P || F;
+    case 'students.edit': return P || F;
+
+    case 'evaluations.view': return !A;
+    case 'evaluations.add': return P;
+    case 'evaluations.edit': return !A;           // التقييم نفسه بحسب فئة المقيَّم
+    case 'evaluations.delete': return P;
+
+    case 'criteria.view': return !A;
+    case 'criteria.add': case 'criteria.edit': case 'criteria.delete': return P;
+
+    case 'users.view': case 'users.add': case 'users.edit': case 'users.delete': return P || A;
+
+    case 'councils.view': return !A;
+    case 'councils.edit': return P || F;
+
+    case 'settings.view': return true;
+    case 'settings.edit': return P || A;
+
+    case 'audit.view': return P || A;
+
+    case 'backups.view': case 'backups.add': return P || A;
+    case 'backups.edit': return A;                // الاستعادة لمدير النظام
+    default: return false;
+  }
+}
+
+/**
+ * القرار النهائي لعملية: الأصل، أو الاستثناء إن وُجد.
+ * `scopeOnGrant` هو ما يبقى شرطًا عند المنح الصريح (نطاق المجلس أو المرحلة).
+ */
+export function decide(u: User, key: string, base: boolean, scopeOnGrant = true): boolean {
+  const ov = u.perms?.[key];
+  if (ov === undefined) return base;
+  return ov ? scopeOnGrant : false;
+}
+
+/** قرارٌ لا سياق له (شاشات الإدارة): الأصل أو الاستثناء. */
+export const can = (u: User, key: string): boolean => decide(u, key, basePerm(u, key));
+
 export const isPresident = (u: RoleStage) => u.role === 'president';
 export const isVice = (u: RoleStage) => u.role === 'vice_president';
 export const isFirstSupervisor = (u: RoleStage) => u.role === 'first_supervisor';
@@ -46,7 +113,9 @@ export function councilStage(type: CouncilType): 'secondary' | 'middle' | null {
 // الرئيس والنائب: كل المجالس. المشرف الأول: التربوي (عضو فيه) + مجلس مرحلته.
 // عضو الفريق: مجلس مرحلته فقط. مدير النظام: بلا صلاحية على المحتوى.
 export function hasFullCouncilAccess(u: RoleStage, council: CouncilRow): boolean {
-  if (isAdmin(u)) return false;
+  // مدير النظام بلا اطلاع على المحتوى — إلا أن يُؤذن له صراحةً باستثناء، فيصير
+  // اطلاعه حقيقيًا (والكتابة تبقى محكومة بمفاتيحها فلا تُفتح معه)
+  if (isAdmin(u)) return (u as User).perms?.['meetings.view'] === true;
   if (isPresident(u) || isVice(u)) return true;
   const stage = councilStage(council.type);
   if (isFirstSupervisor(u)) return council.type === 'educational' || u.stage === stage;
@@ -66,7 +135,8 @@ const tsOf = (ts: string | null | undefined): string | null => (ts ? String(ts) 
  */
 export async function councilScope(env: Env, u: User, council: CouncilRow): Promise<CouncilScope> {
   const full = hasFullCouncilAccess(u, council);
-  if (isAdmin(u)) return { level: 'none', windows: [] };
+  // مدير النظام خارج المحتوى، إلا أن يُؤذن له صراحةً (يقرّره hasFullCouncilAccess)
+  if (isAdmin(u) && !full) return { level: 'none', windows: [] };
 
   const rows = await env.DB.prepare(
     'SELECT role, stage, from_at, to_at FROM user_role_periods WHERE user_id = ? ORDER BY id',
@@ -146,12 +216,14 @@ export async function canViewMeeting(
 
 // ---- إنشاء دعوة/محضر ----
 // التربوي: الرئيس فقط. مجلس المرحلة: الرئيس أو مشرف تلك المرحلة.
+/** القاعدة الأصلية للإنشاء بلا استثناءات — تُستعمل أساسًا لقرارات أخرى تشتقّ منها. */
+export function baseCanCreateMeeting(u: RoleStage, council: CouncilRow): boolean {
+  return isPresident(u)
+    || (isFirstSupervisor(u) && council.type !== 'educational' && u.stage === councilStage(council.type));
+}
+
 export function canCreateMeeting(u: User, council: CouncilRow): boolean {
-  if (isPresident(u)) return true;
-  if (isFirstSupervisor(u) && council.type !== 'educational') {
-    return u.stage === councilStage(council.type);
-  }
-  return false;
+  return decide(u, 'meetings.add', baseCanCreateMeeting(u, council), hasFullCouncilAccess(u, council));
 }
 
 // ---- تعيين كاتب المحضر ---- (نفس صلاحية الإنشاء)
@@ -173,44 +245,63 @@ export function canEditDraft(
   council: CouncilRow,
   meetingWriterId: number | null,
 ): boolean {
-  if (!hasFullCouncilAccess(u, council)) return false;
-  if (isPresident(u)) return true;
-  if (isFirstSupervisor(u) && council.type !== 'educational' && u.stage === councilStage(council.type))
-    return true;
-  // كاتب المحضر الفعّال (writer_id يُثبَّت عند الإنشاء بالكاتب المخصّص أو الافتراضي)
-  if (meetingWriterId != null && meetingWriterId === u.id) return true;
-  return false;
+  const full = hasFullCouncilAccess(u, council);
+  const base = full && (
+    isPresident(u)
+    || (isFirstSupervisor(u) && council.type !== 'educational' && u.stage === councilStage(council.type))
+    // كاتب المحضر الفعّال (writer_id يُثبَّت عند الإنشاء بالكاتب المخصّص أو الافتراضي)
+    || (meetingWriterId != null && meetingWriterId === u.id));
+  return decide(u, 'meetings.edit', base, full);
 }
 
 // ---- الإلغاء (بدل الحذف) — للرئيس فقط ----
-export const canCancelMeeting = (u: User) => isPresident(u);
+export const canCancelMeeting = (u: User) => decide(u, 'meetings.delete', isPresident(u));
 
 // ---- التقييم ----
-export const canCreateEvalCycle = (u: User) => isPresident(u); // الرئيس حصراً
-export const canManageCriteria = (u: User) => isPresident(u);
+export const canCreateEvalCycle = (u: User) => decide(u, 'evaluations.add', isPresident(u)); // الرئيس حصراً
+export const canDeleteEvalCycle = (u: User) => decide(u, 'evaluations.delete', isPresident(u));
+/** إدارة دورة قائمة (تعديلها وفتحها وإغلاقها ونشر نتائجها). */
+export const canManageCycle = (u: User) => decide(u, 'evaluations.edit', isPresident(u));
+/** إدارة المعايير: العملية تُحدَّد لأن الاستثناء يفرّق بين الإضافة والتعديل والحذف. */
+export const canManageCriteria = (u: User, action: 'add' | 'edit' | 'delete' = 'edit') =>
+  decide(u, `criteria.${action}`, isPresident(u));
 
 // إدارة سجل الطلاب: الرئيس، أو المشرف الأول لمرحلته
-export function canManageStudents(u: User, stage?: 'secondary' | 'middle'): boolean {
-  if (isPresident(u)) return true;
-  if (isFirstSupervisor(u)) return stage == null || u.stage === stage;
-  return false;
+export function canManageStudents(u: User, stage?: 'secondary' | 'middle', action: 'add' | 'edit' = 'edit'): boolean {
+  const inStage = stage == null || u.stage === stage;
+  const base = isPresident(u) || (isFirstSupervisor(u) && inStage);
+  // عند المنح الصريح يبقى النطاق: المشرف على مرحلته، ومن لا مرحلة له على الجميع
+  return decide(u, `students.${action}`, base, isPresident(u) || inStage);
 }
 
 // من يقيّم ماذا
 export function canEvaluate(u: RoleStage, targetType: string): boolean {
-  if (targetType === 'students') return isFirstSupervisor(u) || isTeamMember(u);
-  if (targetType === 'team_members') return isFirstSupervisor(u);
-  if (targetType === 'first_supervisors') return isPresident(u) || isVice(u);
-  return false;
+  const base = targetType === 'students' ? (isFirstSupervisor(u) || isTeamMember(u))
+    : targetType === 'team_members' ? isFirstSupervisor(u)
+      : targetType === 'first_supervisors' ? (isPresident(u) || isVice(u)) : false;
+  // يُستدعى أحيانًا بصفٍّ تاريخي لا بمستخدم كامل، وحينها لا استثناءات تُقرأ
+  return decide(u as User, 'evaluations.edit', base);
 }
 
 // من يرى نتائج فئة
 export function canViewResults(u: RoleStage, targetType: string): boolean {
-  if (targetType === 'students') return isPresident(u) || isVice(u) || isFirstSupervisor(u) || isTeamMember(u);
-  if (targetType === 'team_members') return isPresident(u) || isFirstSupervisor(u);
-  if (targetType === 'first_supervisors') return isPresident(u) || isVice(u);
-  return false;
+  const base = targetType === 'students' ? (isPresident(u) || isVice(u) || isFirstSupervisor(u) || isTeamMember(u))
+    : targetType === 'team_members' ? (isPresident(u) || isFirstSupervisor(u))
+      : targetType === 'first_supervisors' ? (isPresident(u) || isVice(u)) : false;
+  return decide(u as User, 'evaluations.view', base);
 }
 
 // إدارة المستخدمين: مدير النظام أو الرئيس
-export const canManageUsers = (u: User) => isAdmin(u) || isPresident(u);
+export const canManageUsers = (u: User, action: 'view' | 'add' | 'edit' | 'delete' = 'edit') =>
+  decide(u, `users.${action}`, isAdmin(u) || isPresident(u));
+
+// ---- بقية شاشات الإدارة (لا سياق لها غير الدور) ----
+export const canViewAudit = (u: User) => can(u, 'audit.view');
+export const canViewBackups = (u: User) => can(u, 'backups.view');
+export const canCreateBackup = (u: User) => can(u, 'backups.add');
+export const canRestoreBackup = (u: User) => can(u, 'backups.edit');
+export const canEditSettings = (u: User) => can(u, 'settings.edit');
+/** تعديل بيانات المجلس (أعضاؤه وكاتبه وبنوده الثابتة) — والنطاق يبقى على مجالسه. */
+export function canEditCouncil(u: User, council: CouncilRow, base: boolean): boolean {
+  return decide(u, 'councils.edit', base, hasFullCouncilAccess(u, council));
+}

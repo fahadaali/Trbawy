@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { councilScope, withinAccessWindow, isOpenAction, canEditDraft, isPresident, isVice, hasFullCouncilAccess, type CouncilRow } from '../permissions';
+import { councilScope, withinAccessWindow, isOpenAction, canEditDraft, can, decide, isPresident, isVice, hasFullCouncilAccess, type CouncilRow } from '../permissions';
 import { getCouncil, nextActionNumber, formatActionNumber } from '../lib/meetings';
 import { notify, notifyMany } from '../lib/notify';
 import { recomputeDelay, assigneeStats, overallStats, stalledActions } from '../lib/taskmetrics';
@@ -62,7 +62,8 @@ app.post('/meeting/:meetingId', async (c) => {
   if (!meeting) return c.json({ error: 'المحضر غير موجود' }, 404);
   const council = await getCouncil(c.env, meeting.council_id);
   if (!EDITABLE_MEETING.includes(meeting.status)) return c.json({ error: 'المحضر مقفل' }, 409);
-  if (!canEditDraft(c.get('user'), council!, meeting.writer_id))
+  const adder = c.get('user');
+  if (!decide(adder, 'actions.add', canEditDraft(adder, council!, meeting.writer_id), hasFullCouncilAccess(adder, council!)))
     return c.json({ error: 'لا تملك صلاحية إضافة بنود لهذا المحضر' }, 403);
 
   const b = await c.req.json().catch(() => ({}));
@@ -102,6 +103,7 @@ app.post('/meeting/:meetingId', async (c) => {
 // ---- قائمة القرارات/المهام ----
 app.get('/', async (c) => {
   const u = c.get('user');
+  if (!can(u, 'actions.view')) return c.json({ error: 'لا تملك صلاحية الاطلاع على البنود' }, 403);
   const mine = c.req.query('mine') === '1';
   const type = c.req.query('type');
   const status = c.req.query('status');
@@ -220,7 +222,10 @@ app.patch('/:id', async (c) => {
   const u = c.get('user');
   const b = await c.req.json().catch(() => ({}));
 
-  const isManager = canEditDraft(u, council!, meeting?.writer_id) || isPresident(u);
+  // الاستثناء يقرّر أصل «تعديل البنود»، والنطاق يبقى مجلسه
+  const isManager = decide(u, 'actions.edit',
+    canEditDraft(u, council!, meeting?.writer_id) || isPresident(u),
+    hasFullCouncilAccess(u, council!));
   const assignee = await isAssignee(c.env, id, u.id);
 
   // تعديل النص/الأولوية/الاستحقاق/المسؤولين: للمدير وبينما المحضر قابل للتحرير فقط

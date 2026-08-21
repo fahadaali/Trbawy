@@ -37,6 +37,17 @@ export const SCHEMA_STATEMENTS: string[] = [
   note       TEXT
 )`,
   `CREATE INDEX IF NOT EXISTS idx_role_periods_user ON user_role_periods(user_id)`,
+  // استثناءات الصلاحيات على مستوى الحساب: صفٌّ لكل عملية استُثني فيها هذا الحساب.
+  // غياب الصف = «كما يقتضي دوره»، فلا يُخزَّن إلا ما خالف الأصل.
+  `CREATE TABLE IF NOT EXISTS user_permissions (
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  perm_key   TEXT    NOT NULL,
+  allowed    INTEGER NOT NULL,                     -- 1 منح · 0 منع
+  granted_by INTEGER REFERENCES users(id),
+  granted_at TEXT    NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (user_id, perm_key)
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_user_perms ON user_permissions(user_id)`,
   `CREATE TABLE IF NOT EXISTS sessions (
   id           TEXT    PRIMARY KEY,        -- رمز الجلسة العشوائي
   user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

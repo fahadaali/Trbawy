@@ -334,6 +334,14 @@ table.tbl tr:hover td { background: #fafbfb; }
 .muted { color: var(--muted); }
 .center { text-align: center; }
 .nb { white-space: nowrap; }
+/* اسم المستخدم زرٌّ يفتح صلاحياته — يبدو نصًّا لا زرًّا */
+.linky { background: none; border: 0; padding: 0; font: inherit; color: inherit; text-align: start; cursor: pointer; }
+.linky:hover { text-decoration: underline; text-underline-offset: 3px; }
+/* جدول الصلاحيات */
+.perms-tbl th.center, .perms-tbl td.center { text-align: center; }
+.pm-cell { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; cursor: pointer; }
+.pm-cell input { width: 18px; height: 18px; accent-color: var(--primary); }
+.pm-flag .tag { font-size: 10px; padding: 1px 5px; }
 .ok-cell { color: var(--primary); font-weight: 700; }   /* صفٌّ سليم في معاينة الاستيراد */   /* «٩:٠٠ ص» لا ينكسر فيبقى «ص» وحدها في سطر */
 
 .menu-toggle { display: none; background: none; color: var(--primary); border: 1px solid var(--border); border-radius: 8px; padding: 8px 11px; }

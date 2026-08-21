@@ -4,7 +4,7 @@ import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
 import {
-  canCreateEvalCycle, canManageCriteria, canEvaluate, canViewResults, isPresident,
+  canCreateEvalCycle, canDeleteEvalCycle, canManageCycle, canManageCriteria, canEvaluate, canViewResults, isPresident,
 } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
 import { evaluationTargets, resultTargets } from '../lib/evaltargets';
@@ -52,7 +52,7 @@ app.get('/criteria', async (c) => {
 });
 
 app.post('/criteria', async (c) => {
-  if (!canManageCriteria(c.get('user'))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!canManageCriteria(c.get('user'), 'add')) return c.json({ error: 'لا تملك صلاحية' }, 403);
   const b = await c.req.json().catch(() => ({}));
   if (!TARGET_TYPES.includes(b.target_type)) return c.json({ error: 'الفئة غير صالحة' }, 400);
   if (!b.name) return c.json({ error: 'اسم المعيار مطلوب' }, 400);
@@ -66,7 +66,7 @@ app.post('/criteria', async (c) => {
 });
 
 app.patch('/criteria/:id', async (c) => {
-  if (!canManageCriteria(c.get('user'))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!canManageCriteria(c.get('user'), 'edit')) return c.json({ error: 'لا تملك صلاحية' }, 403);
   const id = Number(c.req.param('id'));
   const cur = await c.env.DB.prepare('SELECT * FROM eval_criteria WHERE id = ? AND cycle_id IS NULL').bind(id).first<any>();
   if (!cur) return c.json({ error: 'المعيار غير موجود' }, 404);
@@ -82,7 +82,7 @@ app.patch('/criteria/:id', async (c) => {
 });
 
 app.delete('/criteria/:id', async (c) => {
-  if (!canManageCriteria(c.get('user'))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!canManageCriteria(c.get('user'), 'delete')) return c.json({ error: 'لا تملك صلاحية' }, 403);
   await c.env.DB.prepare('DELETE FROM eval_criteria WHERE id = ? AND cycle_id IS NULL').bind(Number(c.req.param('id'))).run();
   return c.json({ ok: true });
 });
@@ -112,7 +112,7 @@ app.get('/criteria/template', async () => {
 
 // استيراد المعايير من CSV (يستبدل قوالب الفئات الواردة في الملف)
 app.post('/criteria/import', async (c) => {
-  if (!canManageCriteria(c.get('user'))) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!canManageCriteria(c.get('user'), 'edit')) return c.json({ error: 'لا تملك صلاحية' }, 403);
   const commit = c.req.query('commit') === '1';
   const { csv } = await c.req.json().catch(() => ({}));
   if (!csv) return c.json({ error: 'لا توجد بيانات' }, 400);
@@ -177,7 +177,7 @@ app.post('/cycles', async (c) => {
 
 // تعديل بيانات الدورة (الاسم/الفترة/الفئات) — الفئات تُعدَّل قبل الفتح فقط
 app.patch('/cycles/:id', async (c) => {
-  if (!canCreateEvalCycle(c.get('user'))) return c.json({ error: 'للرئيس حصراً' }, 403);
+  if (!canManageCycle(c.get('user'))) return c.json({ error: 'للرئيس حصراً' }, 403);
   const id = Number(c.req.param('id'));
   const cur = await c.env.DB.prepare('SELECT * FROM eval_cycles WHERE id = ?').bind(id).first<any>();
   if (!cur) return c.json({ error: 'الدورة غير موجودة' }, 404);
@@ -203,7 +203,7 @@ app.patch('/cycles/:id', async (c) => {
 
 // حذف دورة — مسموح فقط وهي مسودة وبلا أي تقييمات مُدخلة
 app.delete('/cycles/:id', async (c) => {
-  if (!canCreateEvalCycle(c.get('user'))) return c.json({ error: 'للرئيس حصراً' }, 403);
+  if (!canDeleteEvalCycle(c.get('user'))) return c.json({ error: 'للرئيس حصراً' }, 403);
   const id = Number(c.req.param('id'));
   const cur = await c.env.DB.prepare('SELECT * FROM eval_cycles WHERE id = ?').bind(id).first<any>();
   if (!cur) return c.json({ error: 'الدورة غير موجودة' }, 404);
@@ -236,7 +236,7 @@ app.get('/cycles/:id', async (c) => {
 
 // تحوّلات حالة الدورة
 app.post('/cycles/:id/status', async (c) => {
-  if (!canCreateEvalCycle(c.get('user'))) return c.json({ error: 'للرئيس حصراً' }, 403);
+  if (!canManageCycle(c.get('user'))) return c.json({ error: 'للرئيس حصراً' }, 403);
   const id = Number(c.req.param('id'));
   const { action } = await c.req.json().catch(() => ({}));
   const cycle = await c.env.DB.prepare('SELECT * FROM eval_cycles WHERE id = ?').bind(id).first<any>();

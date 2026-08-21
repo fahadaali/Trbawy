@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Env, Variables, User } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { canManageStudents, isPresident, isVice } from '../permissions';
+import { canManageStudents, can, isPresident, isVice } from '../permissions';
 import { weightedForEvaluation } from '../lib/evalcalc';
 import { csvCell, parseCsv, colOf, matchAlias, toEnDigits } from '../lib/csv';
 
@@ -27,9 +27,11 @@ const STATUS_ALIASES: Record<string, string[]> = {
 
 // نطاق الاطلاع على الطلاب
 function studentScopeStage(u: User): 'secondary' | 'middle' | 'all' | null {
+  // الاستثناء يقرّر أصل الاطلاع، والمرحلة تبقى نطاقه
+  if (!can(u, 'students.view')) return null;
   if (isPresident(u) || isVice(u)) return 'all';
   if (u.role === 'first_supervisor' || u.role === 'team_member') return (u.stage as any) || null;
-  return null;
+  return (u.stage as any) || 'all';
 }
 
 // ---- قائمة الطلاب ----
@@ -61,7 +63,7 @@ app.get('/', async (c) => {
 app.post('/', async (c) => {
   const b = await c.req.json().catch(() => ({}));
   if (!STAGES.includes(b.stage)) return c.json({ error: 'المرحلة غير صالحة' }, 400);
-  if (!canManageStudents(c.get('user'), b.stage)) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!canManageStudents(c.get('user'), b.stage, 'add')) return c.json({ error: 'لا تملك صلاحية' }, 403);
   if (!b.national_id || !b.name) return c.json({ error: 'رقم الهوية والاسم مطلوبان' }, 400);
   const exists = await c.env.DB.prepare('SELECT 1 FROM students WHERE national_id = ?').bind(String(b.national_id)).first();
   if (exists) return c.json({ error: 'رقم الهوية مكرر' }, 409);
@@ -77,7 +79,7 @@ app.patch('/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const cur = await c.env.DB.prepare('SELECT * FROM students WHERE id = ?').bind(id).first<any>();
   if (!cur) return c.json({ error: 'الطالب غير موجود' }, 404);
-  if (!canManageStudents(c.get('user'), cur.stage)) return c.json({ error: 'لا تملك صلاحية' }, 403);
+  if (!canManageStudents(c.get('user'), cur.stage, 'edit')) return c.json({ error: 'لا تملك صلاحية' }, 403);
   const b = await c.req.json().catch(() => ({}));
   await c.env.DB.prepare(
     `UPDATE students SET name=?, grade=?, class=?, status=?, notes=?, updated_at=datetime('now') WHERE id=?`,
@@ -192,7 +194,7 @@ app.post('/import', async (c) => {
     if (!name) errors.push('الاسم ناقص');
     if (!stage) errors.push('المرحلة غير صالحة (secondary/ثانوي أو middle/متوسط)');
     if (nid && (existing.has(nid) || seen.has(nid))) errors.push('رقم هوية مكرر');
-    if (stage && !canManageStudents(u, stage as any)) errors.push('لا تملك صلاحية على هذه المرحلة');
+    if (stage && !canManageStudents(u, stage as any, 'add')) errors.push('لا تملك صلاحية على هذه المرحلة');
     if (nid) seen.add(nid);
     const rec = {
       national_id: nid, name, stage,

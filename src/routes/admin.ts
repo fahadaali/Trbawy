@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { isAdmin, isPresident } from '../permissions';
+import { canViewBackups, canCreateBackup, canRestoreBackup } from '../permissions';
 import { audit } from '../lib/audit';
 import { createBackup, listBackups, restoreBackup } from '../lib/backup';
 
@@ -10,7 +10,8 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
 app.use('*', async (c, next) => {
   const u = c.get('user');
-  if (!isAdmin(u) && !isPresident(u)) return c.json({ error: 'خاص بمدير النظام' }, 403);
+  // الاطلاع بابُ هذه الشاشة كلها؛ والإنشاء والاستعادة يُفحصان في موضعهما
+  if (!canViewBackups(u)) return c.json({ error: 'خاص بمدير النظام' }, 403);
   await next();
 });
 
@@ -38,7 +39,7 @@ app.get('/backups/download', async (c) => {
 // ---- استعادة نسخة احتياطية (مدير النظام حصراً) ----
 // عملية استبدال كامل: تُنشأ نسخة وقائية تلقائياً قبل التنفيذ.
 app.post('/backups/restore', async (c) => {
-  if (!isAdmin(c.get('user'))) return c.json({ error: 'الاستعادة لمدير النظام حصراً' }, 403);
+  if (!canRestoreBackup(c.get('user'))) return c.json({ error: 'الاستعادة لمدير النظام حصراً' }, 403);
   const b = await c.req.json().catch(() => ({}));
   const key = String(b.key || '');
   // تأكيد صريح يمنع التنفيذ العرضي

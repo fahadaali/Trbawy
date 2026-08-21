@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { canAssignWriter, canViewCouncil, isPresident } from '../permissions';
+import { canViewCouncil, canEditCouncil, baseCanCreateMeeting, isPresident } from '../permissions';
 import { sanitizeHtml } from '../lib/sanitize';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
@@ -51,7 +51,7 @@ app.put('/:id/default-writer', async (c) => {
   const { writer_id } = await c.req.json().catch(() => ({}));
   const council = await c.env.DB.prepare('SELECT * FROM councils WHERE id = ?').bind(id).first<any>();
   if (!council) return c.json({ error: 'المجلس غير موجود' }, 404);
-  if (!canAssignWriter(c.get('user'), council))
+  if (!canEditCouncil(c.get('user'), council, baseCanCreateMeeting(c.get('user'), council)))
     return c.json({ error: 'لا تملك صلاحية تعيين كاتب هذا المجلس' }, 403);
 
   // يجب أن يكون الكاتب عضواً في المجلس
@@ -76,8 +76,11 @@ app.put('/:id/default-writer', async (c) => {
 
 // إدارة العضوية (الرئيس فقط — بنية تنظيمية تربوية)
 app.post('/:id/members', async (c) => {
-  if (!isPresident(c.get('user'))) return c.json({ error: 'إدارة عضوية المجالس للرئيس فقط' }, 403);
   const id = Number(c.req.param('id'));
+  const council = await c.env.DB.prepare('SELECT * FROM councils WHERE id = ?').bind(id).first<any>();
+  if (!council) return c.json({ error: 'المجلس غير موجود' }, 404);
+  if (!canEditCouncil(c.get('user'), council, isPresident(c.get('user'))))
+    return c.json({ error: 'إدارة عضوية المجالس للرئيس فقط' }, 403);
   const { user_id, position } = await c.req.json().catch(() => ({}));
   const pos = position === 'chair' ? 'chair' : 'member';
   await c.env.DB.prepare(
@@ -91,8 +94,11 @@ app.post('/:id/members', async (c) => {
 });
 
 app.delete('/:id/members/:userId', async (c) => {
-  if (!isPresident(c.get('user'))) return c.json({ error: 'إدارة عضوية المجالس للرئيس فقط' }, 403);
   const id = Number(c.req.param('id'));
+  const council = await c.env.DB.prepare('SELECT * FROM councils WHERE id = ?').bind(id).first<any>();
+  if (!council) return c.json({ error: 'المجلس غير موجود' }, 404);
+  if (!canEditCouncil(c.get('user'), council, isPresident(c.get('user'))))
+    return c.json({ error: 'إدارة عضوية المجالس للرئيس فقط' }, 403);
   const userId = Number(c.req.param('userId'));
   await c.env.DB.prepare('DELETE FROM council_members WHERE council_id = ? AND user_id = ?')
     .bind(id, userId)
@@ -106,7 +112,7 @@ app.post('/:id/fixed-items', async (c) => {
   const id = Number(c.req.param('id'));
   const council = await c.env.DB.prepare('SELECT * FROM councils WHERE id = ?').bind(id).first<any>();
   if (!council) return c.json({ error: 'المجلس غير موجود' }, 404);
-  if (!canAssignWriter(c.get('user'), council))
+  if (!canEditCouncil(c.get('user'), council, baseCanCreateMeeting(c.get('user'), council)))
     return c.json({ error: 'لا تملك صلاحية تعديل بنود هذا المجلس' }, 403);
   const { title, body } = await c.req.json().catch(() => ({}));
   if (!title) return c.json({ error: 'العنوان مطلوب' }, 400);
@@ -127,7 +133,7 @@ app.delete('/:id/fixed-items/:itemId', async (c) => {
   const id = Number(c.req.param('id'));
   const council = await c.env.DB.prepare('SELECT * FROM councils WHERE id = ?').bind(id).first<any>();
   if (!council) return c.json({ error: 'المجلس غير موجود' }, 404);
-  if (!canAssignWriter(c.get('user'), council))
+  if (!canEditCouncil(c.get('user'), council, baseCanCreateMeeting(c.get('user'), council)))
     return c.json({ error: 'لا تملك صلاحية' }, 403);
   await c.env.DB.prepare('DELETE FROM fixed_agenda_templates WHERE id = ? AND council_id = ?')
     .bind(Number(c.req.param('itemId')), id)

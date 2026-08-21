@@ -9,7 +9,8 @@ import type { Env, Role, Stage, Variables } from '../types';
 import { hashPassword } from '../lib/crypto';
 import { audit } from '../lib/audit';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { canManageUsers } from '../permissions';
+import { canManageUsers, basePerm } from '../permissions';
+import { PERM_ROWS, PERM_KEYS, isPermKey } from '../lib/permcatalog';
 import { DEFAULT_PASSWORD } from '../lib/bootstrap';
 import { defaultPersonColor, isValidColor } from '../lib/people';
 import {
@@ -23,9 +24,9 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
 app.use('*', requireAuth, requirePasswordChanged);
 
-// حارس الصلاحية
+// حارس الصلاحية: الاطلاع بابُ الشاشة كلها، والإضافة والتعديل والحذف تُفحص كلٌّ في موضعها
 app.use('*', async (c, next) => {
-  if (!canManageUsers(c.get('user'))) return c.json({ error: 'لا تملك صلاحية إدارة المستخدمين' }, 403);
+  if (!canManageUsers(c.get('user'), 'view')) return c.json({ error: 'لا تملك صلاحية إدارة المستخدمين' }, 403);
   await next();
 });
 
@@ -95,6 +96,7 @@ app.get('/:id/impact', async (c) => {
 
 // إنشاء مستخدم (كلمة المرور الافتراضية مع إلزام التغيير)
 app.post('/', async (c) => {
+  if (!canManageUsers(c.get('user'), 'add')) return c.json({ error: 'لا تملك صلاحية إضافة مستخدم' }, 403);
   const b = await c.req.json().catch(() => ({}));
   const name = (b.name || '').trim();
   const email = (b.email || '').trim().toLowerCase();
@@ -137,6 +139,7 @@ app.post('/', async (c) => {
 // ---- تعديل مستخدم: الاسم، الدور/المرحلة، التعليق/التفعيل ----
 // تغيير الدور أو المرحلة أو التعليق يمرّ بفحص الموانع أولًا، ويُنفَّذ بآثاره كاملة.
 app.patch('/:id', async (c) => {
+  if (!canManageUsers(c.get('user'), 'edit')) return c.json({ error: 'لا تملك صلاحية تعديل المستخدمين' }, 403);
   const id = Number(c.req.param('id'));
   const b = await c.req.json().catch(() => ({}));
   const actor = c.get('user');
@@ -230,9 +233,103 @@ app.patch('/:id', async (c) => {
 
 // ---- حذف مستخدم ----
 // الافتراضي: حذف أرشيفي يحفظ كل السجلات الرسمية. purge=1: حذف نهائي لمن لا أثر له.
+// ============================================================
+// استثناءات الصلاحيات لحساب بعينه
+// ============================================================
+//
+// القواعد الأساسية في المنصة لا تتغيّر من هنا. ما يُحفظ هنا استثناءٌ على حسابٍ
+// واحد: «امنح هذا الحساب عملية لا يملكها دورُه» أو «امنعه عملية يملكها». وغيابُ
+// الصف يعني «كما يقتضي الدور» — فلا يُخزَّن إلا ما خالف الأصل.
+
+app.get('/:id/permissions', async (c) => {
+  const id = Number(c.req.param('id'));
+  const target = await c.env.DB.prepare('SELECT id, name, role, stage FROM users WHERE id = ? AND deleted_at IS NULL')
+    .bind(id).first<any>();
+  if (!target) return c.json({ error: 'المستخدم غير موجود' }, 404);
+
+  const rows = await c.env.DB.prepare('SELECT perm_key, allowed FROM user_permissions WHERE user_id = ?')
+    .bind(id).all<{ perm_key: string; allowed: number }>();
+  const overrides: Record<string, boolean> = {};
+  for (const r of rows.results) overrides[r.perm_key] = !!r.allowed;
+
+  const base: Record<string, boolean> = {};
+  const effective: Record<string, boolean> = {};
+  for (const k of PERM_KEYS) {
+    base[k] = basePerm(target, k);
+    effective[k] = k in overrides ? overrides[k] : base[k];
+  }
+  return c.json({ user: target, rows: PERM_ROWS, base, overrides, effective });
+});
+
+app.put('/:id/permissions', async (c) => {
+  const actor = c.get('user');
+  if (!canManageUsers(actor, 'edit')) return c.json({ error: 'لا تملك صلاحية تعديل الصلاحيات' }, 403);
+  const id = Number(c.req.param('id'));
+  // لا يعدّل أحدٌ صلاحيات نفسه: بابٌ لرفع الصلاحية ذاتيًّا، وبابٌ لإغلاقها على النفس
+  if (id === actor.id) return c.json({ error: 'لا يمكن تعديل صلاحيات حسابك أنت' }, 400);
+
+  const target = await c.env.DB.prepare('SELECT id, name, role FROM users WHERE id = ? AND deleted_at IS NULL')
+    .bind(id).first<any>();
+  if (!target) return c.json({ error: 'المستخدم غير موجود' }, 404);
+  // حساب الرئيس مرجعُ الصلاحيات كلها؛ تقييده من داخل المنصة يُفقدها إدارتها
+  if (target.role === 'president') return c.json({ error: 'لا تُوضع استثناءات على حساب الرئيس' }, 400);
+
+  const b = await c.req.json().catch(() => ({} as any));
+  const incoming: Record<string, any> = (b && typeof b.overrides === 'object' && b.overrides) || {};
+  const currentRows = await c.env.DB.prepare('SELECT perm_key, allowed FROM user_permissions WHERE user_id = ?')
+    .bind(id).all<{ perm_key: string; allowed: number }>();
+  const current: Record<string, boolean> = {};
+  for (const r of currentRows.results) current[r.perm_key] = !!r.allowed;
+  const stmts: D1PreparedStatement[] = [];
+  const kept: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(incoming)) {
+    if (!isPermKey(k)) return c.json({ error: `مفتاح صلاحية غير معروف: ${k}` }, 400);
+    if (v === null || v === undefined) {
+      stmts.push(c.env.DB.prepare('DELETE FROM user_permissions WHERE user_id = ? AND perm_key = ?').bind(id, k));
+      continue;
+    }
+    if (typeof v !== 'boolean') return c.json({ error: 'قيمة الصلاحية يجب أن تكون صحيحة أو خاطئة' }, 400);
+    // ما وافق الأصل لا يُخزَّن: الاستثناء يبقى استثناءً يُقرأ في السجل
+    if (basePerm(target, k) === v) {
+      stmts.push(c.env.DB.prepare('DELETE FROM user_permissions WHERE user_id = ? AND perm_key = ?').bind(id, k));
+      continue;
+    }
+    kept[k] = v;
+    stmts.push(c.env.DB.prepare(
+      `INSERT INTO user_permissions (user_id, perm_key, allowed, granted_by) VALUES (?, ?, ?, ?)
+       ON CONFLICT(user_id, perm_key) DO UPDATE SET allowed = excluded.allowed,
+         granted_by = excluded.granted_by, granted_at = datetime('now')`,
+    ).bind(id, k, v ? 1 : 0, actor.id));
+  }
+  // الاطلاع شرط ما بعده: من لا يرى الوحدة لا يضيف فيها ولا يعدّل ولا يحذف.
+  // نفحص الحاصل النهائي (لا المُرسَل وحده) فلا يمرّ تناقضٌ عبر حفظين متتاليين.
+  const eff: Record<string, boolean> = {};
+  for (const k of PERM_KEYS) {
+    eff[k] = k in incoming
+      ? (incoming[k] === null || incoming[k] === undefined ? basePerm(target, k) : !!incoming[k])
+      : (k in current ? current[k] : basePerm(target, k));
+  }
+  for (const row of PERM_ROWS) {
+    if (eff[`${row.key}.view`] !== false) continue;
+    for (const a of ['add', 'edit', 'delete'] as const) {
+      if (row.actions[a] && eff[`${row.key}.${a}`]) {
+        return c.json({ error: `«${row.actions[a]}» في ${row.label} يحتاج «عرض» — فعّل الاطلاع أولًا` }, 400);
+      }
+    }
+  }
+
+  if (stmts.length) await c.env.DB.batch(stmts);
+  await audit(c.env, {
+    userId: actor.id, action: 'set_user_permissions', entityType: 'user', entityId: id,
+    newValue: { overrides: kept },
+  });
+  return c.json({ ok: true, overrides: kept });
+});
+
 app.delete('/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const actor = c.get('user');
+  if (!canManageUsers(actor, 'delete')) return c.json({ error: 'لا تملك صلاحية حذف المستخدمين' }, 403);
   const target = await loadUserRow(c.env, id);
   if (!target) return c.json({ error: 'المستخدم غير موجود' }, 404);
 

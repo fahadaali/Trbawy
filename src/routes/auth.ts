@@ -77,6 +77,8 @@ app.get('/me', requireAuth, async (c) => {
       stage: u.stage,
       must_change_password: u.must_change_password,
       signature_image: u.signature_image,
+      // استثناءات هذا الحساب — تقرؤها الواجهة لتُخفي ما لا يملكه وتُظهر ما مُنح
+      perms: u.perms || {},
     },
   });
 });

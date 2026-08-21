@@ -17,6 +17,7 @@ import { sanitizeHtml } from '../lib/sanitize';
 import { computeFollowups, getFollowups, freezeFollowups } from '../lib/followups';
 import { assigneesJson } from '../lib/people';
 import { effStatusSql, meetingRefSql, overdueDaysSql } from '../lib/status';
+import { can } from '../permissions';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -113,6 +114,7 @@ async function previewFollowups(env: Env, councilId: number) {
 // ---- قائمة المحاضر (حسب الصلاحية والفلاتر) ----
 app.get('/', async (c) => {
   const u = c.get('user');
+  if (!can(u, 'meetings.view')) return c.json({ error: 'لا تملك صلاحية الاطلاع على المحاضر' }, 403);
   const councilId = c.req.query('council_id');
   const status = c.req.query('status');
   const year = c.req.query('year');
@@ -183,6 +185,7 @@ app.get('/meta/years', async (c) => {
 
 // ---- تفاصيل محضر ----
 app.get('/:id', async (c) => {
+  if (!can(c.get('user'), 'meetings.view')) return c.json({ error: 'لا تملك صلاحية الاطلاع على المحاضر' }, 403);
   const id = Number(c.req.param('id'));
   const m = await c.env.DB.prepare('SELECT * FROM meetings WHERE id = ?').bind(id).first<any>();
   if (!m) return c.json({ error: 'المحضر غير موجود' }, 404);

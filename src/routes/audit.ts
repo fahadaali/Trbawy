@@ -2,13 +2,13 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { isPresident, isAdmin } from '../permissions';
+import { canViewAudit } from '../permissions';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
 app.use('*', async (c, next) => {
   const u = c.get('user');
-  if (!isPresident(u) && !isAdmin(u)) return c.json({ error: 'لا تملك صلاحية الاطلاع على سجل التدقيق' }, 403);
+  if (!canViewAudit(u)) return c.json({ error: 'لا تملك صلاحية الاطلاع على سجل التدقيق' }, 403);
   await next();
 });
 
