@@ -150,36 +150,35 @@ function printStyles(primary: string, font: string): string {
   .watermark { position: fixed; inset: 0; display: grid; place-items: center; opacity: .05; z-index: -1; }
   .watermark img { max-width: 55%; }
 
-  .content { padding: 0 0 2mm; }
-  .content.brk { break-before: page; page-break-before: always; }
-
   /* ---------- تقسيم المحضر أقسامًا، لكل قسم صفحته ----------
      المحضر يُقرأ قسمًا قسمًا لا سيلًا متصلًا: الصفحة الأولى للتعريف ولوحة
      المؤشرات والحضور، ثم جدول الأعمال، ثم متابعة بنود المحاضر السابقة، ثم
      القرارات والمهام الجديدة، ثم التوقيعات — كلٌّ يبدأ من رأس صفحة ويمتدّ إلى
      ما يحتاجه. وداخل القسم يبقى العنوان ملازمًا لجدوله (h2 { break-after: avoid })
-     فلا يقع عنوان في ذيل صفحة وبياناته في التالية. */
+     فلا يقع عنوان في ذيل صفحة وبياناته في التالية.
+     وكل قسم **صفٌّ مستقلّ** في جدول الإطار: صفوف متعدّدة تجعل المحرّك يكرّر صفّ
+     الترويسة على كل صفحة — خلية واحدة عملاقة لا تكفي في بعض المحركات. */
   .sec { break-before: page; page-break-before: always; }
-  .sec > h2:first-child { margin-top: 0; }
-  /* علامة انتهاء القسم: خطّان متلاشيان ومعيّن صغير — سطر واحد لا يزيد صفحة */
-  .sec-end { display: flex; align-items: center; gap: 7px; margin: 9px 0 0;
-    break-inside: avoid; page-break-inside: avoid; }
-  .sec-end::before, .sec-end::after { content: ''; flex: 1; height: 1px; background: ${primary}33; }
-  .sec-end > i { width: 5px; height: 5px; background: ${primary}80; transform: rotate(45deg);
-    border-radius: 1px; display: block; }
-  .sec:last-child .sec-end { display: none; }
   .sec:first-child, .sec.sec-open { break-before: auto; page-break-before: auto; }
+  .sec > td { padding: 0 0 9px; }
+  .sec > td > h2:first-child { margin-top: 0; }
+  /* علامة انتهاء القسم: حدّ سفليّ على صندوق القسم نفسه. زخرفةُ الصندوق لا
+     تُولّد صفحة أبدًا، بخلاف عنصر مستقلّ — وقد دُفع عنصر الفاصل وحده إلى صفحة
+     كاملة فارغة في تصدير حقيقي. */
+  .sec > td { border-bottom: 1.5px solid ${primary}38;
+    border-image: linear-gradient(to left, transparent, ${primary}66 22%, ${primary}66 78%, transparent) 1; }
+  .sec:last-child > td { border-bottom: 0; padding-bottom: 0; }
   /* رأس الجدول يتكرّر على كل صفحة يمتدّ إليها الجدول */
-  .sec > .t-wrap { break-before: avoid; page-break-before: avoid; }
+  .sec > td > .t-wrap { break-before: avoid; page-break-before: avoid; }
 
   /* العناوين */
-  h1 { font-size: 19px; text-align: center; color: ${primary}; margin: 0 0 2px; }
+  h1 { font-size: 18px; text-align: center; color: ${primary}; margin: 0 0 2px; }
   .subnum { text-align: center; font-weight: 700; direction: ltr; color: ${primary};
     background: ${primary}12; border: 1px solid ${primary}33; border-radius: 999px;
-    display: inline-block; padding: 2px 14px; }
+    display: inline-block; padding: 1px 12px; }
   .center { text-align: center; }
   /* عنوان القسم لا يُترك وحده في ذيل صفحة وجدوله في التالية */
-  h2 { font-size: 13px; color: ${primary}; margin: 14px 0 6px; padding: 4px 10px 4px 0;
+  h2 { font-size: 13px; color: ${primary}; margin: 10px 0 5px; padding: 4px 10px 4px 0;
     border-right: 4px solid ${primary}; background: ${primary}0f; border-radius: 0 6px 6px 0;
     break-after: avoid; page-break-after: avoid; break-inside: avoid; }
   h3.sub { font-size: 11.5px; color: #4a5b55; margin: 8px 0 4px; break-after: avoid; page-break-after: avoid; }
@@ -197,9 +196,11 @@ function printStyles(primary: string, font: string): string {
   table.tbl thead { display: table-header-group; }
   table.tbl.fixed { table-layout: fixed; }
   table.tbl tr { break-inside: avoid; page-break-inside: avoid; }
-  .meta { width: 100%; border-collapse: collapse; margin: 8px 0; }
+  .meta { width: 100%; border-collapse: collapse; margin: 7px 0; }
   .meta td, .meta th { border: 1px solid #dbe3e0; padding: 3px 7px; text-align: right; font-size: 11px; }
-  .meta th { background: ${primary}14; color: ${primary}; width: 15%; font-weight: 700; }
+  /* عمود العناوين أوسع: «التاريخ الميلادي» كان يلتفّ سطرين مع خطّ أعرض فيطيل
+     الجدول ويدفع «الحضور» إلى صفحة تالية. */
+  .meta th { background: ${primary}14; color: ${primary}; width: 18%; font-weight: 700; }
 
   /* الشارات */
   .chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 10px;
@@ -228,9 +229,9 @@ function printStyles(primary: string, font: string): string {
     break-inside: avoid; page-break-inside: avoid; }
   /* البطاقات في صف واحد: التفافها إلى سطر ثانٍ كان يدفع «الحضور» إلى صفحة تالية */
   .kpis { display: flex; flex-wrap: nowrap; gap: 6px; }
-  .kpi { flex: 1 1 0; min-width: 0; border: 1px solid #e0e6e3; border-radius: 9px; padding: 6px 4px;
+  .kpi { flex: 1 1 0; min-width: 0; border: 1px solid #e0e6e3; border-radius: 9px; padding: 5px 4px;
     text-align: center; background: #fff; }
-  .kpi-v { font-size: 17px; font-weight: 700; line-height: 1.2; }
+  .kpi-v { font-size: 16px; font-weight: 700; line-height: 1.2; }
   .kpi-l { font-size: 10px; color: #5b6a65; }
   .kpi-s { font-size: 9px; color: #8a9691; }
   .kpi-ok .kpi-v { color: ${C.ok}; }  .kpi-warn .kpi-v { color: ${C.warn}; }
@@ -249,13 +250,13 @@ function printStyles(primary: string, font: string): string {
   .lg-pct { font-weight: 400; color: #8a9691; }
 
   .bars { margin-top: 2px; }
-  .bar-row { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 11px; }
+  .bar-row { display: flex; align-items: center; gap: 6px; margin-bottom: 3px; font-size: 11px; }
   .bar-lbl { width: 58px; color: #4a5b55; }
   .bar-track { flex: 1; height: 9px; background: #eef2f1; border-radius: 5px; overflow: hidden; }
   .bar-fill { display: block; height: 100%; border-radius: 5px; }
   .bar-val { width: 34px; text-align: left; font-weight: 700; }
 
-  .meter { margin-top: 6px; }
+  .meter { margin-top: 4px; }
   .meter-top { display: flex; justify-content: space-between; font-size: 11px; color: #4a5b55; margin-bottom: 3px; }
   .meter-track { display: block; height: 9px; background: #eef2f1; border-radius: 5px; overflow: hidden; }
   .meter-fill { display: block; height: 100%; border-radius: 5px; }
@@ -300,7 +301,7 @@ function printStyles(primary: string, font: string): string {
   .verify { margin-top: 14px; display: flex; align-items: center; gap: 14px; border: 1px solid #e0e6e3;
     border-radius: 10px; padding: 10px; break-inside: avoid; background: #fcfdfd; }
   .verify .txt { font-size: 11px; color: #5b6a65; }
-  .banner { text-align: center; font-weight: 700; margin: 7px 0; padding: 5px 10px; border-radius: 8px; }
+  .banner { text-align: center; font-weight: 700; margin: 6px 0; padding: 4px 10px; border-radius: 8px; }
   .banner-ok { color: ${C.ok}; background: #e7f5ee; border: 1px solid #bfe3d0; }
   .banner-warn { color: ${C.warn}; background: #fdf3e1; border: 1px solid #f0dcb4; }
   .note { font-size: 10px; color: #8a9691; margin: 3px 0 5px; break-after: avoid; page-break-after: avoid; }
@@ -412,7 +413,7 @@ function meetingDashboard(attendees: any[], actions: any[], followups: FollowupR
     </div>
     <div class="panels">
       <div class="panel"><div class="ttl">توزيع الحضور</div>
-        ${donut(attSlices, { centerTop: `${arNum(attRate)}٪`, centerSub: 'نسبة الحضور' })}</div>
+        ${donut(attSlices, { size: 112, centerTop: `${arNum(attRate)}٪`, centerSub: 'نسبة الحضور' })}</div>
       <div class="panel"><div class="ttl">حالة القرارات والتوصيات والمهام</div>
         ${bars(statusRows)}
         ${meter(doneRate, 'إنجاز بنود المتابعة الموثّقة في هذا المحضر')}
@@ -490,8 +491,9 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       <td>${progressCell(a.progress)}</td>
     </tr>`).join('');
 
-  return `<div class="content${brk ? ' brk' : ''}">
-    <section class="sec sec-open">
+  // كل قسم صفٌّ في جدول الإطار. أول صفّ في المحضر المفرد يفتح بلا قطع صفحة،
+  // وفي الحزمة يبدأ كل محضر تالٍ من صفحة جديدة (brk).
+  return `<tr class="sec${brk ? '' : ' sec-open'}"><td>
     <h1>محضر اجتماع ${finalized ? '' : '(مسودة)'}</h1>
     <div class="center"><span class="subnum">${esc(m.display_number)}</span></div>
     ${m.title ? `<p class="center" style="font-weight:700;margin:6px 0 0">${esc(m.title)}</p>` : ''}
@@ -514,16 +516,14 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       ${attendees.filter((a) => !a.is_guest).map((a) => `<tr><td>${esc(a.user_name)}</td><td>${esc(roleAr(a.user_role))}</td><td>${attChip(a.attendance_status)}</td></tr>`).join('')}
       ${guests.map((g) => `<tr><td>${esc(g.guest_name)} ${chip('ضيف', 'info')}</td><td>${esc(g.guest_title || '')}</td><td>${attChip('present')}</td></tr>`).join('')}
     </tbody></table></div>
-    <div class="sec-end"><i></i></div>
-    </section>
+    </td></tr>
 
-    <section class="sec">
+    <tr class="sec"><td>
     <h2>جدول الأعمال والبنود</h2>
     <ol class="agenda">${agenda.map((it) => `<li><b>${esc(it.title)}</b>${it.body ? `<div class="body-rich">${sanitizeHtml(it.body)}</div>` : ''}</li>`).join('') || '<li>—</li>'}</ol>
-    <div class="sec-end"><i></i></div>
-    </section>
+    </td></tr>
 
-    ${followups.length ? `<section class="sec">
+    ${followups.length ? `<tr class="sec"><td>
     <h2>متابعة بنود المحاضر السابقة</h2>
     <p class="note">البند غير المنجَز يُرحَّل إلى المحضر التالي حتى يُنجَز، ثم يظهر ظهورًا أخيرًا للتوثيق.</p>
     <div class="t-wrap"><table class="tbl fixed">
@@ -532,10 +532,9 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       <thead><tr><th>النوع</th><th>الرقم</th><th>البند</th><th>المسؤول</th><th>الاستحقاق</th>
       <th>الحالة</th><th>الإنجاز</th><th>الترحيل</th></tr></thead>
       <tbody>${followupRows}</tbody></table></div>
-    <div class="sec-end"><i></i></div>
-    </section>` : ''}
+    </td></tr>` : ''}
 
-    ${actions.length ? `<section class="sec">
+    ${actions.length ? `<tr class="sec"><td>
     <h2>القرارات والتوصيات والمهام</h2>
     <div class="t-wrap"><table class="tbl fixed">
       <colgroup><col style="width:11%" /><col style="width:11%" /><col style="width:21%" /><col style="width:16%" />
@@ -543,10 +542,9 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       <thead><tr><th>النوع</th><th>الرقم</th><th>البند</th><th>المسؤول</th><th>الأولوية</th>
       <th>الاستحقاق</th><th>الحالة</th><th>الإنجاز</th></tr></thead>
       <tbody>${actionRows}</tbody></table></div>
-    <div class="sec-end"><i></i></div>
-    </section>` : ''}
+    </td></tr>` : ''}
 
-    <section class="sec">
+    <tr class="sec"><td>
     <h2>التوقيعات</h2>
     <div class="t-wrap"><table class="tbl fixed">
       <colgroup><col style="width:26%" /><col style="width:12%" /><col style="width:22%" />
@@ -554,8 +552,7 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       <thead><tr><th>الاسم</th><th>الحالة</th><th>التوقيع</th><th>رمز التحقق</th><th>وقت التوقيع</th></tr></thead>
       <tbody>${signRows}</tbody></table></div>
     ${qr ? `<div class="verify">${qr}<div class="txt"><b>رمز التحقق من صحة المحضر</b><br />امسح الرمز أو افتح:<br /><span dir="ltr">${esc(verifyUrl)}</span></div></div>` : ''}
-    </section>
-  </div>`;
+    </td></tr>`;
 }
 
 const attChip = (s: string) =>
@@ -579,7 +576,7 @@ ${watermark}
     <thead><tr><td>
       <div class="page-head"><span class="org">${esc(settings.header_text || settings.org_name || '')}</span>${logoImg}</div>
     </td></tr></thead>
-    <tbody><tr><td>${bodies}</td></tr></tbody>
+    <tbody>${bodies}</tbody>
     <tfoot><tr><td>
       <div class="page-foot"><span>${esc(settings.footer_text || settings.org_name || '')}</span><span class="doc" dir="ltr">${esc(footerRight)}</span></div>
     </td></tr></tfoot>
@@ -646,7 +643,7 @@ export async function renderBundleHtml(
   ).bind(councilId, from, to).all()).results as any[];
 
   if (!meetings.length) {
-    return shell(settings, primary, 'حزمة محاضر', `<div class="content"><h1>حزمة محاضر</h1><p class="center muted">لا توجد محاضر معتمدة في هذه الفترة.</p></div>`, logoUri, wmUri);
+    return shell(settings, primary, 'حزمة محاضر', `<tr class="sec sec-open"><td><h1>حزمة محاضر</h1><p class="center muted">لا توجد محاضر معتمدة في هذه الفترة.</p></td></tr>`, logoUri, wmUri);
   }
   const blocks: string[] = [];
   for (let i = 0; i < meetings.length; i++) blocks.push(await meetingContentBlock(env, meetings[i], origin, i > 0));
@@ -701,7 +698,7 @@ export async function renderStudentReportHtml(
     ? `<div class="banner" style="color:${C.bad};background:#fdecea;border:1px solid #f5c9c2">تنبيه: أداء متدنٍّ (أقل من ٣)</div>`
     : alert === 'declining' ? `<div class="banner banner-warn">تنبيه: تراجع عن الدورة السابقة</div>` : '';
 
-  const body = `<div class="content">
+  const body = `<tr class="sec sec-open"><td>
     <h1>بطاقة تقرير الطالب</h1>
     <div class="center"><span class="subnum">${esc(student.name)}</span></div>
     ${alertHtml}
@@ -722,7 +719,7 @@ export async function renderStudentReportHtml(
     <div class="t-wrap"><table class="tbl"><thead><tr><th>الدورة</th><th>نتيجته</th><th>متوسط صفه</th><th>متوسط مرحلته</th></tr></thead>
       <tbody>${rows || '<tr><td colspan="4">لا توجد نتائج منشورة</td></tr>'}</tbody></table></div>
     ${student.notes ? `<h2>ملاحظات</h2><p>${esc(student.notes)}</p>` : ''}
-  </div>`;
+  </td></tr>`;
 
   return shell(settings, primary, `تقرير: ${student.name}`, body, logoUri, wmUri);
 }
