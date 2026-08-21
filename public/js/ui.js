@@ -650,7 +650,7 @@ function closeMobileSearchOutside(e) {
 
 // ---------- تطبيق الشاشة الرئيسية (PWA) ----------
 const isIOS = () => /iPad|iPhone|iPod/.test(navigator.userAgent)
-  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);   // آيباد بواجهة سطح مكتب
+  || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);   // iPad بواجهة سطح مكتب
 const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
 
 let deferredInstall = null;
@@ -658,7 +658,7 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); defe
 
 /**
  * دعوة لتثبيت التطبيق على الشاشة الرئيسية.
- * آيفون لا يدعم beforeinstallprompt، فنعرض له خطوات المشاركة؛ وغيره يُثبَّت بضغطة.
+ * iPhone لا يدعم beforeinstallprompt، فنعرض له خطوات المشاركة؛ وغيره يُثبَّت بضغطة.
  * تظهر مرة واحدة ثم تُحفظ الاستجابة محليًا.
  */
 // البطاقة العائمة تحجب جزءًا من الشاشة، فتظهر على الصفحة الرئيسية وحدها
@@ -682,7 +682,7 @@ function maybeShowInstallCard() {
     <div class="ic">${icon('addbox', 22)}</div>
     <div class="tx"><b>ثبّت المنصة على شاشتك الرئيسية</b>
       ${ios
-        ? 'افتح قائمة <b style="display:inline">المشاركة</b> في سفل سفاري ثم اختر «إضافة إلى الشاشة الرئيسية».'
+        ? 'افتح قائمة <b style="display:inline">المشاركة</b> في سفل Safari ثم اختر «إضافة إلى الشاشة الرئيسية».'
         : 'تفتح كتطبيق مستقل وتعمل أسرع، وتصلك إشعاراتها من الشاشة الرئيسية.'}
       ${!ios ? '<div style="margin-top:8px"><button class="btn btn-sm" id="a2hsGo">تثبيت الآن</button></div>' : ''}
     </div>
@@ -700,7 +700,7 @@ function maybeShowInstallCard() {
 
 /**
  * دعوة لتفعيل الإشعارات داخل التطبيق المثبَّت.
- * على آيفون لا تُمنح الإشعارات إلا للتطبيق المضاف للشاشة الرئيسية، فبعد التثبيت
+ * على iPhone لا تُمنح الإشعارات إلا للتطبيق المضاف للشاشة الرئيسية، فبعد التثبيت
  * لا شيء يُذكّر المستخدم بتفعيلها — هذه البطاقة هي التذكير، وتظهر مرة واحدة.
  */
 function maybeShowPushCard() {
@@ -964,15 +964,15 @@ const PullRefresh = {
 // إشعارات الدفع على الجهاز (متصفح الجوال وتطبيق الشاشة الرئيسية)
 // ============================================================
 //
-// قاعدة آيفون: iOS لا يمنح إذن الإشعارات لصفحة في سفاري — يمنحه فقط للتطبيق
-// المضاف إلى الشاشة الرئيسية (iOS 16.4 فأحدث). لذلك نُرشد مستخدم آيفون للتثبيت
+// قاعدة iPhone: iOS لا يمنح إذن الإشعارات لصفحة في Safari — يمنحه فقط للتطبيق
+// المضاف إلى الشاشة الرئيسية (iOS 16.4 فأحدث). لذلك نُرشد مستخدم iPhone للتثبيت
 // أولًا بدل عرض زر لا يعمل.
 
 const Push = {
   supported() {
     return 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
   },
-  // آيفون في سفاري (غير مثبَّت): الإشعارات غير متاحة حتى يُضاف للشاشة الرئيسية
+  // iPhone في Safari (غير مثبَّت): الإشعارات غير متاحة حتى يُضاف للشاشة الرئيسية
   iosNeedsInstall() { return isIOS() && !isStandalone(); },
   permission() { return ('Notification' in window) ? Notification.permission : 'default'; },
 
@@ -1003,7 +1003,7 @@ const Push = {
   /** تفعيل الإشعارات — يجب استدعاؤها من نقرة مستخدم (شرط iOS و Safari). */
   async enable() {
     if (!this.supported()) throw new Error('هذا المتصفح لا يدعم إشعارات الدفع');
-    if (this.iosNeedsInstall()) throw new Error('على آيفون: أضف المنصة إلى الشاشة الرئيسية أولًا ثم فعّل الإشعارات من داخل التطبيق');
+    if (this.iosNeedsInstall()) throw new Error('على iPhone: أضف المنصة إلى الشاشة الرئيسية أولًا ثم فعّل الإشعارات من داخل التطبيق');
     const perm = await Notification.requestPermission();
     if (perm !== 'granted') throw new Error('لم يُمنح إذن الإشعارات لهذا الجهاز');
 

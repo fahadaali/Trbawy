@@ -37,7 +37,7 @@ input, select, textarea { font-family: inherit; font-size: 15px; }
 /* ---------- تسجيل الدخول ---------- */
 .auth-wrap {
   min-height: 100vh;
-  min-height: 100dvh;                  /* سفاري الجوال: الارتفاع المرئي فعلًا */
+  min-height: 100dvh;                  /* Safari على الجوال: الارتفاع المرئي فعلًا */
   display: grid;
   place-items: center;
   background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
@@ -473,7 +473,7 @@ table.tbl tr:hover td { background: #fafbfb; }
    أو يمرَّر داخل حاويته وحدها، لا أن يجرّ الصفحة كلها.
    ============================================================ */
 
-/* مناطق الأمان في آيفون (الشقّ العلوي وشريط الإيماءة السفلي) */
+/* مناطق الأمان في iPhone (الشقّ العلوي وشريط الإيماءة السفلي) */
 :root {
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
@@ -572,7 +572,7 @@ body { overflow-x: hidden; }
   .modal-foot { position: sticky; bottom: 0; background: var(--surface); flex-wrap: wrap; }
   .modal-foot .btn, .modal-foot .btn-ghost, .modal-foot .btn-danger { flex: 1 1 auto; }
 
-  /* الحقول: ١٦ بكسل فأعلى وإلا كبّر آيفون الصفحة عند التركيز */
+  /* الحقول: ١٦ بكسل فأعلى وإلا كبّر iPhone الصفحة عند التركيز */
   .field input:not([type="checkbox"]):not([type="radio"]), .field select, .field textarea,
   input[type="text"], input[type="email"], input[type="password"], input[type="number"],
   input[type="date"], input[type="search"], select, textarea {
@@ -641,7 +641,7 @@ body { overflow-x: hidden; }
   .topbar h2 { font-size: 15px; }
 }
 
-/* في وضع التطبيق المستقل (شاشة الآيفون الرئيسية) لا يوجد شريط متصفح */
+/* في وضع التطبيق المستقل (شاشة iPhone الرئيسية) لا يوجد شريط متصفح */
 html.standalone .topbar { padding-top: calc(10px + var(--safe-t)); }
 html.standalone body { overscroll-behavior-y: none; }
 /* تحديثُ المتصفح المدمج بالسحب لا يزاحم تحديثنا: contain تمنع تسلسل التمرير إلى

@@ -455,7 +455,7 @@ async function renderPushCard() {
     off: ['tag-gold', 'الإشعارات غير مفعّلة على هذا الجهاز.'],
     denied: ['tag-red', 'حجبتَ الإشعارات لهذا الموقع. فعّلها من إعدادات المتصفح (إعدادات الموقع ← الإشعارات) ثم أعد المحاولة.'],
     unsupported: ['tag-gray', 'هذا المتصفح لا يدعم إشعارات الدفع.'],
-    'ios-install': ['tag-gold', 'على آيفون تصل الإشعارات للتطبيق المضاف إلى الشاشة الرئيسية فقط: افتح قائمة المشاركة في سفاري ← «إضافة إلى الشاشة الرئيسية»، ثم افتح التطبيق من الأيقونة وفعّل الإشعارات من هنا.'],
+    'ios-install': ['tag-gold', 'على iPhone تصل الإشعارات للتطبيق المضاف إلى الشاشة الرئيسية فقط: افتح قائمة المشاركة في Safari ← «إضافة إلى الشاشة الرئيسية»، ثم افتح التطبيق من الأيقونة وفعّل الإشعارات من هنا.'],
   }[st.state] || ['tag-gray', ''];
 
   const devRows = devices.map((d) => `<tr>
@@ -527,10 +527,13 @@ async function renderPushCard() {
 // اسم مقروء للجهاز من ترويسة المتصفح
 function deviceName(ua) {
   const s = String(ua || '');
-  const os = /iPhone/.test(s) ? 'آيفون' : /iPad/.test(s) ? 'آيباد' : /Android/.test(s) ? 'أندرويد'
-    : /Mac OS X/.test(s) ? 'ماك' : /Windows/.test(s) ? 'ويندوز' : /Linux/.test(s) ? 'لينكس' : 'جهاز';
-  const br = /CriOS|Chrome/.test(s) ? 'كروم' : /FxiOS|Firefox/.test(s) ? 'فايرفوكس'
-    : /Edg/.test(s) ? 'إيدج' : /Safari/.test(s) ? 'سفاري' : '';
+  const os = /iPhone/.test(s) ? 'iPhone' : /iPad/.test(s) ? 'iPad' : /Android/.test(s) ? 'Android'
+    : /Mac OS X/.test(s) ? 'Mac' : /Windows/.test(s) ? 'Windows' : /Linux/.test(s) ? 'Linux' : 'جهاز';
+  // الترتيب مقصود: ترويسة Edge وOpera تذكران Chrome أيضًا، فالفحص عنهما أولًا
+  // وإلا سُمّي كل متصفح مبنيّ على Chromium «Chrome».
+  const br = /Edg\//.test(s) ? 'Edge' : /OPR\//.test(s) ? 'Opera'
+    : /CriOS|Chrome/.test(s) ? 'Chrome' : /FxiOS|Firefox/.test(s) ? 'Firefox'
+      : /Safari/.test(s) ? 'Safari' : '';
   return br ? `${os} · ${br}` : os;
 }
 
@@ -543,7 +546,7 @@ async function renderPushRow(box) {
     off: ['فعّل إشعارات هذا الجهاز', 'تفعيل'],
     denied: ['الإشعارات محجوبة من إعدادات المتصفح', ''],
     unsupported: ['هذا المتصفح لا يدعم إشعارات الدفع', ''],
-    'ios-install': ['على آيفون: أضف المنصة إلى الشاشة الرئيسية لتفعيل الإشعارات', ''],
+    'ios-install': ['على iPhone: أضف المنصة إلى الشاشة الرئيسية لتفعيل الإشعارات', ''],
   };
   const [label, btn] = texts[st.state] || texts.off;
   box.innerHTML = `<div style="display:flex;align-items:center;gap:8px">
@@ -1287,8 +1290,8 @@ async function loadSessions() {
 // اسم مختصر للمتصفح/النظام من ترويسة user-agent
 function shortUa(ua) {
   if (!ua) return '—';
-  const os = /Android/i.test(ua) ? 'أندرويد' : /iPhone|iPad|iOS/i.test(ua) ? 'iOS'
-    : /Windows/i.test(ua) ? 'ويندوز' : /Mac OS/i.test(ua) ? 'ماك' : /Linux/i.test(ua) ? 'لينكس' : '';
+  const os = /Android/i.test(ua) ? 'Android' : /iPhone|iPad|iOS/i.test(ua) ? 'iOS'
+    : /Windows/i.test(ua) ? 'Windows' : /Mac OS/i.test(ua) ? 'Mac' : /Linux/i.test(ua) ? 'Linux' : '';
   const br = /Edg\//i.test(ua) ? 'Edge' : /OPR\//i.test(ua) ? 'Opera' : /Chrome\//i.test(ua) ? 'Chrome'
     : /Firefox\//i.test(ua) ? 'Firefox' : /Safari\//i.test(ua) ? 'Safari' : '';
   // تعذّر التعرّف (أداة سطر أوامر مثلاً): نعرض الترويسة مختصرة كما هي
