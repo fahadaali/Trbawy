@@ -1,10 +1,11 @@
 // توليد صفحات المحاضر القابلة للطباعة/التصدير (HTML عربي RTL مع الهوية البصرية ورمز QR).
 // يدعم: محضراً واحداً، وحزمة محاضر فترة في ملف واحد، وصفحة التحقق العامة.
 //
-// تخطيط الصفحة المطبوعة: الترويسة والتذييل عنصران ثابتان (position: fixed) يتكرّران
-// على كل صفحة، والمحتوى داخل جدول إطار يحمل صفَّي حجز (thead/tfoot) فارغين يحجزان
-// ارتفاعهما في **كل** صفحة — وهذا ما يمنع تسلّل النص فوق الترويسة في الصفحات التالية
-// (الحشو العلوي وحده يسري على الصفحة الأولى فقط).
+// تخطيط الصفحة المطبوعة: المحتوى داخل «جدول إطار» ترويسته صفّ thead وتذييله صفّ
+// tfoot، فيتكرّران على كل صفحة بآلية الجداول — وهي الآلية الوحيدة التي تحترمها كل
+// المتصفحات في الطباعة، وتحجز مكانهما حقًّا فلا يعلو النص الترويسة.
+// (كانا position: fixed: كروم يكرّرهما على كل صفحة، وسفاري يرسمهما مرة واحدة في وسط
+// المحتوى فيحجبان صفوفًا من الجدول — وهو ما وقع في تصدير حقيقي.)
 //
 // ملاحظة: counter(page) لا يُحتسب خارج صناديق @page في Chrome وFirefox (يطبع صفرًا)،
 // فالتذييل يحمل رقم المحضر — وهو المعرّف المطلوب تكراره على كل صفحة — ومن أراد ترقيم
@@ -127,24 +128,29 @@ function printStyles(primary: string, font: string): string {
      معايَرة على عرض A4 حتى لا يقع ذلك أصلًا. */
   @page { size: A4; margin: 12mm 14mm 14mm 14mm; }
 
-  /* إطار الصفحة: صفّا الحجز يحفظان مكان الترويسة والتذييل في كل صفحة */
-  /* الإطار مثبَّت العرض: وإلا وسّعه أعرض محتوى بداخله فطفح الجدول خارج هوامش الصفحة */
+  /* إطار الصفحة: الترويسة في thead والتذييل في tfoot — فيتكرّران على كل صفحة
+     بآلية الجداول نفسها، وهي الآلية الوحيدة التي تحترمها كل المتصفحات في الطباعة.
+     (كانا عنصرين ثابتين position:fixed: كروم يكرّرهما، وسفاري يرسمهما مرة واحدة
+     في وسط المحتوى فيحجبان صفوفًا من الجدول — وهو ما وقع فعلًا في التصدير.)
+     الإطار مثبَّت العرض: وإلا وسّعه أعرض محتوى بداخله فطفح الجدول خارج الهوامش. */
   .frame { width: 100%; table-layout: fixed; border-collapse: collapse; }
   .frame > thead > tr > td, .frame > tbody > tr > td, .frame > tfoot > tr > td { border: 0; padding: 0; }
-  .sp-h { height: 21mm; } .sp-f { height: 15mm; }
+  .frame > thead { display: table-header-group; }
+  .frame > tfoot { display: table-footer-group; }
 
   .page-head { display: flex; align-items: center; justify-content: space-between;
-    border-bottom: 2.5px solid ${primary}; padding: 3mm 0 2mm; background: #fff; }
+    border-bottom: 2.5px solid ${primary}; padding: 1mm 0 1.5mm; margin-bottom: 2.5mm; background: #fff; }
   .page-head .org { font-weight: 700; color: ${primary}; font-size: 13.5px; }
-  .page-head .logo { height: 14mm; max-width: 46mm; object-fit: contain; }
+  .page-head .logo { height: 11mm; max-width: 40mm; object-fit: contain; }
   .page-foot { display: flex; align-items: center; justify-content: space-between;
-    border-top: 1px solid #dfe6e3; font-size: 10px; color: #6b7a75; padding-top: 2mm; background: #fff; }
+    border-top: 1px solid #dfe6e3; font-size: 10px; color: #6b7a75;
+    padding-top: 1.5mm; margin-top: 2.5mm; background: #fff; }
   .page-foot .doc { font-weight: 700; color: #4a5b55; }
 
   .watermark { position: fixed; inset: 0; display: grid; place-items: center; opacity: .05; z-index: -1; }
   .watermark img { max-width: 55%; }
 
-  .content { padding: 2mm 0 4mm; }
+  .content { padding: 0 0 2mm; }
   .content.brk { break-before: page; page-break-before: always; }
 
   /* ---------- تقسيم المحضر أقسامًا، لكل قسم صفحته ----------
@@ -155,12 +161,19 @@ function printStyles(primary: string, font: string): string {
      فلا يقع عنوان في ذيل صفحة وبياناته في التالية. */
   .sec { break-before: page; page-break-before: always; }
   .sec > h2:first-child { margin-top: 0; }
+  /* علامة انتهاء القسم: خطّان متلاشيان ومعيّن صغير — سطر واحد لا يزيد صفحة */
+  .sec-end { display: flex; align-items: center; gap: 7px; margin: 9px 0 0;
+    break-inside: avoid; page-break-inside: avoid; }
+  .sec-end::before, .sec-end::after { content: ''; flex: 1; height: 1px; background: ${primary}33; }
+  .sec-end > i { width: 5px; height: 5px; background: ${primary}80; transform: rotate(45deg);
+    border-radius: 1px; display: block; }
+  .sec:last-child .sec-end { display: none; }
   .sec:first-child, .sec.sec-open { break-before: auto; page-break-before: auto; }
   /* رأس الجدول يتكرّر على كل صفحة يمتدّ إليها الجدول */
   .sec > .t-wrap { break-before: avoid; page-break-before: avoid; }
 
   /* العناوين */
-  h1 { font-size: 19px; text-align: center; color: ${primary}; margin: 4px 0 2px; }
+  h1 { font-size: 19px; text-align: center; color: ${primary}; margin: 0 0 2px; }
   .subnum { text-align: center; font-weight: 700; direction: ltr; color: ${primary};
     background: ${primary}12; border: 1px solid ${primary}33; border-radius: 999px;
     display: inline-block; padding: 2px 14px; }
@@ -176,7 +189,7 @@ function printStyles(primary: string, font: string): string {
   table.tbl th, table.tbl td { border: 1px solid #dbe3e0; padding: 4px 6px; text-align: right;
     font-size: 11px; vertical-align: middle; }
   /* عنوان العمود كلمة اصطلاحية: يلتفّ عند المسافات ولا يُقصّ في منتصف الكلمة */
-  table.tbl th { background: ${primary}; color: #fff; font-weight: 700; font-size: 10.5px;
+  table.tbl th { background: ${primary}; color: #fff; font-weight: 700; font-size: 10px;
     overflow-wrap: normal; hyphens: none; }
   table.tbl tbody tr:nth-child(even) td { background: #f7faf9; }
   table.tbl tbody tr.row-bad td { background: #fdf1ef; }
@@ -184,8 +197,8 @@ function printStyles(primary: string, font: string): string {
   table.tbl thead { display: table-header-group; }
   table.tbl.fixed { table-layout: fixed; }
   table.tbl tr { break-inside: avoid; page-break-inside: avoid; }
-  .meta { width: 100%; border-collapse: collapse; margin: 10px 0; }
-  .meta td, .meta th { border: 1px solid #dbe3e0; padding: 4px 8px; text-align: right; font-size: 11px; }
+  .meta { width: 100%; border-collapse: collapse; margin: 8px 0; }
+  .meta td, .meta th { border: 1px solid #dbe3e0; padding: 3px 7px; text-align: right; font-size: 11px; }
   .meta th { background: ${primary}14; color: ${primary}; width: 15%; font-weight: 700; }
 
   /* الشارات */
@@ -211,17 +224,18 @@ function printStyles(primary: string, font: string): string {
     overflow-wrap: break-word; }
 
   /* لوحة المؤشرات */
-  .dash { border: 1px solid #e0e6e3; border-radius: 10px; padding: 10px 12px; background: #fcfdfd;
+  .dash { border: 1px solid #e0e6e3; border-radius: 10px; padding: 8px 10px; background: #fcfdfd;
     break-inside: avoid; page-break-inside: avoid; }
-  .kpis { display: flex; flex-wrap: wrap; gap: 8px; }
-  .kpi { flex: 1 1 88px; border: 1px solid #e0e6e3; border-radius: 9px; padding: 7px 6px;
+  /* البطاقات في صف واحد: التفافها إلى سطر ثانٍ كان يدفع «الحضور» إلى صفحة تالية */
+  .kpis { display: flex; flex-wrap: nowrap; gap: 6px; }
+  .kpi { flex: 1 1 0; min-width: 0; border: 1px solid #e0e6e3; border-radius: 9px; padding: 6px 4px;
     text-align: center; background: #fff; }
   .kpi-v { font-size: 17px; font-weight: 700; line-height: 1.2; }
   .kpi-l { font-size: 10px; color: #5b6a65; }
   .kpi-s { font-size: 9px; color: #8a9691; }
   .kpi-ok .kpi-v { color: ${C.ok}; }  .kpi-warn .kpi-v { color: ${C.warn}; }
   .kpi-bad .kpi-v { color: ${C.bad}; } .kpi-neutral .kpi-v { color: ${primary}; }
-  .panels { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
+  .panels { display: flex; gap: 10px; margin-top: 8px; flex-wrap: wrap; }
   .panel { flex: 1 1 220px; border: 1px solid #e8edeb; border-radius: 9px; padding: 8px 10px; background: #fff; }
   .panel > .ttl { font-size: 11px; font-weight: 700; color: #4a5b55; margin-bottom: 6px; }
 
@@ -271,29 +285,29 @@ function printStyles(primary: string, font: string): string {
   table.tbl.fixed td .num { white-space: normal; overflow-wrap: anywhere; font-size: 10.5px; }
   /* رقم البند مزيج عربي/أرقام: الخط أحادي العرض يبالغ في عرض الحروف العربية
      فيكسر الرقم سطرين في عمود ضيّق — خط المتن يسعه في سطر واحد. */
-  table.tbl.fixed td.code { font-family: '${font}', Tahoma, sans-serif; font-size: 10.5px; }
+  table.tbl.fixed td.code { font-family: '${font}', Tahoma, sans-serif; font-size: 10px; }
   table.tbl td .chip, table.tbl th .chip { font-size: 9.5px; padding: 1px 5px; max-width: 100%;
     white-space: normal; vertical-align: middle; }
-  table.tbl td, table.tbl th { word-break: normal; overflow-wrap: break-word; }
+  table.tbl td { word-break: normal; overflow-wrap: break-word; }
+  /* عنوان العمود يلتفّ عند المسافات فقط ولا يُقصّ في منتصف الكلمة. هذه القاعدة
+     **بعد** قاعدة الخلايا عمدًا: هي مساوية لها في الأولوية، والمتأخّرة تغلب. */
+  table.tbl th { word-break: keep-all; overflow-wrap: normal; hyphens: none; }
+  /* الشارة كلمة واحدة قصيرة: لا تُكسر في منتصفها، والأعمدة معايَرة لتسعها */
+  table.tbl td .chip, table.tbl th .chip, .who { word-break: keep-all; overflow-wrap: normal; }
   /* حاجز أخير: لو طفح محتوى غير متوقّع رغم ما سبق، يُقتطع عند حدّ الخلية ولا يتداخل مع جارتها */
   table.tbl.fixed td, table.tbl.fixed th { overflow: hidden; padding: 4px 5px; }
   .ov { color: ${C.warn}; font-weight: 700; } .muted { color: #8a9691; }
   .verify { margin-top: 14px; display: flex; align-items: center; gap: 14px; border: 1px solid #e0e6e3;
     border-radius: 10px; padding: 10px; break-inside: avoid; background: #fcfdfd; }
   .verify .txt { font-size: 11px; color: #5b6a65; }
-  .banner { text-align: center; font-weight: 700; margin: 8px 0; padding: 6px 10px; border-radius: 8px; }
+  .banner { text-align: center; font-weight: 700; margin: 7px 0; padding: 5px 10px; border-radius: 8px; }
   .banner-ok { color: ${C.ok}; background: #e7f5ee; border: 1px solid #bfe3d0; }
   .banner-warn { color: ${C.warn}; background: #fdf3e1; border: 1px solid #f0dcb4; }
   .note { font-size: 10px; color: #8a9691; margin: 3px 0 5px; break-after: avoid; page-break-after: avoid; }
 
-  @media print {
-    .page-head { position: fixed; top: 0; left: 0; right: 0; height: 19mm; }
-    .page-foot { position: fixed; bottom: 0; left: 0; right: 0; height: 13mm; }
-  }
   @media screen {
     body { background: #eceff0; padding: 16px 0; }
-    .sp-h, .sp-f { display: none; }
-    .sheet { background: #fff; max-width: 820px; margin: 0 auto; padding: 22mm 16mm;
+    .sheet { background: #fff; max-width: 820px; margin: 0 auto; padding: 18mm 16mm;
       box-shadow: 0 2px 22px rgba(0,0,0,.14); border-radius: 4px; }
   }
 
@@ -307,7 +321,9 @@ function printStyles(primary: string, font: string): string {
     .t-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; margin-inline: -4px; padding-inline: 4px; }
     .t-wrap table.tbl { min-width: 640px; }
     .meta th { width: auto; }
-    .kpi { flex-basis: calc(50% - 8px); }
+    /* على الجوال يعود الالتفاف: صفٌّ واحد من ستّ بطاقات يعصر نصّها */
+    .kpis { flex-wrap: wrap; }
+    .kpi { flex: 1 1 calc(50% - 6px); }
     .panel { flex-basis: 100%; }
     .verify { flex-direction: column; text-align: center; }
     .page-head .logo { height: 11mm; }
@@ -498,32 +514,36 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
       ${attendees.filter((a) => !a.is_guest).map((a) => `<tr><td>${esc(a.user_name)}</td><td>${esc(roleAr(a.user_role))}</td><td>${attChip(a.attendance_status)}</td></tr>`).join('')}
       ${guests.map((g) => `<tr><td>${esc(g.guest_name)} ${chip('ضيف', 'info')}</td><td>${esc(g.guest_title || '')}</td><td>${attChip('present')}</td></tr>`).join('')}
     </tbody></table></div>
+    <div class="sec-end"><i></i></div>
     </section>
 
     <section class="sec">
     <h2>جدول الأعمال والبنود</h2>
     <ol class="agenda">${agenda.map((it) => `<li><b>${esc(it.title)}</b>${it.body ? `<div class="body-rich">${sanitizeHtml(it.body)}</div>` : ''}</li>`).join('') || '<li>—</li>'}</ol>
+    <div class="sec-end"><i></i></div>
     </section>
 
     ${followups.length ? `<section class="sec">
     <h2>متابعة بنود المحاضر السابقة</h2>
     <p class="note">البند غير المنجَز يُرحَّل إلى المحضر التالي حتى يُنجَز، ثم يظهر ظهورًا أخيرًا للتوثيق.</p>
     <div class="t-wrap"><table class="tbl fixed">
-      <colgroup><col style="width:8%" /><col style="width:11%" /><col style="width:22%" /><col style="width:15%" />
-        <col style="width:11%" /><col style="width:15%" /><col style="width:7%" /><col style="width:11%" /></colgroup>
-      <thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الاستحقاق</th>
-      <th>الحالة والالتزام</th><th>الإنجاز</th><th>الترحيل</th></tr></thead>
+      <colgroup><col style="width:11%" /><col style="width:11%" /><col style="width:19%" /><col style="width:15%" />
+        <col style="width:12%" /><col style="width:14%" /><col style="width:8%" /><col style="width:10%" /></colgroup>
+      <thead><tr><th>النوع</th><th>الرقم</th><th>البند</th><th>المسؤول</th><th>الاستحقاق</th>
+      <th>الحالة</th><th>الإنجاز</th><th>الترحيل</th></tr></thead>
       <tbody>${followupRows}</tbody></table></div>
+    <div class="sec-end"><i></i></div>
     </section>` : ''}
 
     ${actions.length ? `<section class="sec">
     <h2>القرارات والتوصيات والمهام</h2>
     <div class="t-wrap"><table class="tbl fixed">
-      <colgroup><col style="width:8%" /><col style="width:11%" /><col style="width:25%" /><col style="width:18%" />
-        <col style="width:9%" /><col style="width:11%" /><col style="width:11%" /><col style="width:7%" /></colgroup>
-      <thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الأولوية</th>
+      <colgroup><col style="width:11%" /><col style="width:11%" /><col style="width:21%" /><col style="width:16%" />
+        <col style="width:10%" /><col style="width:12%" /><col style="width:11%" /><col style="width:8%" /></colgroup>
+      <thead><tr><th>النوع</th><th>الرقم</th><th>البند</th><th>المسؤول</th><th>الأولوية</th>
       <th>الاستحقاق</th><th>الحالة</th><th>الإنجاز</th></tr></thead>
       <tbody>${actionRows}</tbody></table></div>
+    <div class="sec-end"><i></i></div>
     </section>` : ''}
 
     <section class="sec">
@@ -553,14 +573,17 @@ function shell(settings: any, primary: string, footerRight: string, bodies: stri
 <style>${printStyles(primary, font)}${extraCss}</style></head><body>
 ${watermark}
 <div class="sheet">
-  <div class="page-head"><span class="org">${esc(settings.header_text || settings.org_name || '')}</span>${logoImg}</div>
+  <!-- الترويسة صفّ thead والتذييل صفّ tfoot: يتكرّران على كل صفحة مطبوعة بآلية
+       الجداول، فيحجزان مكانهما حقًّا ولا يمكن أن يحجبا محتوى. -->
   <table class="frame">
-    <thead><tr><td><div class="sp-h"></div></td></tr></thead>
+    <thead><tr><td>
+      <div class="page-head"><span class="org">${esc(settings.header_text || settings.org_name || '')}</span>${logoImg}</div>
+    </td></tr></thead>
     <tbody><tr><td>${bodies}</td></tr></tbody>
-    <tfoot><tr><td><div class="sp-f"></div></td></tr></tfoot>
+    <tfoot><tr><td>
+      <div class="page-foot"><span>${esc(settings.footer_text || settings.org_name || '')}</span><span class="doc" dir="ltr">${esc(footerRight)}</span></div>
+    </td></tr></tfoot>
   </table>
-  <!-- التذييل بعد المحتوى ليقع أسفل الصفحة على الشاشة، ويثبت في كل صفحة عند الطباعة -->
-  <div class="page-foot"><span>${esc(settings.footer_text || settings.org_name || '')}</span><span class="doc" dir="ltr">${esc(footerRight)}</span></div>
 </div>
 <div class="pactions">
   <button type="button" class="prim" id="btnPrint">${esc('طباعة / حفظ PDF')}</button>

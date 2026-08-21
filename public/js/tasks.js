@@ -67,7 +67,7 @@ async function loadAll() {
 
 function taskTable(actions, allowComplete) {
   return `<table class="tbl">
-    <thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الأولوية</th><th>الاستحقاق</th>
+    <thead><tr><th>النوع</th><th>الرقم</th><th>البند</th><th>المسؤول</th><th>الأولوية</th><th>الاستحقاق</th>
       <th>الحالة</th><th>الإنجاز</th><th>الالتزام بالموعد</th><th></th></tr></thead>
     <tbody>${actions.map((a) => `<tr>
       <td>${esc(ACTION_TYPE_AR[a.type] || a.type)}</td>
@@ -108,7 +108,7 @@ async function loadPerformance() {
 
   const stalledHtml = (d.stalled && d.stalled.length) ? `
     <div class="card mt"><div class="card-head"><h3>أكثر البنود تعثّرًا</h3></div>
-      <table class="tbl"><thead><tr><th>الرقم</th><th>النص</th><th>المسؤول</th><th>المحضر</th>
+      <table class="tbl"><thead><tr><th>الرقم</th><th>البند</th><th>المسؤول</th><th>المحضر</th>
         <th>الاستحقاق</th><th>التأخر</th><th>مرات الترحيل</th><th>الإنجاز</th></tr></thead>
       <tbody>${d.stalled.map((a) => `<tr>
         <td dir="ltr" style="text-align:right">${esc(a.display_number)}</td>

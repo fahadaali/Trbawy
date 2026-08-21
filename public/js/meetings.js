@@ -258,7 +258,7 @@ async function meetingDetail(id) {
     <div class="card mt"><div class="card-head"><h3>جدول المتابعة (بنود المحاضر السابقة)</h3>
       <div class="spacer"></div>
       <span class="legend-note">${locked ? 'لقطة مجمّدة وقت الاعتماد' : 'البند غير المنجَز يُرحَّل حتى يُنجَز، ثم يظهر مرة أخيرة للتوثيق'}</span></div>
-      <table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th><th>الاستحقاق</th>
+      <table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>البند</th><th>المسؤول</th><th>الاستحقاق</th>
         <th>الحالة</th><th>الإنجاز</th><th>الالتزام بالموعد</th><th>الترحيل</th>${p.can_edit ? '<th></th>' : ''}</tr></thead>
       <tbody>${d.followups.map((f) => `<tr>
         <td>${esc(ACTION_TYPE_AR[f.type] || f.type)}</td>
@@ -862,7 +862,7 @@ function renderActionsSection(meetingId, d, canEdit) {
   const render = () => {
     const rows = d.actions || [];
     box.innerHTML = `
-      ${rows.length ? `<table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>النص</th><th>المسؤول</th>
+      ${rows.length ? `<table class="tbl"><thead><tr><th>النوع</th><th>الرقم</th><th>البند</th><th>المسؤول</th>
           <th>الأولوية</th><th>الاستحقاق</th><th>الحالة</th><th>الإنجاز</th><th></th></tr></thead>
         <tbody>${rows.map((a) => `<tr><td>${esc(ACTION_TYPE_AR[a.type] || a.type)}</td><td dir="ltr" style="text-align:right">${esc(a.display_number)}</td><td>${esc(a.text)}</td>
           <td>${personChips(a.assignees)}</td>
