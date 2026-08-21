@@ -252,7 +252,7 @@ function renderShell(view, rest) {
             <div id="gsResults" class="gsearch-results" style="display:none"></div>
           </div>
           <div class="spacer"></div>
-          <div style="position:relative">
+          <div class="bell-wrap">
             <button class="btn-ghost btn-sm" id="bellBtn">${icon('bell', 18)}<span id="notifBadge" class="badge" style="display:none;position:absolute;top:-6px;inset-inline-start:-6px;background:var(--danger);color:#fff;border-radius:20px;padding:0 6px;font-size:11px"></span></button>
             <div id="notifPanel" class="notif-panel" style="display:none"></div>
           </div>

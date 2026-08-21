@@ -622,9 +622,19 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); defe
  * آيفون لا يدعم beforeinstallprompt، فنعرض له خطوات المشاركة؛ وغيره يُثبَّت بضغطة.
  * تظهر مرة واحدة ثم تُحفظ الاستجابة محليًا.
  */
+// البطاقة العائمة تحجب جزءًا من الشاشة، فتظهر على الصفحة الرئيسية وحدها
+// وتنسحب تلقائيًا بعد ١٤ ثانية إن لم يتفاعل معها المستخدم.
+function onDashboard() {
+  const h = location.hash.replace(/^#\/?/, '').split('?')[0];
+  return !h || h === 'dashboard';
+}
+function autoHideCard(el, ms = 14000) {
+  setTimeout(() => { if (document.body.contains(el)) el.remove(); }, ms);
+}
+
 function maybeShowInstallCard() {
   if (isStandalone() || localStorage.getItem('a2hs_dismissed') === '1') return;
-  if (document.querySelector('.a2hs')) return;
+  if (!onDashboard() || document.querySelector('.a2hs')) return;
   const ios = isIOS();
   if (!ios && !deferredInstall) return;              // متصفح لا يدعم التثبيت الآن
   const el = document.createElement('div');
@@ -639,6 +649,7 @@ function maybeShowInstallCard() {
     </div>
     <button class="x" id="a2hsX" aria-label="إخفاء">&times;</button>`;
   document.body.appendChild(el);
+  autoHideCard(el);
   el.querySelector('#a2hsX').onclick = () => { localStorage.setItem('a2hs_dismissed', '1'); el.remove(); };
   const go = el.querySelector('#a2hsGo');
   if (go) go.onclick = async () => {
@@ -657,7 +668,7 @@ function maybeShowPushCard() {
   if (!isStandalone() || !Push.supported()) return;
   if (Push.permission() !== 'default') return;
   if (localStorage.getItem('push_prompt_dismissed') === '1') return;
-  if (document.querySelector('.a2hs')) return;
+  if (!onDashboard() || document.querySelector('.a2hs')) return;
   const el = document.createElement('div');
   el.className = 'a2hs';
   el.innerHTML = `
@@ -668,6 +679,7 @@ function maybeShowPushCard() {
     </div>
     <button class="x" id="pushX" aria-label="إخفاء">&times;</button>`;
   document.body.appendChild(el);
+  autoHideCard(el);
   el.querySelector('#pushX').onclick = () => { localStorage.setItem('push_prompt_dismissed', '1'); el.remove(); };
   el.querySelector('#pushGo').onclick = async () => {
     localStorage.setItem('push_prompt_dismissed', '1');
@@ -677,9 +689,22 @@ function maybeShowPushCard() {
   };
 }
 
+// ارتفاع الشريط العلوي الحقيقي — تعتمد عليه العناصر العائمة أسفله بدل أرقام ثابتة
+// (يتغيّر بمنطقة الأمان في الأجهزة ذات الشقّ وبتدوير الشاشة).
+function syncTopbarHeight() {
+  const tb = document.querySelector('.topbar');
+  if (tb) document.documentElement.style.setProperty('--topbar-h', tb.offsetHeight + 'px');
+}
+
 function initMobile() {
   if (isStandalone()) document.documentElement.classList.add('standalone');
   watchTables();
+  syncTopbarHeight();
+  if (!window.__topbarWatch) {
+    window.__topbarWatch = true;
+    addEventListener('resize', syncTopbarHeight);
+    addEventListener('orientationchange', () => setTimeout(syncTopbarHeight, 250));
+  }
   // تُستدعى مع كل تنقّل (إعادة بناء الهيكل)، والدعوات تظهر مرة واحدة في الجلسة
   if (!window.__a2hsScheduled) {
     window.__a2hsScheduled = true;
