@@ -72,19 +72,32 @@ app.get('/push/devices', async (c) => {
   return c.json({ devices: rows.results });
 });
 
-/** إشعار تجريبي إلى أجهزة المستخدم نفسه — للتأكد من وصول الإشعارات. */
+/**
+ * إشعار تجريبي إلى أجهزة المستخدم نفسه. وظيفته كلها التشخيص، فيقول ما جرى فعلًا
+ * لا «تم الإرسال» دائمًا: إعلانُ نجاحٍ لم يقع يترك المستخدم أمام زرّ لا يحدث عنده شيء.
+ */
 app.post('/push/test', async (c) => {
   const u = c.get('user');
   const n = await c.env.DB.prepare('SELECT COUNT(*) AS n FROM push_subscriptions WHERE user_id = ?')
     .bind(u.id).first<{ n: number }>();
-  if (!n?.n) return c.json({ error: 'لا يوجد جهاز مسجَّل للإشعارات' }, 400);
-  await pushToUsers(c.env, [u.id], {
+  if (!n?.n) {
+    return c.json({ error: 'لا يوجد جهاز مسجَّل للإشعارات — فعّلها على هذا الجهاز أولًا' }, 400);
+  }
+  const r = await pushToUsers(c.env, [u.id], {
     title: 'تجربة الإشعارات',
     body: 'وصلك هذا الإشعار — الإشعارات مفعّلة على هذا الجهاز.',
     link: '#/notifications',
     type: 'push_test',
   });
-  return c.json({ ok: true, devices: n.n });
+  if (r.sent > 0) return c.json({ ok: true, ...r });
+
+  // لم يقبلها أحد: نفسّر السبب بدقّة بدل الصمت
+  const error = r.reason === 'no-keys'
+    ? 'مفاتيح الدفع غير مهيّأة على الخادم — راجع مدير النظام'
+    : r.gone > 0
+      ? 'انتهت صلاحية تسجيل هذا الجهاز (يحدث بعد إعادة تثبيت التطبيق أو تحديث النظام). أوقف الإشعارات ثم فعّلها من جديد.'
+      : 'تعذّر تسليم الإشعار إلى خدمة الدفع. أعد المحاولة، وإن تكرّر فأوقف الإشعارات وفعّلها من جديد.';
+  return c.json({ error, ...r }, 502);
 });
 
 app.get('/', async (c) => {

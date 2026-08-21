@@ -467,9 +467,20 @@ async function renderPushCard() {
     try { await Push.disable(); toast('أُوقفت الإشعارات على هذا الجهاز', 'ok'); } catch (err) { toast(err.message, 'err'); }
     renderPushCard();
   });
-  on('pcTest', async () => {
-    try { await API.post('/notifications/push/test'); toast('أُرسل الإشعار التجريبي', 'ok'); }
-    catch (err) { toast(err.message, 'err'); }
+  on('pcTest', async (e) => {
+    // حالة انتظار ظاهرة: طلبٌ صامت لثانيتين يبدو كزرّ معطوب
+    const btn = e.currentTarget, html = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner spinner-inline"></span> جارٍ الإرسال…';
+    try {
+      const r = await API.post('/notifications/push/test');
+      toast(r.sent > 1 ? `أُرسل الإشعار إلى ${arNum(r.sent)} أجهزة — إن لم يصلك خلال ثوانٍ فراجع إعدادات الإشعارات في نظامك`
+        : 'أُرسل الإشعار — إن لم يصلك خلال ثوانٍ فراجع إعدادات الإشعارات في نظامك', 'ok');
+    } catch (err) {
+      toast(err.message, 'err');
+      // الاشتراك المنتهي يُحذف في الخادم، فنُحدّث البطاقة ليظهر زرّ التفعيل من جديد
+      if (err.status === 502 || err.status === 400) renderPushCard();
+    } finally { btn.disabled = false; btn.innerHTML = html; }
   });
 }
 

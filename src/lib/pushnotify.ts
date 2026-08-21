@@ -14,20 +14,35 @@ export interface PushMessage {
 
 interface SubRow extends PushSubscriptionKeys { id: number; user_id: number }
 
+/**
+ * حصيلة محاولة التسليم. الدفع أفضل-جهد لمن لا يعنيه أمره (المُطلِقات العادية
+ * تتجاهلها)، لكنه يعني «الإشعار التجريبي» الذي وظيفته كلها أن يقول ما جرى:
+ * إعلانُ النجاح دائمًا يترك المستخدم أمام زرّ «لا يحدث عنده شيء».
+ */
+export interface PushDelivery {
+  subscriptions: number;   // أجهزة مسجَّلة وُجدت
+  sent: number;            // قبلتها خدمة الدفع
+  failed: number;          // رفضتها أو تعذّر الوصول
+  gone: number;            // اشتراك منتهٍ حُذف (٤٠٤/٤١٠)
+  reason?: 'no-users' | 'no-subscriptions' | 'no-keys' | 'error';
+}
+const EMPTY = (reason: PushDelivery['reason']): PushDelivery =>
+  ({ subscriptions: 0, sent: 0, failed: 0, gone: 0, reason });
+
 /** إرسال إشعار دفع إلى كل أجهزة مجموعة مستخدمين. */
-export async function pushToUsers(env: Env, userIds: number[], msg: PushMessage): Promise<void> {
+export async function pushToUsers(env: Env, userIds: number[], msg: PushMessage): Promise<PushDelivery> {
   const ids = [...new Set(userIds.filter((n) => Number.isFinite(n)))];
-  if (!ids.length) return;
+  if (!ids.length) return EMPTY('no-users');
   try {
     // نبدأ بالاشتراكات: بلا جهاز مسجَّل لا داعي لقراءة المفاتيح (أو توليدها) أصلًا
     const placeholders = ids.map(() => '?').join(',');
     const subs = (await env.DB.prepare(
       `SELECT id, user_id, endpoint, p256dh, auth FROM push_subscriptions WHERE user_id IN (${placeholders})`,
     ).bind(...ids).all<SubRow>()).results;
-    if (!subs.length) return;
+    if (!subs.length) return EMPTY('no-subscriptions');
 
     const keys = await getVapidKeys(env);
-    if (!keys) return;
+    if (!keys) return { ...EMPTY('no-keys'), subscriptions: subs.length };
 
     // عدد غير المقروء لكل مستخدم — يُحدِّث شارة أيقونة التطبيق على الشاشة الرئيسية
     const unreadRows = (await env.DB.prepare(
@@ -71,7 +86,9 @@ export async function pushToUsers(env: Env, userIds: number[], msg: PushMessage)
       ).bind(...okIds));
     }
     if (stmts.length) await env.DB.batch(stmts);
+    return { subscriptions: subs.length, sent: okIds.length, failed: failed.length, gone: gone.length };
   } catch (e) {
     console.error('push notify failed (non-fatal)', e);
+    return EMPTY('error');
   }
 }

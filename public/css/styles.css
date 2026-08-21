@@ -544,6 +544,12 @@ body { overflow-x: hidden; }
     background: var(--surface); border-top: 1px solid var(--border);
     padding-bottom: var(--safe-b); box-shadow: 0 -2px 14px rgba(0,0,0,.06);
   }
+  /* التنبيه فوق شريط التبويب لا عليه: كان يهبط في مكان الشريط فيبدو جزءًا منه
+     أو يُقرأ خطأً، ورسالةٌ لا تُرى تعني زرًّا «لا يحدث عنده شيء». */
+  .toast {
+    inset-inline: 12px; max-width: none; text-align: center;
+    bottom: calc(var(--tabbar-h) + var(--safe-b) + 14px);
+  }
   .tabbar a, .tabbar button {
     flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 3px; padding: 8px 2px; min-height: var(--tabbar-h); background: none; border: 0;
