@@ -53,7 +53,7 @@ export function basePerm(u: RoleStage, key: string): boolean {
 
     case 'actions.view': return !A;
     case 'actions.add': return P || F;
-    case 'actions.edit': return !A;               // ومنها تحديث المكلَّف لتقدّمه
+    case 'actions.edit': return P || F;           // والمكلَّف يتابع بنده بحكم إسناده لا بهذا المفتاح
 
     case 'students.view': return !A;
     case 'students.add': return P || F;

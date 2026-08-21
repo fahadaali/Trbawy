@@ -1137,9 +1137,9 @@ async function councilDetail(id) {
   try { d = await API.get('/councils/' + id); }
   catch (err) { return toast(err.message, 'err'); }
   // يطابق canAssignWriter/canCreateMeeting في الخادم (بما فيه فحص المرحلة)
-  const canAssign = canCreateForCouncil(d.council);
+  const canAssign = canEditCouncilUi(d.council);
 
-  const canManageMembers = State.user.role === 'president';
+  const canManageMembers = canEditCouncilUi(d.council, State.user.role === 'president');
   let allUsers = [];
   if (canManageMembers) { try { allUsers = (await API.get('/users')).users; } catch {} }
   const memberIds = new Set(d.members.map((m) => m.user_id));
@@ -1340,8 +1340,8 @@ VIEWS.backups = async () => {
         <tbody>${data.backups.map((b) => `<tr><td dir="ltr" style="text-align:right">${esc(b.key.split('/').pop())}</td>
           <td>${arNum((b.size / 1024).toFixed(1))} ك.ب</td><td>${fmtDateTime(b.uploaded)}</td>
           <td><a class="btn-ghost btn-sm" href="/api/admin/backups/download?key=${encodeURIComponent(b.key)}">تنزيل</a>
-            ${isSysAdmin() ? `<button class="btn-danger btn-sm" data-restore="${esc(b.key)}">استعادة</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="center muted">لا نسخ بعد</td></tr>'}</tbody></table>
-      ${isSysAdmin() ? '<p class="hint mt">الاستعادة تستبدل كل البيانات الحالية بمحتوى النسخة، وتُنشئ نسخة وقائية تلقائياً قبل التنفيذ.</p>' : ''}
+            ${canRestore() ? `<button class="btn-danger btn-sm" data-restore="${esc(b.key)}">استعادة</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="4" class="center muted">لا نسخ بعد</td></tr>'}</tbody></table>
+      ${canRestore() ? '<p class="hint mt">الاستعادة تستبدل كل البيانات الحالية بمحتوى النسخة، وتُنشئ نسخة وقائية تلقائياً قبل التنفيذ.</p>' : ''}
     </div></div>
 
     <div class="card mt"><div class="card-head"><h3>${icon('key', 16)} الجلسات النشطة</h3><div class="spacer"></div>
@@ -1356,7 +1356,8 @@ VIEWS.backups = async () => {
   loadSessions();
 };
 
-const isSysAdmin = () => State.user && State.user.role === 'system_admin';
+// زرّ الاستعادة يتبع مفتاحه لا الدور وحده (أصله: مدير النظام)
+const canRestore = () => may('backups.edit', !!State.user && State.user.role === 'system_admin');
 
 // جدول الجلسات النشطة مع الإنهاء عن بُعد
 async function loadSessions() {

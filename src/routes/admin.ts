@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import type { Env, Variables } from '../types';
 import { requireAuth, requirePasswordChanged } from '../middleware/auth';
-import { canViewBackups, canCreateBackup, canRestoreBackup } from '../permissions';
+import { canViewBackups, canCreateBackup, canRestoreBackup, isAdmin, isPresident } from '../permissions';
 import { audit } from '../lib/audit';
 import { createBackup, listBackups, restoreBackup } from '../lib/backup';
 
@@ -10,7 +10,7 @@ const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
 app.use('*', async (c, next) => {
   const u = c.get('user');
-  // الاطلاع بابُ هذه الشاشة كلها؛ والإنشاء والاستعادة يُفحصان في موضعهما
+  // بابُ الشاشة: من يملك الاطلاع على النسخ أصلًا أو باستثناء
   if (!canViewBackups(u)) return c.json({ error: 'خاص بمدير النظام' }, 403);
   await next();
 });
@@ -18,6 +18,7 @@ app.use('*', async (c, next) => {
 app.get('/backups', async (c) => c.json({ backups: await listBackups(c.env) }));
 
 app.post('/backups', async (c) => {
+  if (!canCreateBackup(c.get('user'))) return c.json({ error: 'لا تملك صلاحية إنشاء نسخة' }, 403);
   const key = await createBackup(c.env);
   await audit(c.env, { userId: c.get('user').id, action: 'manual_backup', entityType: 'backup', newValue: { key } });
   return c.json({ ok: true, key }, 201);
@@ -59,7 +60,12 @@ app.post('/backups/restore', async (c) => {
 });
 
 // ---- الجلسات النشطة لكل المستخدمين ----
+// إنهاء جلسات الناس سلطةٌ أثقل من الاطلاع على النسخ، فلا تُمنح بمفتاحها: تبقى
+// لمدير النظام والرئيس وحدهما ولا يفتحها استثناءٌ على «النسخ الاحتياطية».
+const sessionsGuard = (c: any) => isAdmin(c.get('user')) || isPresident(c.get('user'));
+
 app.get('/sessions', async (c) => {
+  if (!sessionsGuard(c)) return c.json({ error: 'إدارة الجلسات لمدير النظام أو الرئيس' }, 403);
   const rows = await c.env.DB.prepare(
     `SELECT s.id, s.user_id, s.created_at, s.last_active, s.ip, s.user_agent, u.name AS user_name, u.email
        FROM sessions s JOIN users u ON u.id = s.user_id
@@ -71,6 +77,7 @@ app.get('/sessions', async (c) => {
 
 // إنهاء جلسة أي مستخدم عن بُعد
 app.delete('/sessions/:id', async (c) => {
+  if (!sessionsGuard(c)) return c.json({ error: 'إدارة الجلسات لمدير النظام أو الرئيس' }, 403);
   const sid = c.req.param('id');
   if (sid === c.get('sessionId')) return c.json({ error: 'لا يمكن إنهاء جلستك الحالية من هنا' }, 400);
   const row = await c.env.DB.prepare('SELECT user_id FROM sessions WHERE id = ?').bind(sid).first<{ user_id: number }>();

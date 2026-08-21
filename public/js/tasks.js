@@ -198,7 +198,8 @@ async function taskDetail(id, onBack) {
   const a = d.action;
   const myId = State.user.id;
   const iAmAssignee = d.assignees.some((x) => x.user_id === myId);
-  const canManage = ['president', 'first_supervisor'].includes(State.user.role) || iAmAssignee;
+  // المكلَّف يتابع بنده دائمًا، وغيرُه بحسب صلاحية «تعديل البنود» (أصلًا أو استثناءً)
+  const canManage = may('actions.edit', ['president', 'first_supervisor'].includes(State.user.role)) || iAmAssignee;
 
   const attList = d.attachments.map((at) =>
     `<li><a href="/api/actions/${id}/attachments/${at.id}" target="_blank">${esc(at.file_name)}</a> <span class="muted">${fmtDateTime(at.uploaded_at)}</span></li>`).join('');

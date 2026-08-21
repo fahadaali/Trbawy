@@ -50,14 +50,26 @@ function esc(s) {
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
-// هل يملك المستخدم صلاحية الإنشاء/تعيين الكاتب/البنود الثابتة لهذا المجلس؟
-// يطابق canCreateMeeting و canAssignWriter في الخادم (بما فيه فحص المرحلة).
-function canCreateForCouncil(cl) {
+// أصل قاعدة المجلس من الدور وحده (يطابق baseCanCreateMeeting في الخادم).
+function baseCouncilRole(cl) {
   const u = State.user;
   if (!u || !cl) return false;
   if (u.role === 'president') return true;
   return u.role === 'first_supervisor' && cl.type !== 'educational' &&
     ((cl.type === 'secondary' && u.stage === 'secondary') || (cl.type === 'middle' && u.stage === 'middle'));
+}
+
+/**
+ * إنشاء دعوة في هذا المجلس — الأصل من الدور، والاستثناء يسبقه.
+ * النطاق مضمون بأن القوائم لا تصل المستخدم إلا بمجالسه، والخادم يفحصه ثانيةً.
+ */
+function canCreateForCouncil(cl) {
+  return may('meetings.add', baseCouncilRole(cl));
+}
+
+/** تعديل بيانات المجلس (كاتبه وبنوده الثابتة وأعضاؤه). */
+function canEditCouncilUi(cl, base) {
+  return may('councils.edit', base === undefined ? baseCouncilRole(cl) : base);
 }
 
 // تفعيل البحث بالضغط على Enter داخل حقل

@@ -14,11 +14,13 @@ async function cyclesList() {
   let cycles;
   try { cycles = (await API.get('/eval/cycles')).cycles; } catch (err) { return renderError(err); }
   const isPres = State.user.role === 'president';
+  const canAddCycle = may('evaluations.add', isPres);
+  const canCriteria = may('criteria.edit', isPres) || may('criteria.add', isPres);
 
   content().innerHTML = `
     <div class="row" style="margin-bottom:16px">
-      ${isPres ? '<button class="btn btn-sm" id="newCycle">+ دورة تقييم جديدة</button>' : ''}
-      ${isPres ? '<button class="btn-ghost btn-sm" onclick="nav(\'evaluations/criteria\')">إدارة المعايير والأوزان</button>' : ''}
+      ${canAddCycle ? '<button class="btn btn-sm" id="newCycle">+ دورة تقييم جديدة</button>' : ''}
+      ${canCriteria ? '<button class="btn-ghost btn-sm" onclick="nav(\'evaluations/criteria\')">إدارة المعايير والأوزان</button>' : ''}
     </div>
     <div class="grid grid-3">${cycles.map((cy) => `
       <div class="card"><div class="card-body">
@@ -431,10 +433,10 @@ function commitmentPanel(rows) {
 
 function canViewResultsClient(tt) {
   const r = State.user.role;
-  if (tt === 'students') return ['president', 'vice_president', 'first_supervisor', 'team_member'].includes(r);
-  if (tt === 'team_members') return ['president', 'first_supervisor'].includes(r);
-  if (tt === 'first_supervisors') return ['president', 'vice_president'].includes(r);
-  return false;
+  const base = tt === 'students' ? ['president', 'vice_president', 'first_supervisor', 'team_member'].includes(r)
+    : tt === 'team_members' ? ['president', 'first_supervisor'].includes(r)
+      : tt === 'first_supervisors' ? ['president', 'vice_president'].includes(r) : false;
+  return may('evaluations.view', base);
 }
 
 // نموذج التقييم
