@@ -756,8 +756,8 @@ function initMobile() {
 // إضافة موعد الاجتماع إلى التقويم الشخصي
 // ============================================================
 //
-// طريقان يغطّيان ما يستعمله الناس: رابطٌ مباشر لتقويم قوقل، وملفُ ICS قياسي تفتحه
-// تقاويم آبل وسامسونج وأوتلوك وغيرها فتُضيف الحدث. والوقت في الاثنين «عائم» بلا
+// طريقان يغطّيان ما يستعمله الناس: رابطٌ مباشر لتقويم Google، وملفُ ICS قياسي تفتحه
+// تقاويم Apple وسامسونج وOutlook وغيرها فتُضيف الحدث. والوقت في الاثنين «عائم» بلا
 // منطقة زمنية، فيظهر كما كُتب على أي جهاز بلا تحويلٍ يزحزحه ساعات.
 //
 // المعرّف ثابت في ملف ICS لكل اجتماع (UID) وتسلسله يعلو بكل تعديل، فمن غيّر موعده
@@ -808,8 +808,8 @@ const Calendar = {
           <div><span class="muted">الوقت:</span> ${esc(time)}</div>
           <div><span class="muted">المكان:</span> ${esc(f.location)}</div>
         </div>
-        <a class="btn btn-block mt" href="${esc(this.googleUrl(f))}" target="_blank" rel="noopener">تقويم قوقل</a>
-        <button class="btn btn-ghost btn-block mt" id="calIcs">تقويم آبل · سامسونج · أوتلوك</button>
+        <a class="btn btn-block mt" href="${esc(this.googleUrl(f))}" target="_blank" rel="noopener">تقويم Google</a>
+        <button class="btn btn-ghost btn-block mt" id="calIcs">تقويم Apple · سامسونج · Outlook</button>
         <p class="hint mt">الزرّ الثاني يُنزّل ملف موعد قياسيًّا (‎.ics) يفتحه تطبيق التقويم في جهازك
           فيضيف الموعد ومعه تذكيرٌ قبله بساعة. وإن تغيّر الموعد لاحقًا فأعِد الإضافة —
           يُحدَّث الحدث نفسه ولا يتكرّر.</p>`,
