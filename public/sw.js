@@ -6,7 +6,8 @@ const SHELL = [
   '/', '/index.html', '/css/styles.css',
   '/js/api.js', '/js/xlsx.js', '/js/ui.js', '/js/ai.js', '/js/app.js',
   '/js/meetings.js', '/js/tasks.js', '/js/evaluations.js', '/js/students.js',
-  '/manifest.webmanifest', '/icons/icon-192.png?v=2', '/icons/icon-512.png?v=2', '/icons/apple-touch-icon.png?v=2',
+  '/manifest.webmanifest', '/icons/icon.svg',
+  '/icons/icon-192.png?v=2', '/icons/icon-512.png?v=2', '/icons/apple-touch-icon.png?v=2',
 ];
 
 // مهلة الشبكة: بعدها نُقدّم النسخة المخزَّنة بدل ترك الصفحة معلّقة.

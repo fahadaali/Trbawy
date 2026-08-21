@@ -82,7 +82,7 @@ function renderLogin() {
   app().innerHTML = `
     <div class="auth-wrap">
       <form class="auth-card" id="loginForm">
-        <div class="auth-logo">م</div>
+        <img class="auth-logo" src="/icons/icon.svg" alt="" />
         <h1>منصة المجلس التربوي</h1>
         <p class="sub">إدارة محاضر الاجتماعات والتقييمات التربوية</p>
         <div id="loginErr"></div>
@@ -229,7 +229,7 @@ function renderShell(view, rest) {
     <div class="layout">
       <div class="drawer-scrim" id="drawerScrim"></div>
       <aside class="sidebar" id="sidebar">
-        <div class="brand"><div class="mark">م</div><div class="name">المجلس التربوي<small>منصة المحاضر والتقييم</small></div></div>
+        <div class="brand"><img class="mark" src="/icons/icon.svg" alt="" /><div class="name">المجلس التربوي<small>منصة المحاضر والتقييم</small></div></div>
         <nav class="nav">${navHtml}</nav>
         <div class="nav-group-title only-mobile">حسابي</div>
         <div class="nav only-mobile" style="flex:0">
