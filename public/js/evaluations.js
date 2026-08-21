@@ -413,11 +413,12 @@ function commitmentPanel(rows) {
   return `<div class="card mt"><div class="card-head"><h3>الالتزام ببنود المحاضر</h3>
     <div class="spacer"></div><span class="legend-note">نسبة الالتزام = ٦٠٪ إنجاز + ٤٠٪ دقة توقيت</span></div>
     <table class="tbl"><thead><tr><th>الاسم</th><th>المُسنَد</th><th>المنجَز</th><th>متأخرة الآن</th>
-      <th>أيام التأخير</th><th>نسبة الإنجاز</th><th>دقة التوقيت</th><th>الالتزام</th></tr></thead>
+      <th>أطول تأخير</th><th>نسبة الإنجاز</th><th>دقة التوقيت</th><th>الالتزام</th></tr></thead>
     <tbody>${sorted.map((r) => `<tr>
       <td>${esc(r.name)}</td><td>${arNum(r.total)}</td><td>${arNum(r.done)}</td>
       <td>${r.overdue ? `<span class="tag tag-red">${arNum(r.overdue)}</span>` : arNum(0)}</td>
-      <td>${r.delay_total ? `<span class="tag tag-red">${arNum(r.delay_total)}</span>` : arNum(0)}</td>
+      <td>${(() => { const d = Math.max(r.delay_max || 0, r.overdue_days_max || 0);
+        return d ? `<span class="tag tag-red">${arNum(d)}</span>` : arNum(0); })()}</td>
       <td>${miniBar(r.completion_rate)}</td><td>${miniBar(r.timeliness)}</td><td>${miniBar(r.commitment)}</td>
     </tr>`).join('')}</tbody></table></div>`;
 }

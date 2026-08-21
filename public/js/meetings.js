@@ -6,7 +6,10 @@ const ATT_STATUS_AR = { present: 'حاضر', apology: 'معتذر', absent: 'غ�
 function hijriFromGreg(greg) {
   if (!greg) return '';
   try {
-    return new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura', { day: 'numeric', month: 'long', year: 'numeric' }).format(new Date(greg)) + 'هـ';
+    // Intl يُلحِق «هـ» بنفسه في التقويم الهجري، فإلحاقها ثانيةً يكتبها مرّتين
+    const t = new Intl.DateTimeFormat('ar-SA-u-ca-islamic-umalqura', { day: 'numeric', month: 'long', year: 'numeric' })
+      .format(new Date(greg)).trim();
+    return /هـ\s*$/.test(t) ? t : t + ' هـ';
   } catch { return ''; }
 }
 
@@ -140,7 +143,8 @@ async function meetingCreate() {
         </div>
         <div class="row-2">
           <div class="field"><label>نوع المكان</label><select id="mc_loctype"><option value="in_person">حضوري</option><option value="remote">عن بُعد</option></select></div>
-          <div class="field"><label>المكان / رابط الاجتماع</label><input id="mc_loc" /></div>
+          <div class="field"><label>المكان / رابط الاجتماع <span class="muted">(مطلوب)</span></label>
+            <input id="mc_loc" placeholder="مثال: قاعة الاجتماعات — الدور الأول" /></div>
         </div>
         <div class="field"><label>الكاتب (يحرّر المسودة فقط)</label><select id="mc_writer"></select></div>
 
@@ -209,6 +213,13 @@ async function meetingCreate() {
     const end = parseTimeInput(document.getElementById('mc_end').value);
     if (start === undefined || end === undefined)
       return document.getElementById('mcErr').innerHTML = '<div class="form-error">صيغة الوقت غير مفهومة — مثال: ٩:٣٠ ص</div>';
+    // المكان يُذكر في الوثيقة الرسمية، ولا يُستدرك بعد الاعتماد
+    if (!document.getElementById('mc_loc').value.trim()) {
+      document.getElementById('mc_loc').focus();
+      return document.getElementById('mcErr').innerHTML = `<div class="form-error">${
+        document.getElementById('mc_loctype').value === 'remote'
+          ? 'أدخل رابط الاجتماع أو وسيلته' : 'أدخل مكان الاجتماع (القاعة أو المبنى)'}</div>`;
+    }
     const payload = {
       council_id: Number(document.getElementById('mc_council').value),
       title: document.getElementById('mc_title').value.trim() || null,
@@ -217,7 +228,7 @@ async function meetingCreate() {
       start_time: start,
       end_time: end,
       location_type: document.getElementById('mc_loctype').value,
-      location: document.getElementById('mc_loc').value.trim() || null,
+      location: document.getElementById('mc_loc').value.trim(),
       writer_id: document.getElementById('mc_writer').value ? Number(document.getElementById('mc_writer').value) : null,
       attendees,
       guests: guests.filter((g) => g.name.trim()),
@@ -331,7 +342,7 @@ async function meetingDetail(id) {
           <div><span class="muted">المجلس:</span> ${esc(COUNCIL_TYPE_AR[d.council.type] || d.council.name)}</div>
           <div><span class="muted">التاريخ الهجري:</span> ${esc(m.hijri_date || '—')}</div>
           <div><span class="muted">التاريخ الميلادي:</span> ${fmtDate(m.greg_date)}</div>
-          <div><span class="muted">المكان:</span> ${m.location_type === 'remote' ? 'عن بُعد' : 'حضوري'} ${m.location ? '— ' + esc(m.location) : ''}</div>
+          <div><span class="muted">المكان:</span> ${m.location ? esc(m.location) + ' ' : ''}<span class="tag tag-gray">${m.location_type === 'remote' ? 'عن بُعد' : 'حضوري'}</span>${m.location ? '' : ' <span class="muted">— لم يُذكر</span>'}</div>
         </div>
         <div id="timePanel" class="time-panel mt"></div>
         <div class="row mt">${btns.join('')}</div>
@@ -727,12 +738,20 @@ function renderAgendaSection(meetingId, d, canEdit) {
       if (!wasOpen && editor) editor.focus();
     });
 
-    // تحويل البند إلى قرار/توصية/مهمة بضغطة — يفتح النموذج مهيّأً بعنوان البند
+    // تحويل البند إلى قرار/توصية/مهمة. مع المساعد: يُقرأ البند كاملًا فتُصاغ منه
+    // المهام المترتّبة عليه (واحدة أو أكثر). وبدونه: نموذج يدويّ مهيَّأ بالعنوان
+    // ونصّ البند مجرّدًا — لا بالعنوان وحده، فالعنوان لا يحمل ما نوقش.
     box.querySelectorAll('[data-toaction]').forEach((el) => el.onclick = async () => {
       const it = items[el.dataset.toaction];
       await commitBody();
-      actionForm(meetingId, d.attendees.filter((a) => !a.is_guest), null,
-        { text: it.title, source: it.title });
+      const members = d.attendees.filter((a) => !a.is_guest);
+      const manual = () => actionForm(meetingId, members, null,
+        { text: [it.title, plainOf(it.body)].filter(Boolean).join('\n'), source: it.title });
+      if (!State.aiEnabled) return manual();
+      aiActionDraftDialog(meetingId, it, members, (how) => {
+        if (how === 'manual') manual();
+        else reloadActions(meetingId);
+      });
     });
 
     box.querySelectorAll('[data-del]').forEach((el) => el.onclick = () => {
@@ -915,6 +934,21 @@ function renderActionsSection(meetingId, d, canEdit) {
 
 // آخر جدول قرارات مرسوم — لتحديثه وحده بعد الحفظ ({ meetingId, fn })
 let actionsRefresher = null;
+
+/** تحديث جدول القرارات والمهام وحده، حفاظًا على ما يحرّره المستخدم في بقية الصفحة. */
+function reloadActions(meetingId) {
+  if (actionsRefresher && (!meetingId || actionsRefresher.meetingId === meetingId)
+      && document.getElementById('actionsBox')) actionsRefresher.fn();
+  else if (meetingId) meetingDetail(meetingId);
+}
+
+/** نصّ البند مجرَّدًا من الوسوم — العنوان وحده لا يحمل ما نوقش. */
+function plainOf(html) {
+  if (!html) return '';
+  const d = document.createElement('div');
+  d.innerHTML = String(html);
+  return (d.textContent || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+}
 
 // نموذج إنشاء/تعديل قرار/توصية/مهمة داخل محضر
 // prefill = { text, source } عند التحويل من بند في جدول الأعمال

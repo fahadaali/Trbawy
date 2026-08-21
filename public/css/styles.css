@@ -208,6 +208,19 @@ table.tbl tr:hover td { background: #fafbfb; }
 .t-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 @media (min-width: 861px) { .t-scroll > table.tbl.wide { min-width: 900px; } }
 
+/* صفّ مقترح من المساعد: نصّه وموعده ومسؤولوه قابلة للتعديل قبل الإضافة */
+.draft-row { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; margin-bottom: 10px; }
+.draft-row > .row { gap: 8px; margin-bottom: 8px; }
+.draft-row select, .draft-row input[type="date"] {
+  padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 14px; }
+.draft-row textarea { width: 100%; padding: 9px 11px; border: 1px solid var(--border);
+  border-radius: 8px; font-family: inherit; font-size: 14px; resize: vertical; }
+.who-pick { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; }
+.chip-check { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border);
+  border-radius: 20px; padding: 4px 10px; font-size: 12.5px; cursor: pointer; background: var(--surface); }
+.chip-check:has(input:checked) { border-color: var(--primary); background: var(--primary-light); color: var(--primary); font-weight: 700; }
+.chip-check input { accent-color: var(--primary); }
+
 /* منتقي لون التمييز في إعدادات المستخدمين */
 .swatches { display: flex; flex-wrap: wrap; gap: 8px; }
 .swatch { width: 30px; height: 30px; border-radius: 50%; border: 2px solid transparent;

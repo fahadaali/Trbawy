@@ -99,7 +99,8 @@ async function loadPerformance() {
     <td>${arNum(r.done)}</td>
     <td>${r.stalled ? `<span class="tag tag-red">${arNum(r.stalled)}</span>` : arNum(0)}</td>
     <td>${arNum(r.late)}</td>
-    <td>${r.delay_total ? `<span class="tag tag-red">${arNum(r.delay_total)}</span>` : arNum(0)}</td>
+    <td>${(() => { const d = Math.max(r.delay_max || 0, r.overdue_days_max || 0);
+      return d ? `<span class="tag tag-red">${arNum(d)}</span>` : arNum(0); })()}</td>
     <td>${arNum(r.delay_avg)}</td>
     <td>${miniBar(r.completion_rate)}</td>
     <td>${miniBar(r.timeliness)}</td>
@@ -126,14 +127,14 @@ async function loadPerformance() {
       <div class="stat ${tone(o.timeliness)}"><div class="v">${arNum(o.timeliness)}٪</div><div class="l">دقة التوقيت</div>
         <div class="s">${arNum(o.on_time)} في الموعد · ${arNum(o.late)} متأخرة</div></div>
       <div class="stat ${o.stalled ? 'stat-bad' : 'stat-ok'}"><div class="v">${arNum(o.stalled)}</div><div class="l">بنود متعثّرة الآن</div>
-        <div class="s">${arNum(o.overdue_days_now)} يوم تأخّر تراكمي</div></div>
-      <div class="stat ${o.delay_total ? 'stat-bad' : 'stat-ok'}"><div class="v">${arNum(o.delay_total)}</div><div class="l">أيام التأخير المسجّلة</div>
-        <div class="s">أطول تأخير ${arNum(o.delay_max)} يومًا</div></div>
+        <div class="s">أطول تأخّر ${arCount(o.overdue_days_max || 0, ['يوم واحد', 'يومان', 'أيام', 'يومًا'])}</div></div>
+      <div class="stat ${o.delay_max ? 'stat-bad' : 'stat-ok'}"><div class="v">${arNum(o.delay_max)}</div><div class="l">أطول تأخير عند الإنجاز</div>
+        <div class="s">${o.late ? `على ${arCount(o.late, ['بند واحد', 'بندين', 'بنود', 'بندًا'])} أُنجزت متأخرة · متوسط ${arFixed(o.delay_avg)} يوم` : 'لا بند أُنجز متأخرًا'}</div></div>
     </div>
     <div class="card mt"><div class="card-head"><h3>الالتزام حسب المكلَّف</h3>
       <div class="spacer"></div><span class="legend-note">نسبة الالتزام = ٦٠٪ إنجاز + ٤٠٪ دقة توقيت</span></div>
       ${d.board.length ? `<table class="tbl"><thead><tr><th>المكلَّف</th><th>المُسنَد</th><th>المنجَز</th>
-        <th>متعثرة الآن</th><th>أُنجزت متأخرة</th><th>مجموع أيام التأخير</th><th>متوسط التأخير</th>
+        <th>متعثرة الآن</th><th>أُنجزت متأخرة</th><th>أطول تأخير</th><th>متوسط التأخير</th>
         <th>نسبة الإنجاز</th><th>دقة التوقيت</th><th>الالتزام</th></tr></thead><tbody>${rows}</tbody></table>`
         : `<div class="empty"><div class="ico">${icon('tasks', 42)}</div><p>لا توجد بنود مُسندة بعد</p></div>`}
     </div>

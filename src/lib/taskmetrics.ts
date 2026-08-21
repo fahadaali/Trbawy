@@ -23,10 +23,11 @@ export interface AssigneeStats {
   overdue: number;          // مفتوحة تجاوزت استحقاقها اليوم
   on_time: number;
   late: number;
-  delay_total: number;      // مجموع أيام التأخير على المنجَز
-  delay_max: number;
+  delay_total: number;      // مجموع أيام التأخير على المنجَز (للمتوسط، لا للعرض)
+  delay_max: number;        // أطول تأخير على بند واحد — وهو مقياس التأخير المعروض
   delay_avg: number;
-  overdue_days_now: number; // مجموع أيام التأخر الجارية على المفتوحة
+  overdue_days_now: number; // مجموع أيام التأخر الجارية على المفتوحة (للمعالجة الداخلية)
+  overdue_days_max: number; // أطول تأخّر جارٍ على بند مفتوح واحد
   carried_total: number;    // مجموع مرات الترحيل بين المحاضر
   completion_rate: number;  // ٪
   timeliness: number;       // ٪ دقة التوقيت
@@ -81,6 +82,9 @@ const AGGREGATES = `
     COALESCE(MAX(CASE WHEN a.status = 'done' AND a.delay_days > 0 THEN a.delay_days ELSE 0 END), 0) AS delay_max,
     COALESCE(SUM(CASE WHEN a.status NOT IN ('done','cancelled') AND a.due_date IS NOT NULL AND a.due_date < date('now')
       THEN CAST(julianday(date('now')) - julianday(date(a.due_date)) AS INTEGER) ELSE 0 END), 0) AS overdue_days_now,
+    -- أطول تأخّر على بند واحد: جمع أيام التأخير عبر البنود يضخّم الرقم بلا معنى
+    COALESCE(MAX(CASE WHEN a.status NOT IN ('done','cancelled') AND a.due_date IS NOT NULL AND a.due_date < date('now')
+      THEN CAST(julianday(date('now')) - julianday(date(a.due_date)) AS INTEGER) ELSE 0 END), 0) AS overdue_days_max,
     COALESCE(SUM(a.carried_count), 0) AS carried_total`;
 
 const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 100) : 0);
@@ -96,6 +100,7 @@ function shape(r: any): Omit<AssigneeStats, 'user_id' | 'name' | 'role' | 'stage
     delay_total: r.delay_total ?? 0, delay_max: r.delay_max ?? 0,
     delay_avg: late > 0 ? Math.round(((r.delay_total ?? 0) / late) * 10) / 10 : 0,
     overdue_days_now: r.overdue_days_now ?? 0,
+    overdue_days_max: r.overdue_days_max ?? 0,
     carried_total: r.carried_total ?? 0,
     completion_rate: completion,
     // بلا بنود مستحقة منجزة لا تُحتسب دقة التوقيت، فلا تُظلم نسبة الالتزام بصفر

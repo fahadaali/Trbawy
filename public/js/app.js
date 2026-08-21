@@ -584,8 +584,8 @@ async function renderCommitmentCard() {
           <div class="s">${arNum(o.on_time)} في الموعد · ${arNum(o.late)} متأخرة</div></div>
         <div class="stat ${o.overdue ? 'stat-bad' : 'stat-ok'}"><div class="v">${arNum(o.overdue)}</div><div class="l">متأخرة الآن</div>
           <div class="s">${arNum(o.stalled)} متعثرة</div></div>
-        <div class="stat ${o.delay_total ? 'stat-bad' : 'stat-ok'}"><div class="v">${arNum(o.delay_total)}</div><div class="l">أيام التأخير المسجّلة</div>
-          <div class="s">متوسط ${arNum(o.delay_avg)} يوم</div></div>
+        <div class="stat ${o.delay_max ? 'stat-bad' : 'stat-ok'}"><div class="v">${arNum(o.delay_max)}</div><div class="l">أطول تأخير</div>
+          <div class="s">${o.late ? `متوسط ${arNum(o.delay_avg)} يوم على ${arCount(o.late, ['بند واحد', 'بندين', 'بنود', 'بندًا'])}` : 'لا بند أُنجز متأخرًا'}</div></div>
       </div></div>`;
 }
 

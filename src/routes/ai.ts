@@ -112,6 +112,77 @@ app.post('/extract-actions', async (c) => {
 });
 
 // ------------------------------------------------------------
+// ٢/ب) صياغة مهام من بند واحد في جدول الأعمال
+// ------------------------------------------------------------
+// «تحويل البند إلى مهمة» كان ينسخ عنوان البند حرفيًا، والعنوان لا يحمل ما نوقش.
+// هنا يُقرأ البند كاملًا (عنوانه ونصّ مناقشته) فتُصاغ منه المهام والقرارات المترتّبة
+// عليه: واحدة إن كفت، وأكثر إن اقتضى البند ذلك — ويبقى كل شيء مقترحًا يعدّله المستخدم.
+app.post('/draft-actions', async (c) => {
+  const b = await c.req.json().catch(() => ({}));
+  const meetingId = Number(b.meeting_id);
+  const { error, meeting } = await editableMeeting(c, meetingId) as any;
+  if (error) return error;
+
+  const itemId = Number(b.agenda_item_id);
+  let title = trimInput(b.title);
+  let body = trimInput(b.body);
+  if (Number.isFinite(itemId) && itemId > 0) {
+    const it = await c.env.DB.prepare(
+      'SELECT title, body FROM agenda_items WHERE id = ? AND meeting_id = ?',
+    ).bind(itemId, meetingId).first<any>();
+    if (!it) return c.json({ error: 'البند غير موجود في هذا المحضر' }, 404);
+    title = trimInput(it.title);
+    body = trimInput(it.body);
+  }
+  // نصّ البند محفوظ HTML — يُجرَّد إلى نص عادي قبل تمريره للنموذج
+  const plain = body.replace(/<br\s*\/?>(\s*)/gi, '\n').replace(/<\/(p|li|div|h[1-6])>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"')
+    .replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  if (!title && !plain) return c.json({ error: 'البند بلا عنوان ولا محتوى لصياغة مهام منه' }, 400);
+
+  const system =
+    'أنت أمين سرّ مجلس تربوي. تُعطى بندًا واحدًا من جدول أعمال محضر: عنوانه ونصّ ما دار فيه. ' +
+    'اقرأ البند كاملًا واستخرج ما يترتّب عليه من عمل. ' +
+    'صنّف كل عنصر: decision للقرار المُلزم، recommendation للتوصية، task للمهمة التنفيذية. ' +
+    'صُغ نص كل عنصر جملة عربية واحدة موجزة تبدأ بفعل، محدّدة وقابلة للقياس، ولا تتجاوز ٢٥ كلمة. ' +
+    'إن لم يترتّب على البند إلا عمل واحد فأخرج عنصرًا واحدًا، وإن تعدّد فأخرج ما يقتضيه البند فعلًا ' +
+    'بحد أقصى ستة عناصر، ولا تفتعل عناصر لم يقتضها. ' +
+    'لا تنسب مسؤولًا ولا تخترع أسماء ولا تواريخ لم ترد. ' +
+    'أضف due_days: عدد الأيام المقترحة للاستحقاق من اليوم بين ٣ و٦٠ للمهام والقرارات ذات التنفيذ، ' +
+    'و null لما لا استحقاق له. ' +
+    'أخرج مصفوفة JSON فقط بالشكل: ' +
+    '[{"type":"decision|recommendation|task","text":"...","priority":"high|medium|low","due_days":14}] ' +
+    'دون أي نص آخر قبلها أو بعدها.';
+
+  const prompt = `عنوان البند: ${title || '(بلا عنوان)'}\n\nنصّ البند:\n${plain || '(بلا نص — اعتمد العنوان وحده)'}`;
+
+  try {
+    const out = await aiText(c.env, system, prompt, 1200);
+    const parsed = extractJson<any[]>(out);
+    if (!Array.isArray(parsed)) return c.json({ error: 'تعذّر تحليل مخرجات النموذج — أعد المحاولة' }, 502);
+    const items = parsed
+      .filter((it) => it && typeof it.text === 'string' && it.text.trim())
+      .slice(0, 6)
+      .map((it) => {
+        const d = Number(it.due_days);
+        return {
+          type: TYPES.includes(it.type) ? it.type : 'task',
+          text: String(it.text).trim().slice(0, 1000),
+          priority: PRIORITIES.includes(it.priority) ? it.priority : 'medium',
+          due_days: Number.isFinite(d) && d > 0 ? Math.min(60, Math.max(1, Math.round(d))) : null,
+        };
+      });
+    if (!items.length) return c.json({ error: 'لم يترتّب على هذا البند عمل يمكن صياغته — اكتب المهمة يدويًا' }, 422);
+    await audit(c.env, {
+      userId: c.get('user').id, action: 'ai_draft_actions', entityType: 'meeting', entityId: meeting.id,
+      newValue: { agenda_item_id: itemId || null, count: items.length },
+    });
+    return c.json({ items });
+  } catch (e) { return aiError(c, e); }
+});
+
+// ------------------------------------------------------------
 // ٣) تفريغ تسجيل صوتي إلى نص
 // ------------------------------------------------------------
 app.post('/transcribe', async (c) => {

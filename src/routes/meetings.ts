@@ -280,6 +280,17 @@ app.post('/', async (c) => {
     if (!mem) return c.json({ error: 'كاتب المحضر يجب أن يكون عضوًا في المجلس' }, 400);
   }
 
+  // المكان جزء من الوثيقة الرسمية: اجتماع حضوري بلا مكان مذكور، أو لقاء عن بُعد بلا
+  // رابط، يترك خانة «المكان» في المحضر بنوعه وحده — وهي نقص لا يُستدرك بعد الاعتماد.
+  const place = (b.location || '').trim();
+  if (!place) {
+    return c.json({
+      error: b.location_type === 'remote'
+        ? 'أدخل رابط الاجتماع أو وسيلته'
+        : 'أدخل مكان الاجتماع (القاعة أو المبنى)',
+    }, 400);
+  }
+
   const academicYear = await currentAcademicYear(c.env);
   const res = await c.env.DB.prepare(
     `INSERT INTO meetings
@@ -289,7 +300,7 @@ app.post('/', async (c) => {
   ).bind(
     council.id, number, hy, display, hijri, greg,
     parseTime(b.start_time) ?? null, parseTime(b.end_time) ?? null,
-    b.location_type === 'remote' ? 'remote' : 'in_person', b.location || null,
+    b.location_type === 'remote' ? 'remote' : 'in_person', place,
     b.title || null, u.id, writerId, academicYear,
   ).run();
 
@@ -636,11 +647,18 @@ app.post('/:id/amend', async (c) => {
   const number = await nextMeetingNumber(c.env, council!.id, hy);
   const display = formatDisplayNumber(council!.number_prefix, hy, number);
 
+  // المكان والوقت يُنقلان من المحضر الأصل: محضر التصويب يُعقد في سياقه نفسه، وإسقاط
+  // المكان كان يترك خانته في الوثيقة الرسمية بنوعه وحده («حضوري») بلا اسم مكان.
+  const year = await currentAcademicYear(c.env);
   const res = await c.env.DB.prepare(
     `INSERT INTO meetings (council_id, number, hijri_year, display_number, hijri_date, greg_date,
-        location_type, title, status, created_by, writer_id, parent_meeting_id)
-     VALUES (?, ?, ?, ?, '', ?, 'in_person', ?, 'invitation', ?, ?, ?)`,
-  ).bind(council!.id, number, hy, display, greg, `محضر تصويب/ملحق للمحضر ${orig.display_number}`, u.id, orig.writer_id || council!.default_writer_id, id).run();
+        start_time, end_time, location_type, location, title, status, created_by, writer_id,
+        parent_meeting_id, academic_year)
+     VALUES (?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, 'invitation', ?, ?, ?, ?)`,
+  ).bind(council!.id, number, hy, display, greg,
+    orig.start_time, orig.end_time, orig.location_type || 'in_person', orig.location,
+    `محضر تصويب/ملحق للمحضر ${orig.display_number}`, u.id,
+    orig.writer_id || council!.default_writer_id, id, year).run();
   const newId = res.meta.last_row_id as number;
 
   // نسخ أعضاء المجلس كحضور مبدئي

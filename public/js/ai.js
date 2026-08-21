@@ -130,6 +130,114 @@ function aiExtractDialog(meetingId, seedText, onDone) {
 }
 
 // ============================================================
+// ١/ب) تحويل بند من جدول الأعمال إلى قرارات/توصيات/مهام
+// ============================================================
+// «إلى مهمة» كان ينسخ عنوان البند حرفيًا — والعنوان لا يحمل ما نوقش. هنا يُقرأ
+// البند كاملًا فيصوغ المساعد ما يترتّب عليه: مهمة واحدة إن كفت، وأكثر إن اقتضى
+// البند. ولكل مقترح نصّه وموعده ومسؤولوه قابلة للتعديل قبل الإضافة.
+function aiActionDraftDialog(meetingId, item, members, onDone) {
+  let items = [];
+  const dayShift = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
+  const { overlay, close } = openModal({
+    title: 'تحويل البند إلى قرارات ومهام',
+    body: `
+      <p class="hint">يقرأ المساعد البند كاملًا — عنوانه ونصّ مناقشته — ويصوغ ما يترتّب عليه.
+        راجع كل مقترح وعدّل نصّه وموعده ومسؤوليه قبل الإضافة.</p>
+      <div class="card" style="margin-bottom:12px"><div class="card-body" style="padding:12px 14px">
+        <b>${esc(item.title || '(بند بلا عنوان)')}</b>
+        ${item.body ? `<div class="muted mt" style="font-size:13px;max-height:120px;overflow:auto">${item.body}</div>`
+                    : '<div class="muted mt" style="font-size:13px">لا محتوى مكتوب — سيعتمد المساعد على العنوان وحده.</div>'}
+      </div></div>
+      <div id="aidErr"></div>
+      <div class="row"><button class="btn btn-sm" id="aid_go">${icon('sparkle', 15)} صياغة المقترحات</button>
+        <button class="btn-ghost btn-sm" id="aid_manual">كتابة يدوية بدل ذلك</button></div>
+      <div id="aid_out" class="mt"></div>`,
+    buttons: [{ label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() }],
+  });
+
+  const err = (m) => overlay.querySelector('#aidErr').innerHTML = m ? `<div class="form-error">${esc(m)}</div>` : '';
+
+  const render = () => {
+    overlay.querySelector('#aid_out').innerHTML = !items.length ? '' : `
+      <div class="card"><div class="card-head"><h3>المقترحات (${arNum(items.length)})</h3></div>
+        <div class="card-body">
+          ${items.map((it, i) => `
+            <div class="draft-row">
+              <div class="row" style="align-items:center">
+                <label class="check-inline"><input type="checkbox" data-pick="${i}" checked /> أضِف</label>
+                <select data-ty="${i}">${['decision', 'recommendation', 'task']
+                  .map((t) => `<option value="${t}" ${it.type === t ? 'selected' : ''}>${ACTION_TYPE_AR[t]}</option>`).join('')}</select>
+                <select data-pr="${i}">${['high', 'medium', 'low']
+                  .map((pp) => `<option value="${pp}" ${it.priority === pp ? 'selected' : ''}>${PRIORITY_AR[pp]}</option>`).join('')}</select>
+                <label class="muted" style="font-size:12.5px">الاستحقاق</label>
+                <input type="date" data-due="${i}" value="${it.due_date || ''}" />
+              </div>
+              <textarea data-tx="${i}" rows="2">${esc(it.text)}</textarea>
+              <div class="who-pick">
+                <span class="muted" style="font-size:12.5px">المسؤولون:</span>
+                ${members.map((m) => `<label class="chip-check"><input type="checkbox" data-as="${i}" value="${m.user_id}"
+                  ${(it.assignees || []).includes(m.user_id) ? 'checked' : ''} /> ${esc(m.user_name)}</label>`).join('')
+                  || '<span class="muted">لا حضور مسجَّل</span>'}
+              </div>
+            </div>`).join('')}
+          <div class="row mt"><button class="btn btn-sm" id="aid_add">إضافة المحدَّد للمحضر</button>
+            <button class="btn-ghost btn-sm" id="aid_again">إعادة الصياغة</button></div>
+        </div></div>`;
+
+    overlay.querySelectorAll('[data-tx]').forEach((el) => el.oninput = () => items[el.dataset.tx].text = el.value);
+    overlay.querySelectorAll('[data-ty]').forEach((el) => el.onchange = () => items[el.dataset.ty].type = el.value);
+    overlay.querySelectorAll('[data-pr]').forEach((el) => el.onchange = () => items[el.dataset.pr].priority = el.value);
+    overlay.querySelectorAll('[data-due]').forEach((el) => el.onchange = () => items[el.dataset.due].due_date = el.value || null);
+    overlay.querySelectorAll('[data-as]').forEach((el) => el.onchange = () => {
+      const it = items[el.dataset.as]; const id = Number(el.value);
+      it.assignees = (it.assignees || []).filter((x) => x !== id);
+      if (el.checked) it.assignees.push(id);
+    });
+
+    const again = overlay.querySelector('#aid_again');
+    if (again) again.onclick = (e) => run(e.currentTarget);
+
+    overlay.querySelector('#aid_add').onclick = (e) => aiRun(e.currentTarget, async () => {
+      const picked = Array.from(overlay.querySelectorAll('[data-pick]:checked')).map((el) => items[el.dataset.pick]);
+      if (!picked.length) return err('اختر مقترحًا واحدًا على الأقل');
+      err('');
+      let ok = 0; const failures = [];
+      for (const it of picked) {
+        if (!it.text.trim()) continue;
+        try {
+          await API.post('/actions/meeting/' + meetingId, {
+            type: it.type, text: it.text.trim(), priority: it.priority,
+            due_date: it.due_date || null, assignees: it.assignees || [],
+          });
+          ok++;
+        } catch (ex) { failures.push(ex.message); }
+      }
+      if (ok) toast(`أُضيف ${arNum(ok)} بند`, 'ok');
+      if (failures.length) err(failures[0]);
+      else { close(); if (onDone) onDone(); }
+    });
+  };
+
+  const run = (btn) => aiRun(btn, async () => {
+    err('');
+    try {
+      const res = await API.post('/ai/draft-actions', { meeting_id: meetingId, agenda_item_id: item.id });
+      // الافتراضات القابلة للتعديل: موعد مقترح من النموذج، والحاضرون بلا إسناد مسبق
+      items = (res.items || []).map((it) => ({
+        ...it,
+        due_date: it.due_days ? dayShift(it.due_days) : (it.type === 'task' ? dayShift(7) : null),
+        assignees: [],
+      }));
+      render();
+    } catch (ex) { err(ex.message); }
+  });
+
+  overlay.querySelector('#aid_go').onclick = (e) => run(e.currentTarget);
+  overlay.querySelector('#aid_manual').onclick = () => { close(); if (onDone) onDone('manual'); };
+  run(overlay.querySelector('#aid_go'));   // نبدأ الصياغة فور الفتح
+}
+
+// ============================================================
 // ٢) الملخّص التنفيذي للمحضر
 // ============================================================
 function aiSummaryDialog(meetingId) {

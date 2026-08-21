@@ -369,12 +369,13 @@ function meetingDashboard(attendees: any[], actions: any[], followups: FollowupR
 
   const overdue = followups.filter((f) => f.status !== 'done' && (f.overdue_days ?? 0) > 0).length;
   const lateDone = followups.filter((f) => f.status === 'done' && (f.delay_days ?? 0) > 0);
-  // أيام التأخير = ما تراكم على البنود المفتوحة حتى تاريخ المحضر + ما تأخّره المنجَز
-  // عن استحقاقه. الاكتفاء بالثاني كان يُظهر «لا تأخير» بجوار «٣ متأخرة» فيناقض نفسه.
-  const delayDone = lateDone.reduce((a, f) => a + (f.delay_days ?? 0), 0);
-  const delayOpen = followups.filter((f) => f.status !== 'done')
-    .reduce((a, f) => a + (f.overdue_days ?? 0), 0);
-  const delayTotal = delayOpen + delayDone;
+  // التأخير يُقاس بأطول مدّة على بند واحد، لا بجمع أيام البنود: بندان تأخّر كلٌّ
+  // منهما خمسة أيام ليسا تأخيرًا مقداره عشرة — وجمعهما يضخّم الرقم بلا معنى.
+  const delays = [
+    ...followups.filter((f) => f.status !== 'done').map((f) => f.overdue_days ?? 0),
+    ...lateDone.map((f) => f.delay_days ?? 0),
+  ].filter((d) => d > 0);
+  const delayMax = delays.length ? Math.max(...delays) : 0;
   const carried = followups.filter((f) => !f.is_final).length;
   const documented = followups.filter((f) => f.is_final).length;
   const doneRate = followups.length ? Math.round((documented / followups.length) * 100) : 0;
@@ -404,11 +405,8 @@ function meetingDashboard(attendees: any[], actions: any[], followups: FollowupR
           .join(' · ') || 'لا بنود جديدة')}
       ${kpi(carried, 'بنود مُرحَّلة', carried ? 'warn' : 'ok', 'من محاضر سابقة')}
       ${kpi(overdue, 'متأخرة عن الاستحقاق', overdue ? 'bad' : 'ok')}
-      ${kpi(delayTotal, 'أيام التأخير', delayTotal ? 'bad' : 'ok',
-        delayTotal
-          ? [delayOpen ? `${arNum(delayOpen)} مفتوحة` : '', delayDone ? `${arNum(delayDone)} عند الإنجاز` : '']
-              .filter(Boolean).join(' · ')
-          : 'لا تأخير')}
+      ${kpi(delayMax, 'أطول تأخير', delayMax ? 'bad' : 'ok',
+        delayMax ? `على ${countAr(delays.length, ['بند واحد', 'بندين', 'بنود', 'بندًا'])}` : 'لا تأخير')}
       ${guests.length ? kpi(guests.length, 'ضيوف', 'neutral') : ''}
     </div>
     <div class="panels">
@@ -504,7 +502,8 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
     <table class="meta"><tbody>
       <tr><th>المجلس</th><td>${esc(council?.name)}</td><th>التاريخ الهجري</th><td>${esc(m.hijri_date || '')}</td></tr>
       <tr><th>التاريخ الميلادي</th><td>${dateAr(m.greg_date)}</td><th>الوقت</th><td>${esc(timeAr(m.start_time))} ${m.end_time ? '– ' + esc(timeAr(m.end_time)) : ''}</td></tr>
-      <tr><th>المكان</th><td>${m.location_type === 'remote' ? 'عن بُعد' : 'حضوري'}${m.location ? ' — ' + esc(m.location) : ''}</td>
+      <tr><th>المكان</th><td>${m.location ? esc(m.location) + ' ' : ''}${
+        chip(m.location_type === 'remote' ? 'عن بُعد' : 'حضوري', m.location_type === 'remote' ? 'info' : 'ok')}</td>
           <th>كاتب المحضر</th><td>${writer ? esc(writer.name) : '—'}</td></tr>
     </tbody></table>
 
