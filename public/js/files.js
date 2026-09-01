@@ -219,7 +219,7 @@ function drawFiles() {
   const note = document.getElementById('fNote');
   if (note) {
     note.innerHTML = (!FilesState.trash && !FilesState.folderId && !FilesState.searching && FilesState.canAdd)
-      ? `${icon('warning', 14)} ما يُرفع في جذر الأرشيف عامٌّ لكل من يملك اطلاع الملفات — أنشئ مجلدًا لتقصر ملفاته على مجلس أو على نفسك.`
+      ? `${icon('lock', 14)} الرفع في جذر الأرشيف يسألك عن نطاق الاطلاع — والمجلد يُورِّث نطاقه لما بداخله بلا سؤال.`
       : '';
   }
 
@@ -399,6 +399,79 @@ function setupDropZone() {
   });
 }
 
+/**
+ * الرفع في جذر الأرشيف لا مجلد يُورِّثه نطاقًا، فيُسأل الرافع عنه صراحةً بدل أن
+ * يُفترض له «عام» بالسهو. وداخل مجلدٍ لا سؤال: النطاق يُورَث كما هو.
+ * يُرجع {access, council_id, year} أو null إن أُلغي الرفع.
+ */
+function rootScopeDialog(count) {
+  const m = FilesState.meta;
+  // الكتابة في مجلس تحتاج اطلاعًا كاملًا عليه الآن، فلا نعرض إلا ما يكتب فيه
+  const councils = (m.councils || []).filter((cl) => cl.level === 'full');
+  const last = FilesState.lastRootScope || {};
+  const chosen = councils.some((cl) => cl.id === last.council_id) ? last.council_id : (councils[0] || {}).id;
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+    const { overlay } = openModal({
+      title: `نطاق الاطلاع على ${arNum(count)} ملف`,
+      body: `<p class="hint">هذه الملفات تُرفع في جذر الأرشيف بلا مجلد، فمن يراها؟</p>
+        <div class="scope-pick" id="sc_pick">
+          <label class="scope-opt">
+            <input type="radio" name="scope" value="public" ${last.access !== 'council' && last.access !== 'private' ? 'checked' : ''} />
+            <span class="ic">${icon('users', 18)}</span>
+            <b>عام للمنصة</b><small>كل من يملك اطلاع الملفات يراها</small>
+          </label>
+          ${councils.length ? `<label class="scope-opt">
+            <input type="radio" name="scope" value="council" ${last.access === 'council' ? 'checked' : ''} />
+            <span class="ic">${icon('councils', 18)}</span>
+            <b>مجلس معيّن</b><small>من له اطلاع على ذلك المجلس وحده</small>
+          </label>` : ''}
+          <label class="scope-opt">
+            <input type="radio" name="scope" value="private" ${last.access === 'private' ? 'checked' : ''} />
+            <span class="ic">${icon('lock', 18)}</span>
+            <b>خاص بي</b><small>لا يراها غيرك، ولو كان رئيس المجلس</small>
+          </label>
+        </div>
+        ${councils.length ? `<div class="field" id="sc_councilWrap" style="display:none"><label>المجلس</label>
+          <select id="sc_council">${councils.map((cl) => `<option value="${cl.id}" ${cl.id === chosen ? 'selected' : ''}>${esc(cl.name)}</option>`).join('')}</select>
+        </div>` : ''}
+        <div class="field"><label>العام الدراسي (اختياري)</label>
+          <input id="sc_year" list="scYears" value="${esc(last.year !== undefined ? last.year : (m.current_year || ''))}" placeholder="١٤٤٧هـ" />
+          <datalist id="scYears">${(m.years || []).map((y) => `<option value="${esc(y)}"></option>`).join('')}</datalist>
+        </div>
+        <p class="hint">ويمكن تغيير النطاق لاحقًا بنقل الملف إلى مجلد — فيرث نطاقه.</p>`,
+      buttons: [
+        { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => { cl(); done(null); } },
+        {
+          label: 'رفع',
+          onClick: (cl, ov) => {
+            const access = ov.querySelector('input[name="scope"]:checked').value;
+            const councilSel = ov.querySelector('#sc_council');
+            const scope = {
+              access,
+              council_id: access === 'council' && councilSel ? Number(councilSel.value) : null,
+              year: ov.querySelector('#sc_year').value.trim(),
+            };
+            FilesState.lastRootScope = scope;
+            cl();
+            done(scope);
+          },
+        },
+      ],
+    });
+    // إغلاق النافذة بالزرّ أو بالنقر خارجها = إلغاء الرفع
+    overlay.querySelector('.modal-head .x').addEventListener('click', () => done(null));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) done(null); });
+    const sync = () => {
+      const wrap = overlay.querySelector('#sc_councilWrap');
+      if (wrap) wrap.style.display = overlay.querySelector('input[name="scope"]:checked').value === 'council' ? '' : 'none';
+    };
+    overlay.querySelectorAll('input[name="scope"]').forEach((r) => r.addEventListener('change', sync));
+    sync();
+  });
+}
+
 /** رفع ملف واحد مع تقدّم فعلي (fetch لا يُبلّغ عن تقدّم الرفع). */
 function uploadOne(file, query, onProgress) {
   return new Promise((resolve, reject) => {
@@ -420,6 +493,12 @@ function uploadOne(file, query, onProgress) {
 
 async function uploadFiles(list) {
   const max = FilesState.meta.max_bytes;
+  // في الجذر يُسأل عن النطاق قبل أي رفع؛ وداخل مجلد يُورَث بلا سؤال
+  let scope = null;
+  if (!FilesState.folderId) {
+    scope = await rootScopeDialog(list.length);
+    if (!scope) return;
+  }
   const panel = document.getElementById('fUpPanel');
   panel.hidden = false;
   panel.innerHTML = `<div class="up-head"><b>رفع ${arNum(list.length)} ملف</b><button class="x" aria-label="إغلاق">&times;</button></div>
@@ -446,8 +525,13 @@ async function uploadFiles(list) {
     }
     st.textContent = 'يُرفع…';
     const q = new URLSearchParams({ name: file.name });
-    if (FilesState.folderId) q.set('folder', String(FilesState.folderId));
-    else if (FilesState.meta.current_year) q.set('year', FilesState.meta.current_year);
+    if (FilesState.folderId) {
+      q.set('folder', String(FilesState.folderId));
+    } else if (scope) {
+      q.set('access', scope.access);
+      if (scope.access === 'council' && scope.council_id) q.set('council_id', String(scope.council_id));
+      if (scope.year) q.set('year', scope.year);
+    }
     try {
       await uploadOne(file, q, (p) => { bar.style.width = Math.round(p * 100) + '%'; });
       bar.style.width = '100%';
