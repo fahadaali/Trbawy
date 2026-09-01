@@ -331,4 +331,76 @@ export const SCHEMA_STATEMENTS: string[] = [
   fail_count   INTEGER NOT NULL DEFAULT 0
 )`,
   `CREATE INDEX IF NOT EXISTS idx_push_subs_user ON push_subscriptions(user_id)`,
+  // ---- الملفات التربوية: أرشيف المنصة (مجلدات · تاقات · أعوام · إصدارات) ----
+  `CREATE TABLE IF NOT EXISTS file_folders (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT    NOT NULL,
+  parent_id     INTEGER REFERENCES file_folders(id),
+  color         TEXT,                              -- لون المجلد (hex)
+  access        TEXT    NOT NULL DEFAULT 'public'
+                        CHECK (access IN ('public','council','private')),
+  council_id    INTEGER REFERENCES councils(id),   -- عند access='council'
+  owner_id      INTEGER NOT NULL REFERENCES users(id),
+  academic_year TEXT,
+  description   TEXT,
+  created_by    INTEGER NOT NULL REFERENCES users(id),
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  deleted_at    TEXT,                              -- سلة المحذوفات
+  deleted_by    INTEGER REFERENCES users(id)
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_ffolders_parent  ON file_folders(parent_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_ffolders_deleted ON file_folders(deleted_at)`,
+  `CREATE TABLE IF NOT EXISTS file_tags (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT    NOT NULL UNIQUE,
+  color      TEXT    NOT NULL DEFAULT '#1f6f54',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+)`,
+  `CREATE TABLE IF NOT EXISTS file_tag_links (
+  tag_id      INTEGER NOT NULL REFERENCES file_tags(id) ON DELETE CASCADE,
+  entity_type TEXT    NOT NULL CHECK (entity_type IN ('file','folder')),
+  entity_id   INTEGER NOT NULL,
+  PRIMARY KEY (tag_id, entity_type, entity_id)
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_ftaglinks_entity ON file_tag_links(entity_type, entity_id)`,
+  `CREATE TABLE IF NOT EXISTS files (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  folder_id     INTEGER REFERENCES file_folders(id),  -- NULL = جذر الأرشيف
+  name          TEXT    NOT NULL,
+  r2_key        TEXT    NOT NULL,
+  mime          TEXT,
+  ext           TEXT,
+  size          INTEGER NOT NULL DEFAULT 0,
+  access        TEXT    NOT NULL DEFAULT 'public'
+                        CHECK (access IN ('public','council','private')),
+  council_id    INTEGER REFERENCES councils(id),
+  owner_id      INTEGER NOT NULL REFERENCES users(id),
+  academic_year TEXT,
+  description   TEXT,
+  version       INTEGER NOT NULL DEFAULT 1,           -- يعلو مع كل استبدال
+  uploaded_by   INTEGER NOT NULL REFERENCES users(id),
+  replaced_at   TEXT,
+  replaced_by   INTEGER REFERENCES users(id),
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  deleted_at    TEXT,
+  deleted_by    INTEGER REFERENCES users(id)
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_files_folder  ON files(folder_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_files_deleted ON files(deleted_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_files_access  ON files(access, council_id)`,
+  `CREATE TABLE IF NOT EXISTS file_events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_type TEXT    NOT NULL CHECK (entity_type IN ('file','folder')),
+  entity_id   INTEGER NOT NULL,
+  action      TEXT    NOT NULL,
+  actor_id    INTEGER REFERENCES users(id),
+  old_value   TEXT,
+  new_value   TEXT,
+  note        TEXT,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_fevents_entity ON file_events(entity_type, entity_id)`,
 ];

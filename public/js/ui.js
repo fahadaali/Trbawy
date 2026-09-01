@@ -36,6 +36,23 @@ const ICON_PATHS = {
   lock: '<rect x="4.5" y="10" width="15" height="10" rx="2.2"/><path d="M8 10V7.5a4 4 0 0 1 8 0V10"/>',
   download: '<path d="M12 4v10"/><path d="M8 10.5 12 14.5l4-4"/><path d="M4.5 17.5v2h15v-2"/>',
   addbox: '<rect x="4.5" y="4.5" width="15" height="15" rx="3.5"/><path d="M12 8.5v7M8.5 12h7"/>',
+  // ---- الملفات التربوية ----
+  folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h3.6l2 2.4h7.4a2 2 0 0 1 2 2v8.1a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2z"/>',
+  folderOpen: '<path d="M3.5 18.5V7.5a2 2 0 0 1 2-2h3.6l2 2.4h7.4a2 2 0 0 1 2 2v1.1"/><path d="M3.5 18.5 6 11.5h15.5l-2.6 7z"/>',
+  folderPlus: '<path d="M3.5 7.5a2 2 0 0 1 2-2h3.6l2 2.4h7.4a2 2 0 0 1 2 2v8.1a2 2 0 0 1-2 2H5.5a2 2 0 0 1-2-2z"/><path d="M12 11.5v5M9.5 14h5"/>',
+  upload: '<path d="M12 16.5V5.5"/><path d="M8 9.5 12 5.5l4 4"/><path d="M4.5 17.5v2h15v-2"/>',
+  replace: '<path d="M4.5 9.5a7.5 7.5 0 0 1 12.8-4.3l2.2 2.1"/><path d="M19.5 3.5v4h-4"/><path d="M19.5 14.5a7.5 7.5 0 0 1-12.8 4.3l-2.2-2.1"/><path d="M4.5 20.5v-4h4"/>',
+  trash: '<path d="M5 7h14"/><path d="M9.5 7V5.2h5V7"/><path d="M6.5 7l.9 12.2h9.2L17.5 7"/><path d="M10.5 10.5v6M13.5 10.5v6"/>',
+  restore: '<path d="M4.5 12a7.5 7.5 0 1 0 2.3-5.4L4.5 8.8"/><path d="M4.5 4.5v4.5h4.5"/>',
+  tag: '<path d="M11.2 3.8H20v8.8l-8.4 8.4a1.6 1.6 0 0 1-2.3 0l-6.5-6.5a1.6 1.6 0 0 1 0-2.3z"/><circle cx="16.2" cy="7.8" r="1.3"/>',
+  grid: '<rect x="4" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="4" width="6.5" height="6.5" rx="1.6"/><rect x="4" y="13.5" width="6.5" height="6.5" rx="1.6"/><rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.6"/>',
+  list: '<path d="M8.5 6.5h11M8.5 12h11M8.5 17.5h11"/><path d="M4.6 6.5h.01M4.6 12h.01M4.6 17.5h.01"/>',
+  external: '<path d="M14 4.5h5.5V10"/><path d="M19.5 4.5 12 12"/><path d="M18 14v5.5H4.5V6h5.5"/>',
+  filePdf: '<path d="M7 3.5h6l4 4V20.5H7z"/><path d="M13 3.5v4h4"/><path d="M9.6 17v-4.6h1.2a1.2 1.2 0 0 1 0 2.4H9.6"/><path d="M13.6 17v-4.6h1.1a2.3 2.3 0 0 1 0 4.6z"/>',
+  fileDoc: '<path d="M7 3.5h6l4 4V20.5H7z"/><path d="M13 3.5v4h4"/><path d="M9.4 12.4 10.5 17l1.5-3.2L13.5 17l1.1-4.6"/>',
+  fileSheet: '<path d="M7 3.5h6l4 4V20.5H7z"/><path d="M13 3.5v4h4"/><path d="M9.2 12.6h6.6M9.2 15h6.6M12.5 12.6V17.4"/>',
+  fileSlide: '<path d="M7 3.5h6l4 4V20.5H7z"/><path d="M13 3.5v4h4"/><rect x="9.3" y="12.4" width="6.4" height="4.4" rx="0.8"/>',
+  fileVideo: '<path d="M7 3.5h6l4 4V20.5H7z"/><path d="M13 3.5v4h4"/><path d="M10.8 12.8v4.2l3.8-2.1z"/>',
 };
 function icon(name, size = 20) {
   return `<svg class="ic-svg" viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name] || ''}</svg>`;

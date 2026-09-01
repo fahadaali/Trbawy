@@ -174,6 +174,7 @@ const NAV = [
     { key: 'tasks', label: 'المهام', ico: 'tasks', perm: 'actions.view', roles: ['president','vice_president','first_supervisor','team_member'] },
     { key: 'evaluations', label: 'التقييم', ico: 'evaluations', perm: 'evaluations.view', roles: ['president','vice_president','first_supervisor','team_member'] },
     { key: 'students', label: 'سجل الطلاب', ico: 'students', perm: 'students.view', roles: ['president','vice_president','first_supervisor','team_member'] },
+    { key: 'files', label: 'الملفات التربوية', ico: 'folder', perm: 'files.view', roles: ['president','vice_president','first_supervisor','team_member'] },
   ]},
   { group: 'الإدارة', items: [
     { key: 'users', label: 'المستخدمون', ico: 'users', perm: 'users.view', roles: ['president','system_admin'] },
@@ -688,6 +689,7 @@ async function renderCommitmentCard() {
 // العروض المتخصّصة تُعرَّف في وحداتها:
 // VIEWS.meetings → meetings.js | VIEWS.tasks → tasks.js
 // VIEWS.evaluations → evaluations.js | VIEWS.students → students.js
+// VIEWS.files → files.js (والمستعرض الموحّد في viewer.js)
 
 // ---- المستخدمون ----
 // كل عملية تغيّر وضع المستخدم تمرّ بتقرير أثر يُعرض قبل التنفيذ: ماذا سيحدث،

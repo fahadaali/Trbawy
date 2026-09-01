@@ -67,6 +67,11 @@ export function basePerm(u: RoleStage, key: string): boolean {
     case 'criteria.view': return !A;
     case 'criteria.add': case 'criteria.edit': case 'criteria.delete': return P;
 
+    case 'files.view': return !A;
+    case 'files.add': return P || F;              // ورافعُ الملف يتصرّف في ملفه بحكم رفعه
+    case 'files.edit': return P || F;
+    case 'files.delete': return P;
+
     case 'users.view': case 'users.add': case 'users.edit': case 'users.delete': return P || A;
 
     case 'councils.view': return !A;
@@ -305,3 +310,80 @@ export const canEditSettings = (u: User) => can(u, 'settings.edit');
 export function canEditCouncil(u: User, council: CouncilRow, base: boolean): boolean {
   return decide(u, 'councils.edit', base, hasFullCouncilAccess(u, council));
 }
+
+// ============================================================
+// الملفات التربوية — الأرشيف
+// ============================================================
+//
+// لكل مجلد (ويرثه ما فيه من ملفات) مستوى وصول واحد:
+//   public  — كل من يملك اطلاع الملفات.
+//   council — مربوط بمجلس، فيسري عليه نموذج الاطلاع نفسه حرفًا بحرف: الاطلاع الكامل
+//             يرى كل ملفات المجلس، والاطلاع التاريخي يرى ما رُفع داخل نوافذ خدمته.
+//   private — خاص برافعه وحده، لا يراه غيره ولو كان رئيسًا.
+//
+// والكتابة فوق ذلك تحتاج مفتاحها (files.add/edit/delete)، **ويبقى النطاق**: لا يُكتب
+// في مجلد مجلسٍ إلا بالاطلاع الكامل عليه الآن، ولا في الخاص إلا لصاحبه.
+export type FileAccess = 'public' | 'council' | 'private';
+
+export interface FileNode {
+  access: FileAccess | string;
+  council_id?: number | null;
+  owner_id?: number | null;
+  created_at?: string | null;
+}
+
+/** نطاق المستخدم على كل مجلس، مرةً واحدة لكل طلب (المجالس ثلاثة ثابتة). */
+export async function councilScopes(env: Env, u: User): Promise<Map<number, CouncilScope>> {
+  const rows = await env.DB.prepare('SELECT id, type, default_writer_id FROM councils').all<CouncilRow>();
+  const map = new Map<number, CouncilScope>();
+  for (const c of rows.results) map.set(c.id, await councilScope(env, u, c));
+  return map;
+}
+
+/**
+ * اطلاع المستخدم على مجلد أو ملف بحسب نطاقه.
+ * والاطلاع التاريخي يقع على **الملفات** وحدها: يرى ما رُفع داخل نوافذ خدمته. أما
+ * المجلد فحاويةٌ لا سجل، فيُرى ما دام له اطلاع على مجلسه — وإلا ظهر له ملفٌ في
+ * نتيجة بحث ولم يفتح المجلد الذي يسكنه.
+ */
+export function canViewFileNode(
+  u: User,
+  node: FileNode,
+  scopes: Map<number, CouncilScope>,
+  kind: 'file' | 'folder' = 'file',
+): boolean {
+  if (!can(u, 'files.view')) return false;
+  if (node.access === 'private') return node.owner_id === u.id;
+  if (node.access === 'public') return true;
+  const s = node.council_id != null ? scopes.get(node.council_id) : undefined;
+  if (!s || s.level === 'none') return false;
+  if (s.level === 'full' || kind === 'folder') return true;
+  return withinAccessWindow(node.created_at, s.windows);
+}
+
+/**
+ * الكتابة على مجلد أو ملف: المفتاح أولًا، ثم النطاق.
+ * ورافعُ الملف يتصرّف في ملفه (تعديلًا واستبدالًا وحذفًا إلى السلة) بحكم رفعه لا
+ * بالمفتاح — كما يتابع المكلَّفُ بندَه بحكم إسناده. والحذف النهائي يبقى للمفتاح وحده.
+ */
+export function canWriteFileNode(
+  u: User,
+  node: FileNode,
+  action: 'add' | 'edit' | 'delete',
+  scopes: Map<number, CouncilScope>,
+  opts: { owner?: boolean; kind?: 'file' | 'folder' } = {},
+): boolean {
+  if (!canViewFileNode(u, node, scopes, opts.kind || 'file')) return false;
+  // النطاق: الخاص لصاحبه، ومجلد المجلس لمن يملك اطلاعًا كاملًا عليه الآن
+  const inScope = node.access === 'private'
+    ? node.owner_id === u.id
+    : node.access === 'council'
+      ? (node.council_id != null && scopes.get(node.council_id)?.level === 'full')
+      : true;
+  if (!inScope) return false;
+  if (opts.owner && action !== 'add') return true;
+  return decide(u, `files.${action}`, basePerm(u, `files.${action}`), true);
+}
+
+/** الحذف النهائي من سلة المحذوفات — للمفتاح وحده، ولا يكفي فيه أنه رافع الملف. */
+export const canPurgeFiles = (u: User) => can(u, 'files.delete');

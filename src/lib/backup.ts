@@ -9,6 +9,8 @@ const TABLES = [
   'students', 'student_transfers', 'eval_cycles', 'eval_criteria', 'evaluations',
   'evaluation_scores', 'notifications', 'audit_log', 'settings',
   'user_role_periods', 'meeting_comments', 'meeting_attachments',
+  // أرشيف الملفات التربوية (المجلد قبل ملفاته، والتاق قبل روابطه)
+  'file_folders', 'files', 'file_tags', 'file_tag_links', 'file_events',
 ];
 
 export async function createBackup(env: Env): Promise<string> {

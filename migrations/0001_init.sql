@@ -426,3 +426,93 @@ CREATE TABLE push_subscriptions (
   fail_count   INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_push_subs_user ON push_subscriptions(user_id);
+
+-- ============================================================
+-- الملفات التربوية — أرشيف المنصة (مجلدات · تاقات · أعوام · إصدارات)
+-- ============================================================
+
+-- المجلدات: شجرة بلا عمق محدَّد، ولكل مجلد لون ومستوى وصول.
+--   public  — كل من يملك اطلاع الملفات في المنصة
+--   council — مربوط بمجلس، فيسري عليه نموذج الاطلاع نفسه (كامل/تاريخي)
+--   private — خاص بمنشئه وحده
+CREATE TABLE file_folders (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  name          TEXT    NOT NULL,
+  parent_id     INTEGER REFERENCES file_folders(id),
+  color         TEXT,                              -- لون المجلد (hex)
+  access        TEXT    NOT NULL DEFAULT 'public'
+                        CHECK (access IN ('public','council','private')),
+  council_id    INTEGER REFERENCES councils(id),   -- عند access='council'
+  owner_id      INTEGER NOT NULL REFERENCES users(id),
+  academic_year TEXT,                              -- العام الدراسي (تصنيف)
+  description   TEXT,
+  created_by    INTEGER NOT NULL REFERENCES users(id),
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  deleted_at    TEXT,                              -- سلة المحذوفات
+  deleted_by    INTEGER REFERENCES users(id)
+);
+CREATE INDEX idx_ffolders_parent  ON file_folders(parent_id);
+CREATE INDEX idx_ffolders_deleted ON file_folders(deleted_at);
+
+-- التاقات: اسم ولون، مشتركة على مستوى المنصة
+CREATE TABLE file_tags (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT    NOT NULL UNIQUE,
+  color      TEXT    NOT NULL DEFAULT '#1f6f54',
+  created_by INTEGER REFERENCES users(id),
+  created_at TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+-- ربط التاقات بالملفات والمجلدات معًا (صنف الكيان في العمود)
+CREATE TABLE file_tag_links (
+  tag_id      INTEGER NOT NULL REFERENCES file_tags(id) ON DELETE CASCADE,
+  entity_type TEXT    NOT NULL CHECK (entity_type IN ('file','folder')),
+  entity_id   INTEGER NOT NULL,
+  PRIMARY KEY (tag_id, entity_type, entity_id)
+);
+CREATE INDEX idx_ftaglinks_entity ON file_tag_links(entity_type, entity_id);
+
+-- الملفات: الكائن في R2 + بياناته الوصفية. نطاق الاطلاع منسوخ من مجلده
+-- (ويُحدَّث معه عند النقل أو تغيير نطاق المجلد) ليبقى فحص القوائم استعلامًا واحدًا.
+CREATE TABLE files (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  folder_id     INTEGER REFERENCES file_folders(id),  -- NULL = جذر الأرشيف
+  name          TEXT    NOT NULL,                     -- الاسم المعروض (قابل لإعادة التسمية)
+  r2_key        TEXT    NOT NULL,
+  mime          TEXT,
+  ext           TEXT,
+  size          INTEGER NOT NULL DEFAULT 0,
+  access        TEXT    NOT NULL DEFAULT 'public'
+                        CHECK (access IN ('public','council','private')),
+  council_id    INTEGER REFERENCES councils(id),
+  owner_id      INTEGER NOT NULL REFERENCES users(id),
+  academic_year TEXT,
+  description   TEXT,
+  version       INTEGER NOT NULL DEFAULT 1,           -- يعلو مع كل استبدال
+  uploaded_by   INTEGER NOT NULL REFERENCES users(id),
+  replaced_at   TEXT,
+  replaced_by   INTEGER REFERENCES users(id),
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  deleted_at    TEXT,
+  deleted_by    INTEGER REFERENCES users(id)
+);
+CREATE INDEX idx_files_folder  ON files(folder_id);
+CREATE INDEX idx_files_deleted ON files(deleted_at);
+CREATE INDEX idx_files_access  ON files(access, council_id);
+
+-- سجل التعديل والاستبدال لكل ملف أو مجلد: سطرٌ لكل حدث (رفع · استبدال ·
+-- إعادة تسمية · نقل · تصنيف · حذف · استعادة)، مع القيمة قبل وبعد.
+CREATE TABLE file_events (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  entity_type TEXT    NOT NULL CHECK (entity_type IN ('file','folder')),
+  entity_id   INTEGER NOT NULL,
+  action      TEXT    NOT NULL,
+  actor_id    INTEGER REFERENCES users(id),
+  old_value   TEXT,                                  -- JSON
+  new_value   TEXT,                                  -- JSON
+  note        TEXT,
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_fevents_entity ON file_events(entity_type, entity_id);
