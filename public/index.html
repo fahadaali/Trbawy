@@ -61,25 +61,15 @@
   <script src="/js/files.js"></script>
   <script>
     // تسجيل عامل الخدمة (PWA) — لا يعيق الإقلاع إن فشل.
-    // عند نزول نسخة جديدة نُفعّلها فورًا ونُعيد التحميل مرة واحدة، حتى لا يبقى
-    // المستخدم على نسخة قديمة مخزّنة بعد التحديث.
+    // ومنطقُ التحديث كلّه في AppUpdate داخل ui.js: يُعلن النسخة الجديدة في شريط أسفل
+    // الشاشة ويطبّقها كاملة عند القبول. وإن تعذّر تحميل ui.js سجّلنا العامل وحده حتى
+    // يبقى التطبيق يعمل دون اتصال.
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', function () {
-        navigator.serviceWorker.register('/sw.js').then(function (reg) {
-          reg.addEventListener('updatefound', function () {
-            var sw = reg.installing;
-            if (!sw) return;
-            sw.addEventListener('statechange', function () {
-              if (sw.state === 'installed' && navigator.serviceWorker.controller) sw.postMessage('skip-waiting');
-            });
-          });
-        }).catch(function () {});
-        var reloaded = false;
-        navigator.serviceWorker.addEventListener('controllerchange', function () {
-          if (reloaded) return;
-          reloaded = true;
-          location.reload();
-        });
+        // typeof لا window.AppUpdate: تعريفُ const في سكربت عادي يُنشئ رابطًا عامًّا
+        // لا خاصيةً على window، فالفحص بالخاصية يفشل دائمًا ويسقط إلى البديل.
+        if (typeof AppUpdate !== 'undefined') AppUpdate.init();
+        else navigator.serviceWorker.register('/sw.js').catch(function () {});
       });
     }
   </script>

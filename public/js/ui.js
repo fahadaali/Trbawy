@@ -760,6 +760,120 @@ function maybeShowPushCard() {
   };
 }
 
+// ============================================================
+// تحديث المنصة — إعلانٌ في أسفل الشاشة، وتحديثٌ كامل بنقرة
+// ============================================================
+//
+// كان التحديث يقع صامتًا: عاملُ الخدمة الجديد يتولّى المهمّة من نفسه والصفحة تُعاد
+// تحميلها بلا استئذان — فيقاطع المستخدمَ في منتصف عمله، ولا يعلم أصلًا أن شيئًا تغيّر.
+// والأسوأ أن ذلك لم يكن يقع إلا حين تتغيّر بايتات `sw.js` (انظر بصمة النشر فيه).
+//
+// فصار: نسألُه أولًا في شريط أسفل الشاشة، وإن قَبِل **مسحنا كل ما خُزِّن** ثم سلّمنا
+// المهمّة للنسخة الجديدة وأعدنا التحميل — وهذا هو «التحديث الشامل» الذي يُغني عن حذف
+// تطبيق الشاشة الرئيسية وإعادة تثبيته. ولا يُمسّ تخزينُ المتصفح المحلي، فلا تُفقد جلسةٌ
+// ولا تفضيل.
+const AppUpdate = {
+  reg: null,
+  offered: false,     // عُرض في هذه الجلسة (لا يُلحّ بعد «لاحقًا»)
+  reloading: false,
+
+  async init() {
+    if (!('serviceWorker' in navigator)) return;
+    try {
+      // updateViaCache:'none' — ملفّ عامل الخدمة لا يُقرأ من مخزَن المتصفح أبدًا،
+      // فلا تُخفي نسخةٌ محفوظة تحديثًا نُشر فعلًا.
+      this.reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+    } catch { return; }
+    const reg = this.reg;
+
+    // إعادة التحميل مرة واحدة حين تتولّى النسخة الجديدة المهمّة — ولو من نافذة أخرى
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (this.reloading) return;
+      this.reloading = true;
+      location.reload();
+    });
+
+    // نسخة جاهزة تنتظر منذ زيارة سابقة
+    if (reg.waiting && navigator.serviceWorker.controller) this.offer();
+
+    reg.addEventListener('updatefound', () => {
+      const sw = reg.installing;
+      if (!sw) return;
+      sw.addEventListener('statechange', () => {
+        // بلا controller فهذا أول تثبيت لا تحديث — لا شيء يُعلَن
+        if (sw.state === 'installed' && navigator.serviceWorker.controller) this.offer();
+      });
+    });
+
+    // التطبيق المثبَّت يبقى مفتوحًا أيامًا ولا يسأل المتصفح عن تحديث من نفسه:
+    // نسأل عند العودة إليه، وعند عودة الاتصال، وكل نصف ساعة.
+    const check = () => { try { reg.update(); } catch { /* غير حرج */ } };
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
+    addEventListener('online', check);
+    setInterval(check, 30 * 60 * 1000);
+    setTimeout(check, 5000);
+  },
+
+  /** شريط أسفل الشاشة يعرض التحديث ولا يفرضه. */
+  offer() {
+    if (this.offered || document.getElementById('appUpdate')) return;
+    this.offered = true;
+    const el = document.createElement('div');
+    el.id = 'appUpdate';
+    el.className = 'app-update';
+    el.setAttribute('role', 'status');
+    el.innerHTML = `
+      <div class="ic">${icon('download', 22)}</div>
+      <div class="tx"><b>يتوفّر تحديث للمنصة</b>
+        نسخة جديدة جاهزة. التحديث يُنزّل كل الملفات من جديد — فلا حاجة إلى حذف
+        التطبيق من الشاشة الرئيسية وإعادة إضافته.</div>
+      <div class="ax">
+        <button class="btn btn-sm" id="auGo">تحديث الآن</button>
+        <button class="btn-ghost btn-sm" id="auLater">لاحقًا</button>
+      </div>`;
+    document.body.appendChild(el);
+    requestAnimationFrame(() => el.classList.add('show'));
+    el.querySelector('#auLater').onclick = () => el.remove();
+    el.querySelector('#auGo').onclick = (e) => this.apply(e.currentTarget);
+  },
+
+  /** مسح كل ما خُزِّن: من الصفحة، ومن عامل الخدمة أيضًا (وقد يرى ما لا تراه). */
+  async purge() {
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.map((k) => caches.delete(k)));
+    } catch { /* غير حرج — الجلب من الشبكة أولًا على كل حال */ }
+    const sw = navigator.serviceWorker.controller;
+    if (!sw) return;
+    try {
+      await new Promise((done) => {
+        const ch = new MessageChannel();
+        ch.port1.onmessage = () => done();
+        setTimeout(done, 2500);                 // لا ننتظر عاملًا لا يردّ
+        sw.postMessage({ type: 'purge-caches' }, [ch.port2]);
+      });
+    } catch { /* غير حرج */ }
+  },
+
+  /** التحديث الشامل: امسح المخزَن، ثم سلّم المهمّة للنسخة الجديدة، ثم أعد التحميل. */
+  async apply(btn) {
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner spinner-inline"></span> جارٍ التحديث…';
+    }
+    await this.purge();
+    const waiting = this.reg && this.reg.waiting;
+    if (waiting) {
+      waiting.postMessage('skip-waiting');
+      // إعادة التحميل تقع في controllerchange، وهذه شبكة أمان إن لم يصل الحدث
+      setTimeout(() => { if (!this.reloading) { this.reloading = true; location.reload(); } }, 3500);
+      return;
+    }
+    this.reloading = true;
+    location.reload();
+  },
+};
+
 // ارتفاع الشريط العلوي الحقيقي — تعتمد عليه العناصر العائمة أسفله بدل أرقام ثابتة
 // (يتغيّر بمنطقة الأمان في الأجهزة ذات الشقّ وبتدوير الشاشة).
 function syncTopbarHeight() {

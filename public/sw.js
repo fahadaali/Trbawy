@@ -1,7 +1,15 @@
 // عامل الخدمة — تخزين هيكل التطبيق للفتح السريع والعمل دون اتصال جزئيًا.
 // مهم: لا نُخزّن أي استجابة من /api أبدًا (بيانات حية وحسّاسة).
 
-const CACHE = 'tarbawi-shell-v14';
+// بصمة النشر — يستبدلها خطُّ النشر بمعرّف الإصدار قبل الرفع.
+//
+// وهي أصلُ الحكاية: المتصفح لا يرى «تحديثًا» إلا إذا تغيّرت **بايتات هذا الملف**.
+// وكان اسم المخزَن يُرفَع باليد، فكل نشرةٍ نُسي فيها ذلك تمرّ على التطبيق المثبَّت
+// بلا أثر: عاملُ الخدمة نفسه، والمخزَن نفسه، والواجهة القديمة تبقى — فلا يجد
+// المستخدم مخرجًا إلا حذف التطبيق وإعادة تثبيته. وبالختم الآلي يتغيّر الملف مع
+// كل نشرة بلا استثناء، فيُكتشف التحديث ويُعرَض على المستخدم.
+const BUILD = '__BUILD__';
+const CACHE = 'tarbawi-shell-' + BUILD;
 const SHELL = [
   '/', '/index.html', '/css/styles.css',
   '/js/api.js', '/js/xlsx.js', '/js/ui.js', '/js/ai.js', '/js/app.js',
@@ -17,10 +25,14 @@ const NET_TIMEOUT = 4000;
 
 self.addEventListener('install', (e) => {
   // كل أصل على حدة: فشل واحد لا يُسقط التخزين كله (addAll ترفض الدفعة بأكملها)
+  //
+  // ولا `skipWaiting()` هنا عمدًا: كانت النسخة الجديدة تتولّى المهمّة من نفسها لحظةَ
+  // تثبيتها فتُعاد الصفحة تحميلًا بلا استئذان — تقاطع المستخدم في منتصف عمله ولا
+  // يعلم أنّ شيئًا تغيّر. فتنتظر الآن حتى يقبل التحديث من الشريط أسفل الشاشة
+  // (فتصلها رسالة skip-waiting)، أو حتى تُغلق كل نوافذ التطبيق فتتولّى من نفسها.
   e.waitUntil((async () => {
     const c = await caches.open(CACHE);
     await Promise.all(SHELL.map((u) => c.add(u).catch(() => {})));
-    await self.skipWaiting();
   })());
 });
 
@@ -32,8 +44,25 @@ self.addEventListener('activate', (e) => {
   );
 });
 
-// الصفحة تطلب تفعيل النسخة الجديدة فورًا بعد تنزيلها
-self.addEventListener('message', (e) => { if (e.data === 'skip-waiting') self.skipWaiting(); });
+// رسائل الصفحة إلى عامل الخدمة:
+//   skip-waiting  — تولَّ المهمّة الآن بدل انتظار إغلاق كل النوافذ.
+//   purge-caches  — امسح كل ما خُزِّن (وهو ما يُغني عن حذف التطبيق وإعادة تثبيته).
+//   version       — أيّ إصدار يشتغل الآن.
+self.addEventListener('message', (e) => {
+  const d = e.data;
+  const reply = (msg) => { if (e.ports && e.ports[0]) e.ports[0].postMessage(msg); };
+  if (d === 'skip-waiting') return void self.skipWaiting();
+  if (d && d.type === 'version') return void reply({ build: BUILD });
+  if (d && d.type === 'purge-caches') {
+    e.waitUntil((async () => {
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.map((k) => caches.delete(k)));
+        reply({ ok: true, cleared: keys.length });
+      } catch (err) { reply({ ok: false }); }
+    })());
+  }
+});
 
 function timedFetch(request) {
   return new Promise((resolve, reject) => {
