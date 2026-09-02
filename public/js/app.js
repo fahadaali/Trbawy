@@ -496,7 +496,15 @@ async function renderPushCard() {
 
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
   on('pcOn', async () => {
-    try { await Push.enable(); toast('فُعّلت الإشعارات على هذا الجهاز', 'ok'); } catch (err) { toast(err.message, 'err'); }
+    try {
+      await Push.enable();
+      lastPushFail = null;
+      toast('فُعّلت الإشعارات على هذا الجهاز', 'ok');
+    } catch (err) {
+      // التنبيه يزول قبل أن يُقرأ، والسبب هو المطلوب — فيبقى في البطاقة بسطره التقني
+      toast(err.message, 'err');
+      lastPushFail = { error: err.message, detail: err.detail, code: err.code };
+    }
     renderPushCard();
   });
   on('pcOff', async () => {

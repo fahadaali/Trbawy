@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import type { Env, Variables } from './types';
 import { ensureBootstrap } from './lib/bootstrap';
 import { rememberSiteOrigin } from './lib/webpush';
+import { buildStamp } from './lib/buildstamp';
 
 import authRoutes from './routes/auth';
 import userRoutes from './routes/users';
@@ -63,6 +64,36 @@ app.route('/api/ai', aiRoutes);
 app.onError((err, c) => {
   console.error('API error:', err);
   return c.json({ error: 'حدث خطأ داخلي في الخادم' }, 500);
+});
+
+// عامل الخدمة يُقدَّم من الـWorker مختومًا ببصمة النشر — وبلا ذلك تمرّ النشرة بلا أن
+// يكتشف المتصفحُ تحديثَها، فيبقى التطبيق المثبَّت على واجهةٍ قديمة ولا مخرج لصاحبه إلا
+// حذفه وإعادة تثبيته (انظر lib/buildstamp).
+//
+// والمسار `/service-worker.js` لا `/sw.js` عمدًا: الأصول الثابتة تُقدَّم **قبل** أن
+// يعمل الـWorker، فلو حمل المسارُ اسم ملفٍ موجود في public لَخرج بلا ختم. ونصّه يُقرأ
+// من ذلك الملف نفسه، فيبقى مصدرًا واحدًا يُحرَّر كأيّ ملف جافاسكربت.
+app.get('/service-worker.js', async (c) => {
+  const res = await c.env.ASSETS.fetch(new Request(new URL('/sw.js', c.req.url).toString()));
+  if (!res.ok) return res;
+  let body = await res.text();
+  // خطُّ النشر قد يكون ختمها قبلنا — فلا نُعيد الحساب حينئذٍ
+  if (body.includes("'__BUILD__'")) {
+    try {
+      const stamp = await buildStamp(c.env, new URL(c.req.url).origin);
+      if (stamp) body = body.replace("'__BUILD__'", JSON.stringify(stamp));
+    } catch (e) {
+      console.error('build stamp failed (non-fatal)', e);
+    }
+  }
+  return new Response(body, {
+    headers: {
+      'Content-Type': 'application/javascript; charset=utf-8',
+      // لا يُخزَّن: نسخةٌ محفوظة من هذا الملف تُخفي التحديث الذي جاءت لتُعلنه
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Service-Worker-Allowed': '/',
+    },
+  });
 });
 
 // صفحات مُخدَّمة من الخادم: /verify، /print، /file

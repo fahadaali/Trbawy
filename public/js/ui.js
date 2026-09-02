@@ -772,6 +772,10 @@ function maybeShowPushCard() {
 // المهمّة للنسخة الجديدة وأعدنا التحميل — وهذا هو «التحديث الشامل» الذي يُغني عن حذف
 // تطبيق الشاشة الرئيسية وإعادة تثبيته. ولا يُمسّ تخزينُ المتصفح المحلي، فلا تُفقد جلسةٌ
 // ولا تفضيل.
+// المسار الذي يُقدَّم منه عامل الخدمة مختومًا ببصمة النشر (انظر src/index.ts).
+// ونطاقُه `/` لأنه في جذر الموقع، فيتولّى التطبيق كله كما كان.
+const SW_URL = '/service-worker.js';
+
 const AppUpdate = {
   reg: null,
   offered: false,     // عُرض في هذه الجلسة (لا يُلحّ بعد «لاحقًا»)
@@ -782,7 +786,7 @@ const AppUpdate = {
     try {
       // updateViaCache:'none' — ملفّ عامل الخدمة لا يُقرأ من مخزَن المتصفح أبدًا،
       // فلا تُخفي نسخةٌ محفوظة تحديثًا نُشر فعلًا.
-      this.reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+      this.reg = await navigator.serviceWorker.register(SW_URL, { updateViaCache: 'none' });
     } catch { return; }
     const reg = this.reg;
 
@@ -1147,6 +1151,51 @@ const Push = {
   },
 
   /** تفعيل الإشعارات — يجب استدعاؤها من نقرة مستخدم (شرط iOS و Safari). */
+  /**
+   * إخفاقُ الاشتراك يأتي من المتصفح بالإنجليزية وبلا دلالة لمن يقرؤه
+   * («Registration failed - push service error» مثلًا)، فنترجمه إلى ما يُفعَل.
+   * وأشهرُها على الحاسب: تعذُّر بلوغ خدمة الدفع — تحجبها شبكاتُ الجهات كثيرًا،
+   * فيعمل الجوال على شبكته ويقف الحاسب على شبكة المدرسة.
+   */
+  errorOf(e) {
+    const name = (e && e.name) || '';
+    const raw = String((e && e.message) || e || '');
+    const detail = [name, raw].filter(Boolean).join(': ').slice(0, 200);
+    const of = (code, message) => Object.assign(new Error(message), { code, detail });
+    if (name === 'NotAllowedError') return of('denied', 'لم يُمنح إذن الإشعارات لهذا الجهاز');
+    if (name === 'NotSupportedError') return of('unsupported', 'هذا المتصفح لا يدعم إشعارات الدفع المعمّاة');
+    if (name === 'InvalidStateError') {
+      return of('stale', 'على هذا المتصفح تسجيلٌ قديم عالق — أوقف الإشعارات ثم فعّلها من جديد.');
+    }
+    if (name === 'AbortError' || /push service|registration failed/i.test(raw)) {
+      return of('push-service',
+        'تعذّر على المتصفح تسجيل هذا الجهاز لدى خدمة الدفع. وأكثر ما يقع هذا حين تحجب '
+        + 'الشبكةُ تلك الخدمة — وشبكات الجهات والمدارس تفعله كثيرًا — أو حين يمنعها المتصفح. '
+        + 'جرّب شبكة أخرى أو بيانات الجوال، أو متصفحًا آخر. وإشعاراتُ المنصة داخل الجرس '
+        + 'تصلك على كل حال.');
+    }
+    return of('error', raw || 'تعذّر تفعيل الإشعارات على هذا الجهاز');
+  },
+
+  /** اشتراكٌ جديد بمحاولة ثانية: الإخفاق يقع عابرًا، وقد يمنعه تسجيلٌ قديم عالق. */
+  async subscribeFresh(reg, key) {
+    const opts = { userVisibleOnly: true, applicationServerKey: b64ToBytes(key) };
+    try {
+      return await reg.pushManager.subscribe(opts);
+    } catch (first) {
+      try {
+        const old = await reg.pushManager.getSubscription();
+        if (old) await old.unsubscribe();
+      } catch { /* لا تسجيل قديم نُنظّفه */ }
+      await new Promise((r) => setTimeout(r, 900));
+      try {
+        return await reg.pushManager.subscribe(opts);
+      } catch (second) {
+        throw this.errorOf(second);
+      }
+    }
+  },
+
   async enable() {
     if (!this.supported()) throw new Error('هذا المتصفح لا يدعم إشعارات الدفع');
     if (this.iosNeedsInstall()) throw new Error('على iPhone: أضف المنصة إلى الشاشة الرئيسية أولًا ثم فعّل الإشعارات من داخل التطبيق');
@@ -1160,10 +1209,8 @@ const Push = {
 
     let sub = await reg.pushManager.getSubscription();
     // اشتراك قائم بمفتاح خادم مختلف لا يصلح — نُلغيه ونشترك من جديد
-    if (sub && !this.sameKey(sub, key)) { try { await sub.unsubscribe(); } catch {} sub = null; }
-    if (!sub) {
-      sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) });
-    }
+    if (sub && !this.sameKey(sub, key)) { try { await sub.unsubscribe(); } catch { /* سقط أصلًا */ } sub = null; }
+    if (!sub) sub = await this.subscribeFresh(reg, key);
     await this.register(sub);
     return sub;
   },
@@ -1220,11 +1267,9 @@ const Push = {
         try { await sub.unsubscribe(); } catch { /* سقط أصلًا */ }
         sub = null;
       }
-      if (!sub) {
-        sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) });
-      }
+      if (!sub) sub = await this.subscribeFresh(reg, key);
       await this.register(sub);
-    } catch { /* غير حرج */ }
+    } catch { /* غير حرج — والتفعيل اليدوي يقول السبب حين يُطلب */ }
   },
 };
 

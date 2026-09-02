@@ -13,6 +13,8 @@ export interface Env {
   VAPID_SUBJECT?: string;
   // Workers AI — قد يكون غير مُهيّأ (تُعطَّل مزايا الذكاء الاصطناعي عندها بلطف)
   AI?: { run: (model: string, input: any) => Promise<any> };
+  // معرّف نسخة الـWorker — يتغيّر مع كل نشرة، وتُختم به بصمةُ عامل الخدمة
+  CF_VERSION_METADATA?: { id: string; tag?: string; timestamp?: string };
 }
 
 export type Role =

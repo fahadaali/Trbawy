@@ -69,7 +69,7 @@
         // typeof لا window.AppUpdate: تعريفُ const في سكربت عادي يُنشئ رابطًا عامًّا
         // لا خاصيةً على window، فالفحص بالخاصية يفشل دائمًا ويسقط إلى البديل.
         if (typeof AppUpdate !== 'undefined') AppUpdate.init();
-        else navigator.serviceWorker.register('/sw.js').catch(function () {});
+        else navigator.serviceWorker.register('/service-worker.js').catch(function () {});
       });
     }
   </script>
