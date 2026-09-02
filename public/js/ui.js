@@ -733,7 +733,10 @@ function maybeShowInstallCard() {
  * لا شيء يُذكّر المستخدم بتفعيلها — هذه البطاقة هي التذكير، وتظهر مرة واحدة.
  */
 function maybeShowPushCard() {
-  if (!isStandalone() || !Push.supported()) return;
+  // الشرط كان «التطبيق مثبَّت» فحُرم منها كل متصفح غير مثبَّت — أندرويد وويندوز
+  // وماك — والدفع يعمل فيها جميعًا، فبقيت أجهزةٌ بلا إشعارات ولا دعوة لتفعيلها.
+  // والتثبيت شرطُ iPhone وحده، وهو ما يقوله iosNeedsInstall.
+  if (!Push.supported() || Push.iosNeedsInstall()) return;
   if (Push.permission() !== 'default') return;
   if (localStorage.getItem('push_prompt_dismissed') === '1') return;
   if (!onDashboard() || document.querySelector('.a2hs')) return;
@@ -1081,20 +1084,29 @@ const Push = {
     }
   },
 
-  /** مزامنة صامتة عند الإقلاع: جهاز مأذون له يبقى مسجَّلًا على الخادم. */
+  /**
+   * مزامنة صامتة عند الإقلاع: جهاز مأذون له يبقى مسجَّلًا على الخادم.
+   *
+   * وكان الخروج هنا بلا اشتراك (`if (!sub) return`) عطبًا صامتًا: الاشتراك يسقط من
+   * الجهاز وحده — بعد تحديث تطبيق الشاشة الرئيسية على iPhone، أو مسح بيانات الموقع،
+   * أو تجديد عامل الخدمة — فيبقى الإذن ممنوحًا ولا اشتراك، فلا يصل الجهازَ شيء أبدًا
+   * ولا يُخبَر صاحبه. والإذن ممنوح أصلًا، فالاشتراك من جديد لا يحتاج نقرة ولا يسأل أحدًا.
+   */
   async syncSilently() {
     try {
       if (!this.supported() || this.permission() !== 'granted') return;
       const reg = await this.registration();
       if (!reg || !reg.pushManager) return;
-      let sub = await reg.pushManager.getSubscription();
-      if (!sub) return;
-      // مفتاح الخادم قد يتبدّل (إعادة تهيئة أو توليد جديد)، والاشتراك القديم يبقى
-      // يبدو «مفعَّلًا» بينما ترفض خدمةُ الدفع كل إشعار. نكتشفه هنا ونشترك من جديد
-      // بلا إزعاج — والإذن ممنوح أصلًا فلا حاجة إلى نقرة.
       const { key, enabled } = await API.get('/notifications/push/key');
-      if (enabled && key && !this.sameKey(sub, key)) {
-        try { await sub.unsubscribe(); } catch {}
+      if (!enabled || !key) return;
+      let sub = await reg.pushManager.getSubscription();
+      // مفتاح الخادم قد يتبدّل (إعادة تهيئة أو توليد جديد)، والاشتراك القديم يبقى
+      // يبدو «مفعَّلًا» بينما ترفض خدمةُ الدفع كل إشعار — فنُسقطه ونشترك من جديد.
+      if (sub && !this.sameKey(sub, key)) {
+        try { await sub.unsubscribe(); } catch { /* سقط أصلًا */ }
+        sub = null;
+      }
+      if (!sub) {
         sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(key) });
       }
       await this.register(sub);

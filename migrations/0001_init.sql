@@ -360,6 +360,7 @@ CREATE TABLE settings (
   current_academic_year TEXT,                  -- السنة الدراسية الحالية
   push_public_key  TEXT,                       -- مفتاح VAPID العام (يُولَّد مرة إن لم يُضبط كسرّ بيئة)
   push_private_key TEXT,                       -- مفتاح VAPID الخاص
+  site_origin    TEXT,                         -- أصل الموقع كما وصل به طلب حقيقي (لرمز VAPID في مسار الكرون)
   updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 

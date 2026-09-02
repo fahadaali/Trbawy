@@ -123,10 +123,12 @@ app.post('/meeting/:meetingId', async (c) => {
     await c.env.DB.batch(assignees.map((uid) =>
       c.env.DB.prepare('INSERT OR IGNORE INTO action_assignees (action_item_id, user_id) VALUES (?, ?)').bind(actionId, uid)));
     // إشعار المسؤولين (بريد + داخل المنصة)
+    // الرابط يُعرّف البند لا الشاشة: هو ما يفتحه المستخدم، وهو وسمُ الإشعار على
+    // الجهاز — ورابطٌ واحد لكل الإسنادات يجعل الثاني يمحو الأول من شريط التنبيهات.
     await notifyMany(c.env, assignees, {
       type: 'action_assigned',
       title: 'إسناد ' + (type === 'task' ? 'مهمة' : type === 'decision' ? 'قرار' : 'توصية'),
-      body: text, link: '#/tasks',
+      body: text, link: `#/tasks/${actionId}`,
     });
   }
 

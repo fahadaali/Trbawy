@@ -1,7 +1,7 @@
 // عامل الخدمة — تخزين هيكل التطبيق للفتح السريع والعمل دون اتصال جزئيًا.
 // مهم: لا نُخزّن أي استجابة من /api أبدًا (بيانات حية وحسّاسة).
 
-const CACHE = 'tarbawi-shell-v13';
+const CACHE = 'tarbawi-shell-v14';
 const SHELL = [
   '/', '/index.html', '/css/styles.css',
   '/js/api.js', '/js/xlsx.js', '/js/ui.js', '/js/ai.js', '/js/app.js',
@@ -92,7 +92,10 @@ self.addEventListener('push', (e) => {
     badge: '/icons/icon-192.png?v=2',
     lang: 'ar',
     dir: 'rtl',
-    tag: d.type || 'tarbawi',          // نوع واحد لا يتراكم عشرات المرات
+    // الوسم يُعرّف **البند** لا نوعه: كان النوع وحده وسمًا، فكان إشعار المهمة الثانية
+    // يحلّ محلّ الأولى في الشريط فلا يرى المستخدم إلا آخر واحد — «التنبيهات لا تصل».
+    // وبالرابط يتراكم المختلف ويحلّ التذكير التالي لنفس البند محلّ سابقه وحده.
+    tag: d.link ? `${d.type || 'n'}:${d.link}` : (d.type || 'tarbawi'),
     renotify: true,
     data: { link: d.link || '#/notifications' },
     timestamp: Date.now(),

@@ -210,13 +210,40 @@ export function rememberSiteOrigin(url: string): void {
 export function forgetVapidKeys(): void { cachedKeys = undefined; }
 
 /**
+ * حقل `sub` في رمز VAPID — وهو ما تتعرّف به خدمةُ الدفع على صاحب الخدمة.
+ *
+ * ولمسار الكرون هنا شأنٌ خاص: العزلة المجدولة لا يصلها طلبٌ يُعرَف منه أصلُ الموقع،
+ * فكانت توقّع بـ`mailto:no-reply@tarbawi.local` — نطاقٌ لا وجود له، وبعض الخدمات
+ * تتشدّد في هذا الحقل فترفض الرمز كلَّه. والتذكيراتُ اليومية كلها تمرّ من هناك.
+ * فنحفظ الأصل حين يُعرف من طلبٍ حقيقي، ونقرأه في المسار الذي لا يعرفه.
+ */
+async function resolveSubject(env: Env): Promise<string> {
+  if (env.VAPID_SUBJECT) return env.VAPID_SUBJECT;
+  try {
+    const row = await env.DB.prepare('SELECT site_origin FROM settings WHERE id = 1')
+      .first<{ site_origin: string | null }>();
+    if (siteOrigin) {
+      if (row?.site_origin !== siteOrigin) {
+        await env.DB.prepare(
+          `INSERT INTO settings (id, site_origin) VALUES (1, ?)
+           ON CONFLICT(id) DO UPDATE SET site_origin = excluded.site_origin`,
+        ).bind(siteOrigin).run();
+      }
+      return siteOrigin;
+    }
+    if (row?.site_origin) return row.site_origin;
+  } catch { /* العمود أو الجدول غير موجود بعد — نمضي إلى البديل */ }
+  return siteOrigin || 'mailto:no-reply@tarbawi.local';
+}
+
+/**
  * مفاتيح الدفع لهذا النشر.
  * الأفضلية لأسرار البيئة (VAPID_*)، وإلا تُولَّد مرة واحدة وتُحفظ في الإعدادات
  * حتى تعمل الإشعارات دون خطوات إعداد يدوية. تغيير المفاتيح يُبطل الاشتراكات القائمة.
  */
 export async function getVapidKeys(env: Env): Promise<VapidKeys | null> {
   if (cachedKeys !== undefined) return cachedKeys;
-  const subject = env.VAPID_SUBJECT || siteOrigin || 'mailto:no-reply@tarbawi.local';
+  const subject = await resolveSubject(env);
   if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) {
     cachedKeys = { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY, subject };
     return cachedKeys;

@@ -1,6 +1,6 @@
 // التذكيرات اليومية المجدولة (Cron): المهام والدورات.
 import type { Env } from '../types';
-import { notify } from './notify';
+import { notify, notifyMany } from './notify';
 import { arNum } from './charts';
 import { evaluatorProgress } from './evalprogress';
 
@@ -82,10 +82,16 @@ async function taskReminders(env: Env): Promise<void> {
     else if (t.due_date < today) { type = 'task_overdue'; title = 'تنبيه: مهمة متأخرة'; }
     if (!type) continue;
 
+    // إشعارٌ واحد لكل المكلَّفين لا إشعارٌ لكلّ واحد: كل نداء `notify` يعني استعلاماته
+    // وإرساله المستقل، وحصّةُ الطلبات الفرعية في التشغيل المجدول محدودة — فإن نفدت
+    // في منتصف الجولة توقّفت بقيةُ التذكيرات صامتةً. والنتيجة للمستخدم واحدة.
     const assignees = await assigneesOf(env, t.id);
+    const pending: number[] = [];
     for (const uid of assignees) {
-      if (await alreadySentToday(env, uid, type, link)) continue;
-      await notify(env, { userId: uid, type, title, body: `${t.display_number} — ${t.text}`, link });
+      if (!(await alreadySentToday(env, uid, type, link))) pending.push(uid);
+    }
+    if (pending.length) {
+      await notifyMany(env, pending, { type, title, body: `${t.display_number} — ${t.text}`, link });
     }
 
     const chair = await env.DB.prepare(

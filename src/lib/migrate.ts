@@ -24,6 +24,8 @@ const COLUMN_ADDS = [
   "ALTER TABLE users ADD COLUMN color TEXT",
   // منشئ البند — المهمة المستقلة (بلا محضر) يديرها منشئها
   "ALTER TABLE action_items ADD COLUMN created_by INTEGER",
+  // أصل الموقع — يحتاجه رمز VAPID في مسار الكرون حيث لا طلبَ يُعرف منه
+  "ALTER TABLE settings ADD COLUMN site_origin TEXT",
 ];
 
 /**

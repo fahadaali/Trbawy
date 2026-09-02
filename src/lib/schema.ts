@@ -287,6 +287,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   current_academic_year TEXT,                  -- السنة الدراسية الحالية
   push_public_key  TEXT,
   push_private_key TEXT,
+  site_origin    TEXT,                          -- أصل الموقع كما وصل به طلب حقيقي (لرمز VAPID في مسار الكرون)
   updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 )`,
   `CREATE TABLE IF NOT EXISTS meeting_comments (
