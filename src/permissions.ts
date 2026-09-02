@@ -219,6 +219,97 @@ export async function canViewMeeting(
   return await isMeetingAttendee(env, meeting.id, u.id);
 }
 
+// ============================================================
+// المهام المستقلة (بلا محضر)
+// ============================================================
+//
+// المهمة لا تُولد كلها من اجتماع: يُكلَّف الرجل بعمل في يومه فيُسجَّل مباشرة. والبند
+// المستقل بندٌ كامل في كل شيء (ترقيمٌ وحالة واستحقاق ومسؤولون وقياس التزام)، وفارقه
+// الوحيد أن `source_meeting_id` فيه NULL — فلا يُرحَّل في جداول متابعة المحاضر، ويُقاس
+// اطلاعه بتاريخ إنشائه هو لا بتاريخ محضرٍ لا وجود له.
+//
+// ومن يُسنَد إليه محكوم بثلاث درجات:
+//   all        — الرئيس ونائبه: كل من في المنصة.
+//   stage_team — المشرف الأول وعضو الفريق: أعضاء مجلس مرحلته (ونفسه معهم).
+//   self       — من لا مرحلة له ولا رئاسة: نفسه وحده.
+export type AssignScope = 'all' | 'stage_team' | 'self';
+
+/** الأصل: من يُنشئ مهمة مستقلة؟ كل ذي دور تربوي — ومدير النظام خارج المحتوى. */
+export const baseCanCreateStandalone = (u: RoleStage) => !isAdmin(u);
+
+/** إنشاء مهمة مستقلة — الأصل من الدور، والاستثناء على «إضافة بند» يسبقه. */
+export const canCreateStandaloneTask = (u: User) =>
+  decide(u, 'actions.add', baseCanCreateStandalone(u));
+
+/** درجة الإسناد: على من يملك أن يضع المهمة. */
+export function assignScopeOf(u: RoleStage): AssignScope {
+  if (isPresident(u) || isVice(u)) return 'all';
+  if ((isFirstSupervisor(u) || isTeamMember(u)) && (u.stage === 'secondary' || u.stage === 'middle'))
+    return 'stage_team';
+  return 'self';
+}
+
+export interface AssignableUser {
+  id: number; name: string; role: string; stage: string | null; color: string | null;
+}
+
+/**
+ * من يجوز لهذا المستخدم إسناد مهمة مستقلة إليهم — ونفسُه فيهم دائمًا.
+ * «فريقه» = أعضاء مجلس مرحلته المسجَّلون (council_members) لا كل من يشاركه المرحلة:
+ * العضوية هي ما يُقرّ به المجلس، وهي نفسها قاعدة التفويض القائمة.
+ * والاستعلام بالنطاق لا بقائمة معرّفات: قائمةُ `IN (?…)` تكبر بعدد المستخدمين وتصطدم
+ * بحدّ معاملات الاستعلام، والنطاق يصف المطلوب نفسه بشرطٍ واحد.
+ */
+// الترتيب: الرئاسة أولًا ثم المشرفون ثم الأعضاء، وداخل كل رتبة بالاسم.
+const rankOrder = (t: string) =>
+  `ORDER BY CASE ${t}.role WHEN 'president' THEN 1 WHEN 'vice_president' THEN 2
+                           WHEN 'first_supervisor' THEN 3 ELSE 4 END, ${t}.name`;
+const USER_COLS = (t: string) => `${t}.id, ${t}.name, ${t}.role, ${t}.stage, ${t}.color`;
+
+export async function assignableUsers(env: Env, u: User): Promise<AssignableUser[]> {
+  const scope = assignScopeOf(u);
+  const self = async () => (await env.DB.prepare(
+    'SELECT id, name, role, stage, color FROM users WHERE id = ?',
+  ).bind(u.id).all<AssignableUser>()).results;
+
+  if (scope === 'self') return await self();
+
+  const rows = scope === 'all'
+    ? await env.DB.prepare(
+      `SELECT ${USER_COLS('us')} FROM users us
+        WHERE us.is_active = 1 AND us.deleted_at IS NULL AND us.role != 'system_admin'
+        ${rankOrder('us')}`,
+    ).all<AssignableUser>()
+    : await env.DB.prepare(
+      `SELECT ${USER_COLS('us')} FROM council_members cm
+         JOIN users us ON us.id = cm.user_id
+         JOIN councils co ON co.id = cm.council_id
+        WHERE co.type = ? AND us.is_active = 1 AND us.deleted_at IS NULL
+          AND us.role != 'system_admin'
+        ${rankOrder('us')}`,
+    ).bind(u.stage).all<AssignableUser>();
+
+  // نفسُه في القائمة دائمًا ولو لم يكن مسجَّلًا في مجلس مرحلته
+  if (rows.results.some((r) => r.id === u.id)) return rows.results;
+  return [...await self(), ...rows.results];
+}
+
+/** المعرّفات وحدها — لفحص ما يصل من الواجهة قبل الكتابة. */
+export async function assignableUserIds(env: Env, u: User): Promise<Set<number>> {
+  return new Set((await assignableUsers(env, u)).map((r) => r.id));
+}
+
+/**
+ * مجلس المهمة المستقلة: مجلس مرحلة منشئها، والتربويّ لمن لا مرحلة له.
+ * المجلس هنا ليس مصدر المهمة بل وعاء ترقيمها ونطاق الاطلاع عليها — والمكلَّف
+ * يرى بنده على كل حال بحكم إسناده.
+ */
+export async function standaloneCouncilId(env: Env, u: User): Promise<number | null> {
+  const type: CouncilType = u.stage === 'secondary' ? 'secondary' : u.stage === 'middle' ? 'middle' : 'educational';
+  const row = await env.DB.prepare('SELECT id FROM councils WHERE type = ?').bind(type).first<{ id: number }>();
+  return row?.id ?? null;
+}
+
 // ---- إنشاء دعوة/محضر ----
 // التربوي: الرئيس فقط. مجلس المرحلة: الرئيس أو مشرف تلك المرحلة.
 /** القاعدة الأصلية للإنشاء بلا استثناءات — تُستعمل أساسًا لقرارات أخرى تشتقّ منها. */

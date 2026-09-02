@@ -176,7 +176,8 @@ CREATE TABLE action_items (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   type              TEXT    NOT NULL CHECK (type IN ('decision','recommendation','task')),
   council_id        INTEGER NOT NULL REFERENCES councils(id),
-  source_meeting_id INTEGER NOT NULL REFERENCES meetings(id),
+  -- NULL = مهمة مستقلة أُنشئت خارج محضر (المهام لا تُولد كلها من اجتماع)
+  source_meeting_id INTEGER REFERENCES meetings(id),
   number            INTEGER NOT NULL,
   display_number    TEXT    NOT NULL,
   text              TEXT    NOT NULL,
@@ -196,6 +197,7 @@ CREATE TABLE action_items (
   delay_days        INTEGER,                   -- الإنجاز ناقص الاستحقاق بالأيام: موجب = تأخير
   carried_count     INTEGER NOT NULL DEFAULT 0,-- عدد المحاضر التي رُحِّل إليها قبل إنجازه (مؤشر التعثّر)
   last_carried_meeting_id INTEGER REFERENCES meetings(id),
+  created_by        INTEGER REFERENCES users(id),  -- منشئ البند (المهمة المستقلة يديرها منشئها)
   created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (council_id, type, number)
@@ -203,6 +205,7 @@ CREATE TABLE action_items (
 CREATE INDEX idx_actions_council ON action_items(council_id);
 CREATE INDEX idx_actions_meeting ON action_items(source_meeting_id);
 CREATE INDEX idx_actions_status  ON action_items(status);
+CREATE INDEX idx_actions_due     ON action_items(due_date);
 
 CREATE TABLE action_assignees (
   action_item_id INTEGER NOT NULL REFERENCES action_items(id) ON DELETE CASCADE,

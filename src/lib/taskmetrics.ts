@@ -6,6 +6,9 @@
 //   التأخير       = أيام (الإنجاز − الاستحقاق) الموجبة، مسجَّلة على البند نفسه لحظة الإنجاز.
 //   التعثّر       = بند متعثر الحالة، أو متأخر عن استحقاقه اليوم، أو رُحِّل لأكثر من محضر.
 //   نسبة الالتزام = ٦٠٪ من نسبة الإنجاز + ٤٠٪ من دقة التوقيت.
+//
+// والمهام المستقلة (بلا محضر) تدخل في القياس كغيرها — فالمكلَّف يُقاس بما عليه لا
+// بمصدره — ولذلك الانضمام إلى المحاضر LEFT لا يُسقطها، ومداها الزمني تاريخُ إنشائها.
 import type { Env } from '../types';
 import { assigneesJson } from './people';
 import { effStatusSql } from './status';
@@ -62,8 +65,9 @@ function whereOf(f: StatsFilter): { sql: string; binds: any[] } {
   if (f.councilId) { where.push('a.council_id = ?'); binds.push(f.councilId); }
   if (f.type) { where.push('a.type = ?'); binds.push(f.type); }
   if (f.userId) { where.push('aa.user_id = ?'); binds.push(f.userId); }
-  if (f.from) { where.push('sm.greg_date >= ?'); binds.push(f.from); }
-  if (f.to) { where.push('sm.greg_date <= ?'); binds.push(f.to); }
+  // مرجع المدى الزمني: تاريخ انعقاد المحضر المصدر، والمهمةُ المستقلة بتاريخ إنشائها
+  if (f.from) { where.push('COALESCE(sm.greg_date, date(a.created_at)) >= ?'); binds.push(f.from); }
+  if (f.to) { where.push('COALESCE(sm.greg_date, date(a.created_at)) <= ?'); binds.push(f.to); }
   return { sql: where.join(' AND '), binds };
 }
 
@@ -116,7 +120,7 @@ export async function assigneeStats(env: Env, f: StatsFilter): Promise<AssigneeS
     `SELECT u.id AS user_id, u.name, u.role, u.stage, u.color, ${AGGREGATES}
        FROM action_assignees aa
        JOIN action_items a ON a.id = aa.action_item_id
-       JOIN meetings sm ON sm.id = a.source_meeting_id
+       LEFT JOIN meetings sm ON sm.id = a.source_meeting_id
        JOIN users u ON u.id = aa.user_id
       WHERE ${sql}
       GROUP BY u.id
@@ -136,8 +140,8 @@ export async function overallStats(env: Env, f: StatsFilter) {
   const from = f.userId
     ? `action_assignees aa
        JOIN action_items a ON a.id = aa.action_item_id
-       JOIN meetings sm ON sm.id = a.source_meeting_id`
-    : `action_items a JOIN meetings sm ON sm.id = a.source_meeting_id`;
+       LEFT JOIN meetings sm ON sm.id = a.source_meeting_id`
+    : `action_items a LEFT JOIN meetings sm ON sm.id = a.source_meeting_id`;
   const r = await env.DB.prepare(`SELECT ${AGGREGATES} FROM ${from} WHERE ${sql}`).bind(...binds).first<any>();
   return shape(r || {});
 }
@@ -147,8 +151,8 @@ export async function stalledActions(env: Env, f: StatsFilter, limit = 10) {
   const where: string[] = ["a.status NOT IN ('done','cancelled')"];
   const binds: any[] = [];
   if (f.councilId) { where.push('a.council_id = ?'); binds.push(f.councilId); }
-  if (f.from) { where.push('sm.greg_date >= ?'); binds.push(f.from); }
-  if (f.to) { where.push('sm.greg_date <= ?'); binds.push(f.to); }
+  if (f.from) { where.push('COALESCE(sm.greg_date, date(a.created_at)) >= ?'); binds.push(f.from); }
+  if (f.to) { where.push('COALESCE(sm.greg_date, date(a.created_at)) <= ?'); binds.push(f.to); }
   return (await env.DB.prepare(
     `SELECT a.id, a.type, a.display_number, a.text, a.due_date, a.progress,
             ${effStatusSql('a.status', 'a.due_date', "date('now')")} AS status,
@@ -156,7 +160,7 @@ export async function stalledActions(env: Env, f: StatsFilter, limit = 10) {
             CASE WHEN a.due_date IS NOT NULL AND a.due_date < date('now')
                  THEN CAST(julianday(date('now')) - julianday(date(a.due_date)) AS INTEGER) ELSE 0 END AS overdue_days,
             ${assigneesJson('a')} AS assignees
-       FROM action_items a JOIN meetings sm ON sm.id = a.source_meeting_id
+       FROM action_items a LEFT JOIN meetings sm ON sm.id = a.source_meeting_id
       WHERE ${where.join(' AND ')}
       ORDER BY overdue_days DESC, a.carried_count DESC, a.due_date
       LIMIT ?`,

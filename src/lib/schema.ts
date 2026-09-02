@@ -139,7 +139,8 @@ export const SCHEMA_STATEMENTS: string[] = [
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   type              TEXT    NOT NULL CHECK (type IN ('decision','recommendation','task')),
   council_id        INTEGER NOT NULL REFERENCES councils(id),
-  source_meeting_id INTEGER NOT NULL REFERENCES meetings(id),
+  -- NULL = مهمة مستقلة أُنشئت خارج محضر (المهام لا تُولد كلها من اجتماع)
+  source_meeting_id INTEGER REFERENCES meetings(id),
   number            INTEGER NOT NULL,
   display_number    TEXT    NOT NULL,
   text              TEXT    NOT NULL,
@@ -157,6 +158,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   delay_days        INTEGER,
   carried_count     INTEGER NOT NULL DEFAULT 0,
   last_carried_meeting_id INTEGER REFERENCES meetings(id),
+  created_by        INTEGER REFERENCES users(id),  -- منشئ البند (المهمة المستقلة يديرها منشئها)
   created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
   UNIQUE (council_id, type, number)
@@ -164,6 +166,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_actions_council ON action_items(council_id)`,
   `CREATE INDEX IF NOT EXISTS idx_actions_meeting ON action_items(source_meeting_id)`,
   `CREATE INDEX IF NOT EXISTS idx_actions_status  ON action_items(status)`,
+  `CREATE INDEX IF NOT EXISTS idx_actions_due     ON action_items(due_date)`,
   `CREATE TABLE IF NOT EXISTS action_assignees (
   action_item_id INTEGER NOT NULL REFERENCES action_items(id) ON DELETE CASCADE,
   user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

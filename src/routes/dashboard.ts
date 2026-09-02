@@ -94,7 +94,7 @@ app.get('/search', async (c) => {
 
   // القرارات والمهام
   const aRows = (await c.env.DB.prepare(
-    `SELECT a.id, a.type, a.display_number, a.text, a.council_id, a.status, co.type AS council_type, m.created_at AS meeting_created_at
+    `SELECT a.id, a.type, a.display_number, a.text, a.council_id, a.status, co.type AS council_type, COALESCE(m.created_at, a.created_at) AS record_created_at
        FROM action_items a JOIN councils co ON co.id = a.council_id
        LEFT JOIN meetings m ON m.id = a.source_meeting_id
       WHERE a.text LIKE ? OR a.display_number LIKE ? ORDER BY a.id DESC LIMIT 30`,
@@ -106,7 +106,7 @@ app.get('/search', async (c) => {
   const actions = [];
   for (const a of aRows) {
     const sc = await scopeOf(a.council_id, a.council_type);
-    const ok = withinAccessWindow(a.meeting_created_at, sc.windows) || (sc.level === 'full' && isOpenAction(a.status)) || assigned.has(a.id);
+    const ok = withinAccessWindow(a.record_created_at, sc.windows) || (sc.level === 'full' && isOpenAction(a.status)) || assigned.has(a.id);
     if (ok) {
       actions.push({ id: a.id, title: a.text, sub: a.display_number, link: `#/tasks/${a.id}` });
       if (actions.length >= 8) break;

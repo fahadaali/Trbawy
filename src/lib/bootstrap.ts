@@ -3,7 +3,7 @@
 import type { Env } from '../types';
 import { hashPassword } from './crypto';
 import { SCHEMA_STATEMENTS } from './schema';
-import { addMissingColumns, backfillRolePeriods, backfillActionMetrics } from './migrate';
+import { addMissingColumns, backfillRolePeriods, backfillActionMetrics, relaxActionSourceMeeting } from './migrate';
 import { backfillFollowupLedger } from './followups';
 import { backfillPersonColors } from './people';
 
@@ -40,7 +40,10 @@ export async function ensureBootstrap(env: Env): Promise<void> {
   // ٢) الجداول والفهارس (الجديد منها فقط يُنشأ).
   // ٣) تعبئة فترات الأدوار — تحتاج جدولها الذي أُنشئ في الخطوة السابقة.
   // ٤) تعبئة قياسات الالتزام وسجل ترحيل المتابعة للمحاضر القائمة (أثر رجعي).
+  // وبين الأولى والثانية إرخاءُ قيد المحضر على البنود: يحتاج الأعمدة كاملة قبله
+  // (ينسخها كما هي)، ويسبق إنشاء المخطط لأن هذا الأخير يُعيد بناء الفهارس بعده.
   await addMissingColumns(env);
+  await relaxActionSourceMeeting(env);
   await ensureSchema(env);
   await backfillRolePeriods(env);
   if (seeded) {
