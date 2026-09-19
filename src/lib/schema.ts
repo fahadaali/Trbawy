@@ -407,4 +407,56 @@ export const SCHEMA_STATEMENTS: string[] = [
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 )`,
   `CREATE INDEX IF NOT EXISTS idx_fevents_entity ON file_events(entity_type, entity_id)`,
+  // ---- المتابعة المالية: الحركة (صرف · إيراد)، مرفقاتها، والعهدة ----
+  // ترتيب الجدولين مقصود: العهدة أولًا بلا مفتاح أجنبي على حركتها، فالجدولان يشير
+  // كلٌّ منهما إلى الآخر ولا تقبل SQLite دائرةً في الإنشاء.
+  `CREATE TABLE IF NOT EXISTS finance_custodies (
+  id              INTEGER PRIMARY KEY AUTOINCREMENT,
+  council_id      INTEGER NOT NULL REFERENCES councils(id),   -- المستوى: التربوي أو مجلس المرحلة
+  amount          REAL    NOT NULL,                           -- المبلغ المطلوب
+  approved_amount REAL,                                       -- المبلغ المقبول (قد يقلّ عن المطلوب)
+  purpose         TEXT    NOT NULL,                           -- البيان/الغرض
+  needed_by       TEXT,                                       -- تاريخ الحاجة
+  status          TEXT    NOT NULL DEFAULT 'pending' CHECK (status IN
+                    ('pending','approved','rejected','cancelled')),
+  requested_by    INTEGER NOT NULL REFERENCES users(id),
+  requested_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  decided_by      INTEGER REFERENCES users(id),
+  decided_at      TEXT,
+  decision_note   TEXT,
+  entry_id        INTEGER,                                    -- حركة الإيراد المولودة عن القبول
+  created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_fin_custody_council ON finance_custodies(council_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_fin_custody_status  ON finance_custodies(status)`,
+  `CREATE TABLE IF NOT EXISTS finance_entries (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  council_id  INTEGER NOT NULL REFERENCES councils(id),
+  kind        TEXT    NOT NULL CHECK (kind IN ('expense','income')),  -- صرف · إيراد
+  statement   TEXT    NOT NULL,                                       -- البيان
+  amount      REAL    NOT NULL,
+  entry_date  TEXT    NOT NULL,                                       -- تاريخ الحركة
+  owner_id    INTEGER REFERENCES users(id),                           -- المسؤول عن الحركة
+  custody_id  INTEGER REFERENCES finance_custodies(id),
+  source      TEXT    NOT NULL DEFAULT 'manual' CHECK (source IN ('manual','custody')),
+  note        TEXT,
+  created_by  INTEGER NOT NULL REFERENCES users(id),
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_fin_entries_council ON finance_entries(council_id)`,
+  `CREATE INDEX IF NOT EXISTS idx_fin_entries_date    ON finance_entries(entry_date)`,
+  `CREATE INDEX IF NOT EXISTS idx_fin_entries_custody ON finance_entries(custody_id)`,
+  `CREATE TABLE IF NOT EXISTS finance_attachments (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  entry_id    INTEGER NOT NULL REFERENCES finance_entries(id) ON DELETE CASCADE,
+  r2_key      TEXT    NOT NULL,
+  file_name   TEXT    NOT NULL,
+  mime        TEXT,
+  size        INTEGER NOT NULL DEFAULT 0,
+  uploaded_by INTEGER REFERENCES users(id),
+  uploaded_at TEXT    NOT NULL DEFAULT (datetime('now'))
+)`,
+  `CREATE INDEX IF NOT EXISTS idx_fin_attach_entry ON finance_attachments(entry_id)`,
 ];

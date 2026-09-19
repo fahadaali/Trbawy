@@ -11,6 +11,8 @@ const TABLES = [
   'user_role_periods', 'meeting_comments', 'meeting_attachments',
   // أرشيف الملفات التربوية (المجلد قبل ملفاته، والتاق قبل روابطه)
   'file_folders', 'files', 'file_tags', 'file_tag_links', 'file_events',
+  // المتابعة المالية (العهدة قبل الحركة لأن الحركة تشير إليها، والمرفق بعدهما)
+  'finance_custodies', 'finance_entries', 'finance_attachments',
 ];
 
 export async function createBackup(env: Env): Promise<string> {

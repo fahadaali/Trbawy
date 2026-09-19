@@ -19,6 +19,8 @@ import dashboardRoutes from './routes/dashboard';
 import adminRoutes from './routes/admin';
 import auditRoutes from './routes/audit';
 import aiRoutes from './routes/ai';
+import financeRoutes from './routes/finance';
+import calendarRoutes from './routes/calendar';
 import pageRoutes from './routes/pages';
 import { runDailyReminders } from './lib/reminders';
 import { createBackup } from './lib/backup';
@@ -58,6 +60,8 @@ app.route('/api/notifications', notificationRoutes);
 app.route('/api/dashboard', dashboardRoutes);
 app.route('/api/admin', adminRoutes);
 app.route('/api/audit', auditRoutes);
+app.route('/api/finance', financeRoutes);
+app.route('/api/calendar', calendarRoutes);
 app.route('/api/ai', aiRoutes);
 
 // معالج أخطاء موحّد

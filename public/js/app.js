@@ -168,12 +168,14 @@ function renderChangePassword(forced) {
 const NAV = [
   { group: 'الرئيسية', items: [
     { key: 'dashboard', label: 'الصفحة الرئيسية', ico: 'home', roles: '*' },
+    { key: 'calendar', label: 'التقويم', ico: 'calendar2', roles: ['president','vice_president','first_supervisor','team_member'] },
   ]},
   { group: 'العمل التربوي', items: [
     { key: 'meetings', label: 'المحاضر', ico: 'meetings', perm: 'meetings.view', roles: ['president','vice_president','first_supervisor','team_member'] },
     { key: 'tasks', label: 'المهام', ico: 'tasks', perm: 'actions.view', roles: ['president','vice_president','first_supervisor','team_member'] },
     { key: 'evaluations', label: 'التقييم', ico: 'evaluations', perm: 'evaluations.view', roles: ['president','vice_president','first_supervisor','team_member'] },
     { key: 'students', label: 'سجل الطلاب', ico: 'students', perm: 'students.view', roles: ['president','vice_president','first_supervisor','team_member'] },
+    { key: 'finance', label: 'المتابعة المالية', ico: 'wallet', perm: 'finance.view', roles: ['president','vice_president','first_supervisor','team_member'] },
     { key: 'files', label: 'الملفات التربوية', ico: 'folder', perm: 'files.view', roles: ['president','vice_president','first_supervisor','team_member'] },
   ]},
   { group: 'الإدارة', items: [
@@ -216,10 +218,10 @@ function closeDrawer() { toggleDrawer(false); }
 // ---- شريط التبويب السفلي: أهم أربع وجهات + «المزيد» يفتح القائمة ----
 function tabbarHtml(view) {
   const items = NAV.flatMap((g) => g.items).filter(canSee);
-  const primary = ['dashboard', 'meetings', 'tasks', 'evaluations', 'students', 'users']
+  const primary = ['dashboard', 'calendar', 'meetings', 'tasks', 'evaluations', 'students', 'users']
     .map((k) => items.find((i) => i.key === k)).filter(Boolean).slice(0, 4);
   if (!primary.length) return '';
-  const short = { dashboard: 'الرئيسية', meetings: 'المحاضر', tasks: 'المهام', evaluations: 'التقييم', students: 'الطلاب', users: 'المستخدمون' };
+  const short = { dashboard: 'الرئيسية', calendar: 'التقويم', meetings: 'المحاضر', tasks: 'المهام', evaluations: 'التقييم', students: 'الطلاب', users: 'المستخدمون', finance: 'المالية' };
   return `<nav class="tabbar" aria-label="تنقّل سريع">
     ${primary.map((it) => `<a href="#/${it.key}" class="${view === it.key ? 'active' : ''}">
       ${icon(it.ico, 21)}<span>${short[it.key] || it.label}</span></a>`).join('')}
@@ -648,7 +650,8 @@ function renderUpcoming(list) {
   if (!list.length) { box.innerHTML = ''; return; }
   box.innerHTML = `
     <div class="card"><div class="card-head"><h3>الاجتماعات القادمة</h3><div class="spacer"></div>
-      <span class="muted" style="font-size:13px">${arCount(list.length, ['اجتماع واحد', 'اجتماعان', 'اجتماعات', 'اجتماعًا'])}</span></div>
+      <span class="muted" style="font-size:13px">${arCount(list.length, ['اجتماع واحد', 'اجتماعان', 'اجتماعات', 'اجتماعًا'])}</span>
+      <button class="btn-ghost btn-sm" onclick="nav('calendar')">${icon('calendar2', 15)} التقويم</button></div>
       <table class="tbl"><thead><tr><th>اليوم والتاريخ</th><th>الوقت</th><th>الاجتماع</th><th>المكان</th><th>التقويم</th></tr></thead>
       <tbody>${list.map((m, i) => `<tr>
         <td><b>${esc(dayNameAr(m.greg_date))}</b> ${fmtDate(m.greg_date)}</td>
@@ -698,6 +701,7 @@ async function renderCommitmentCard() {
 // VIEWS.meetings → meetings.js | VIEWS.tasks → tasks.js
 // VIEWS.evaluations → evaluations.js | VIEWS.students → students.js
 // VIEWS.files → files.js (والمستعرض الموحّد في viewer.js)
+// VIEWS.calendar → calendar.js | VIEWS.finance → finance.js
 
 // ---- المستخدمون ----
 // كل عملية تغيّر وضع المستخدم تمرّ بتقرير أثر يُعرض قبل التنفيذ: ماذا سيحدث،

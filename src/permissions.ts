@@ -67,6 +67,11 @@ export function basePerm(u: RoleStage, key: string): boolean {
     case 'criteria.view': return !A;
     case 'criteria.add': case 'criteria.edit': case 'criteria.delete': return P;
 
+    case 'finance.view': return !A;
+    case 'finance.add': return P || F;
+    case 'finance.edit': return P || F;
+    case 'finance.delete': return P;
+
     case 'files.view': return !A;
     case 'files.add': return P || F;              // ورافعُ الملف يتصرّف في ملفه بحكم رفعه
     case 'files.edit': return P || F;
@@ -331,6 +336,32 @@ export function canApproveMeeting(u: User, council: CouncilRow): boolean {
   if (council.type === 'educational') return isPresident(u);
   if (isFirstSupervisor(u)) return u.stage === councilStage(council.type);
   return false;
+}
+
+// ============================================================
+// المتابعة المالية
+// ============================================================
+//
+// الحركة المالية سجلٌّ في مجلس، فيسري عليها نموذج الاطلاع نفسه حرفًا بحرف: الاطلاع
+// الكامل يرى حركات مجلسه كلها، والتاريخي يرى ما سُجّل داخل نوافذ خدمته. والكتابة
+// تحتاج مفتاحها (finance.add/edit/delete) **ويبقى النطاق**: لا يُكتب في مجلس إلا
+// بالاطلاع الكامل عليه الآن.
+export function canWriteFinance(u: User, council: CouncilRow, action: 'add' | 'edit' | 'delete'): boolean {
+  const full = hasFullCouncilAccess(u, council);
+  if (!full) return false;
+  return decide(u, `finance.${action}`, basePerm(u, `finance.${action}`), true);
+}
+
+/**
+ * قرار العهدة (قبولًا أو رفضًا) — جهة الاعتماد نفسها التي تعتمد محاضر ذلك المجلس:
+ * المجلس التربوي لرئيسه، ومجلس كل مرحلة لمشرفها الأول. ولا استثناء حساب يفتحه:
+ * هي صفة الجهة لا عملية في فهرس الصلاحيات.
+ */
+export const canDecideCustody = canApproveMeeting;
+
+/** طلب العهدة: كل من يملك اطلاعًا كاملًا على ذلك المجلس الآن (ومدير النظام خارجه). */
+export function canRequestCustody(u: User, council: CouncilRow): boolean {
+  return !isAdmin(u) && hasFullCouncilAccess(u, council) && can(u, 'finance.view');
 }
 
 // ---- تحرير المسودة ----
