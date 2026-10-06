@@ -25,6 +25,12 @@ const TARGET_ALIASES: Record<string, string[]> = {
   first_supervisors: ['المشرفون الأوائل', 'المشرفين الأوائل', 'مشرف أول', 'المشرف الأول', 'الأوائل'],
 };
 
+// حالة المعيار في ملف الاستيراد — بالصيغة التي يكتبها ملف المعايير المعتمد (نشط / غير نشط)
+const STATUS_ALIASES: Record<string, string[]> = {
+  active: ['نشط', 'مفعل', 'مفعّل', 'فعال', 'نعم', '1', 'true', 'yes'],
+  inactive: ['غير نشط', 'غير مفعل', 'معطل', 'معطّل', 'موقوف', 'لا', '0', 'false', 'no'],
+};
+
 // قالب المعايير: صفوف تمثيلية لكل فئة، أوزانها تجمع ١٠٠ داخل الفئة الواحدة —
 // ليرى المستخدم الرموز المقبولة وتوزيع الأوزان بدل أن يستنتجهما.
 const CRITERIA_TEMPLATE_ROWS = [
@@ -89,9 +95,9 @@ app.delete('/criteria/:id', async (c) => {
 
 // تصدير المعايير CSV (يفتح في Excel)
 app.get('/criteria/export', async (c) => {
-  const rows = await c.env.DB.prepare('SELECT target_type, name, description, weight FROM eval_criteria WHERE cycle_id IS NULL ORDER BY target_type, sort_order').all<any>();
-  const header = 'target_type,name,description,weight';
-  const body = rows.results.map((r) => [r.target_type, r.name, r.description || '', r.weight].map(csvCell).join(',')).join('\n');
+  const rows = await c.env.DB.prepare('SELECT target_type, name, description, weight, is_active FROM eval_criteria WHERE cycle_id IS NULL ORDER BY target_type, sort_order').all<any>();
+  const header = 'target_type,name,description,weight,status';
+  const body = rows.results.map((r) => [r.target_type, r.name, r.description || '', r.weight, r.is_active ? 'نشط' : 'غير نشط'].map(csvCell).join(',')).join('\n');
   return new Response('﻿' + header + '\n' + body, {
     headers: { 'Content-Type': 'text/csv; charset=utf-8', 'Content-Disposition': 'attachment; filename="criteria.csv"' },
   });
@@ -114,8 +120,10 @@ app.get('/criteria/template', async () => {
 app.post('/criteria/import', async (c) => {
   if (!canManageCriteria(c.get('user'), 'edit')) return c.json({ error: 'لا تملك صلاحية' }, 403);
   const commit = c.req.query('commit') === '1';
-  const { csv } = await c.req.json().catch(() => ({}));
+  // default_target_type: فئة الملف كله حين يخلو من عمود الفئة (كملف معايير فئة واحدة)
+  const { csv, default_target_type } = await c.req.json().catch(() => ({}));
   if (!csv) return c.json({ error: 'لا توجد بيانات' }, 400);
+  const fallbackTt = TARGET_TYPES.includes(default_target_type) ? default_target_type : '';
   const rows = parseCsv(csv);
   if (rows.length < 2) return c.json({ error: 'الملف فارغ' }, 400);
   const header = rows[0].map((h) => h.trim());
@@ -124,23 +132,30 @@ app.post('/criteria/import', async (c) => {
     name: colOf(header, ['name', 'المعيار', 'الاسم', 'اسم المعيار']),
     desc: colOf(header, ['description', 'الوصف', 'وصف', 'ملاحظات']),
     weight: colOf(header, ['weight', 'الوزن', 'النسبة', 'الدرجة']),
+    status: colOf(header, ['status', 'is_active', 'الحالة', 'التفعيل']),
   };
-  if (ci.tt < 0 || ci.name < 0 || ci.weight < 0)
-    return c.json({ error: 'الأعمدة الإلزامية: target_type (الفئة) · name (المعيار) · weight (الوزن)' }, 400);
+  if ((ci.tt < 0 && !fallbackTt) || ci.name < 0 || ci.weight < 0)
+    return c.json({ error: 'الأعمدة الإلزامية: target_type (الفئة) · name (المعيار) · weight (الوزن) — أو اختر فئة الملف إن خلا من عمود الفئة' }, 400);
 
   const report: any[] = [];
   const valid: any[] = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    const tt = matchAlias((r[ci.tt] || '').trim(), TARGET_ALIASES);
+    const tt = ci.tt >= 0 ? matchAlias((r[ci.tt] || '').trim(), TARGET_ALIASES) : fallbackTt;
     const name = (r[ci.name] || '').trim();
+    // الحالة اختيارية: الخلية الفارغة أو العمود الغائب = مفعّل
+    const st = ci.status >= 0 ? matchAlias((r[ci.status] || '').trim(), STATUS_ALIASES) : '';
     // الوزن قد يُكتب بأرقام هندية أو بعلامة نسبة — والمقصود واحد
     const weight = Number(toEnDigits((r[ci.weight] || '').trim()).replace(/[٪%\s]/g, ''));
     const errors: string[] = [];
     if (!tt) errors.push('الفئة غير صالحة (students/الطلاب · team_members/أعضاء الفرق · first_supervisors/المشرفون الأوائل)');
     if (!name) errors.push('الاسم ناقص');
     if (isNaN(weight) || weight < 0 || weight > 100) errors.push('الوزن غير صالح (٠–١٠٠)');
-    const rec = { target_type: tt, name, description: ci.desc >= 0 ? (r[ci.desc] || '').trim() : '', weight };
+    if (ci.status >= 0 && (r[ci.status] || '').trim() && !st) errors.push('الحالة غير صالحة (نشط / غير نشط)');
+    const rec = {
+      target_type: tt, name, description: ci.desc >= 0 ? (r[ci.desc] || '').trim() : '', weight,
+      is_active: st === 'inactive' ? 0 : 1,
+    };
     report.push({ row: i + 1, ...rec, errors });
     if (!errors.length) valid.push(rec);
   }
@@ -153,8 +168,8 @@ app.post('/criteria/import', async (c) => {
   let order: Record<string, number> = {};
   if (valid.length) await c.env.DB.batch(valid.map((v) => {
     const o = (order[v.target_type] = (order[v.target_type] ?? -1) + 1);
-    return c.env.DB.prepare('INSERT INTO eval_criteria (cycle_id, target_type, name, description, weight, sort_order, is_active) VALUES (NULL, ?, ?, ?, ?, ?, 1)')
-      .bind(v.target_type, v.name, v.description || null, v.weight, o);
+    return c.env.DB.prepare('INSERT INTO eval_criteria (cycle_id, target_type, name, description, weight, sort_order, is_active) VALUES (NULL, ?, ?, ?, ?, ?, ?)')
+      .bind(v.target_type, v.name, v.description || null, v.weight, o, v.is_active);
   }));
   await audit(c.env, { userId: c.get('user').id, action: 'import_criteria', entityType: 'eval_criteria', newValue: { inserted: valid.length } });
   return c.json({ committed: true, inserted: valid.length });

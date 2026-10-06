@@ -288,6 +288,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   push_public_key  TEXT,
   push_private_key TEXT,
   site_origin    TEXT,                          -- أصل الموقع كما وصل به طلب حقيقي (لرمز VAPID في مسار الكرون)
+  criteria_seed  TEXT,                          -- علامات قوائم المعايير المعتمدة المحمَّلة لكل فئة (كلٌّ مرةً واحدة)
   updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
 )`,
   `CREATE TABLE IF NOT EXISTS meeting_comments (

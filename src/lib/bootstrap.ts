@@ -6,6 +6,7 @@ import { SCHEMA_STATEMENTS } from './schema';
 import { addMissingColumns, backfillRolePeriods, backfillActionMetrics, relaxActionSourceMeeting } from './migrate';
 import { backfillFollowupLedger } from './followups';
 import { backfillPersonColors } from './people';
+import { applyApprovedCriteria } from './criteriaseed';
 
 let checkedThisIsolate = false;
 
@@ -53,6 +54,8 @@ export async function ensureBootstrap(env: Env): Promise<void> {
   }
 
   if (!seeded) await seed(env);
+  // بعد الزرع: يحتاج صف الإعدادات الذي يُنشئه الزرع في القاعدة الجديدة
+  await applyApprovedCriteria(env);
   checkedThisIsolate = true;
 }
 
@@ -150,27 +153,8 @@ async function seed(env: Env): Promise<void> {
   }
   await env.DB.batch(fixedStmts);
 
-  // 5) قوالب معايير مرجعية (cycle_id = NULL) لكل فئة
-  const criteria: Array<[string, string, number]> = [
-    ['students', 'الالتزام والانضباط', 25],
-    ['students', 'التفاعل مع الأنشطة', 25],
-    ['students', 'التحصيل والمثابرة', 25],
-    ['students', 'السلوك والتعاون', 25],
-    ['team_members', 'الأداء المهني', 34],
-    ['team_members', 'الالتزام والحضور', 33],
-    ['team_members', 'التعاون وروح الفريق', 33],
-    ['first_supervisors', 'القيادة والتخطيط', 34],
-    ['first_supervisors', 'المتابعة والإنجاز', 33],
-    ['first_supervisors', 'التواصل والتطوير', 33],
-  ];
-  await env.DB.batch(
-    criteria.map(([tt, name, w], i) =>
-      env.DB.prepare(
-        `INSERT INTO eval_criteria (cycle_id, target_type, name, weight, sort_order, is_active)
-         VALUES (NULL, ?, ?, ?, ?, 1)`,
-      ).bind(tt, name, w, i),
-    ),
-  );
+  // 5) قوالب المعايير المرجعية لكل فئة: تُحمَّل بعد الزرع من القوائم المعتمدة
+  //    (applyApprovedCriteria في src/lib/criteriaseed.ts) — لأنها تحتاج صف الإعدادات أدناه.
 
   // 6) صف الإعدادات
   await env.DB.prepare(
