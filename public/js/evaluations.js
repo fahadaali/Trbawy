@@ -136,8 +136,11 @@ function importCriteria(onDone) {
       <div class="row"><a class="btn btn-ghost btn-sm" href="/api/eval/criteria/template">تنزيل القالب</a>
         <a class="btn btn-ghost btn-sm" href="/api/eval/criteria/export">تصدير المعايير الحالية</a></div>
       <input type="file" class="mt" id="ci_file" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
-      <p class="hint">الأعمدة: <code dir="ltr">target_type,name,description,weight</code> — وتُقبل بالعربية:
-        الفئة · المعيار · الوصف · الوزن.<br>
+      <div class="field mt"><label>فئة الملف إن خلا من عمود الفئة</label>
+        <select id="ci_tt"><option value="">— الملف فيه عمود الفئة —</option>
+          ${Object.entries(TARGET_TYPE_AR).map(([k, v]) => `<option value="${k}">${v}</option>`).join('')}</select></div>
+      <p class="hint">الأعمدة: <code dir="ltr">target_type,name,description,weight,status</code> — وتُقبل بالعربية:
+        الفئة · المعيار · الوصف · الوزن · الحالة (نشط / غير نشط، واختيارية).<br>
         الفئات: <b>students</b> (الطلاب) · <b>team_members</b> (أعضاء الفرق) · <b>first_supervisors</b> (المشرفون الأوائل).
         والوزن رقم بين ٠ و١٠٠.<br>
         يقبل ملفات Excel ‎(.xlsx)‎ وCSV. <b>تنبيه:</b> الاستيراد يستبدل معايير الفئات الواردة في الملف.</p>
@@ -146,25 +149,29 @@ function importCriteria(onDone) {
       { label: 'حفظ', onClick: async (cl, ov) => {
         if (!ov._csv) return toast('اختر ملفًا وعايِنه أولًا', 'err');
         if (!ov._valid) return toast('لا توجد صفوف صحيحة للحفظ', 'err');
-        try { const r = await API.post('/eval/criteria/import?commit=1', { csv: ov._csv }); cl(); toast(`تم استيراد ${r.inserted} معيارًا`, 'ok'); onDone(); }
+        try { const r = await API.post('/eval/criteria/import?commit=1', { csv: ov._csv, default_target_type: ov.querySelector('#ci_tt').value }); cl(); toast(`تم استيراد ${r.inserted} معيارًا`, 'ok'); onDone(); }
         catch (err) { toast(err.message, 'err'); }
       }},
       { label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() },
     ],
   });
-  overlay.querySelector('#ci_file').onchange = async (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    let text;
-    try { text = await fileToCsv(f); }
-    catch (err) { overlay.querySelector('#ci_preview').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; overlay._csv = null; return; }
-    overlay._csv = text;
+  // المعاينة تُعاد عند تغيير الفئة أيضًا: الفئة تغيّر صحة الصفوف
+  const preview = async () => {
+    const text = overlay._csv; if (!text) return;
     try {
-      const p = await API.post('/eval/criteria/import', { csv: text });
+      const p = await API.post('/eval/criteria/import', { csv: text, default_target_type: overlay.querySelector('#ci_tt').value });
       overlay._valid = p.valid;
       overlay.querySelector('#ci_preview').innerHTML = `<div class="row"><span class="tag tag-green">صحيح: ${arNum(p.valid)}</span><span class="tag tag-red">خطأ: ${arNum(p.invalid)}</span></div>
-        <table class="tbl mt"><thead><tr><th>الصف</th><th>الفئة</th><th>المعيار</th><th>الوزن</th><th>الأخطاء</th></tr></thead>
-        <tbody>${p.report.map((r) => `<tr style="${r.errors.length ? 'background:#fdecea' : ''}"><td>${arNum(r.row)}</td><td>${esc(TARGET_TYPE_AR[r.target_type] || r.target_type)}</td><td>${esc(r.name)}</td><td>${arNum(r.weight)}</td><td class="${r.errors.length ? 'tag-red' : 'ok-cell'}">${r.errors.map(esc).join('، ') || '✓'}</td></tr>`).join('')}</tbody></table>`;
-    } catch (err) { overlay.querySelector('#ci_preview').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; overlay._csv = null; }
+        <table class="tbl mt"><thead><tr><th>الصف</th><th>الفئة</th><th>المعيار</th><th>الوزن</th><th>الحالة</th><th>الأخطاء</th></tr></thead>
+        <tbody>${p.report.map((r) => `<tr style="${r.errors.length ? 'background:#fdecea' : ''}"><td>${arNum(r.row)}</td><td>${esc(TARGET_TYPE_AR[r.target_type] || r.target_type)}</td><td>${esc(r.name)}</td><td>${arNum(r.weight)}</td><td>${r.is_active ? 'مفعّل' : 'معطّل'}</td><td class="${r.errors.length ? 'tag-red' : 'ok-cell'}">${r.errors.map(esc).join('، ') || '✓'}</td></tr>`).join('')}</tbody></table>`;
+    } catch (err) { overlay._valid = 0; overlay.querySelector('#ci_preview').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; }
+  };
+  overlay.querySelector('#ci_tt').onchange = preview;
+  overlay.querySelector('#ci_file').onchange = async (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    try { overlay._csv = await fileToCsv(f); }
+    catch (err) { overlay.querySelector('#ci_preview').innerHTML = `<div class="form-error">${esc(err.message)}</div>`; overlay._csv = null; return; }
+    await preview();
   };
 }
 

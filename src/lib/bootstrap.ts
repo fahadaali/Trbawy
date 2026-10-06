@@ -6,6 +6,7 @@ import { SCHEMA_STATEMENTS } from './schema';
 import { addMissingColumns, backfillRolePeriods, backfillActionMetrics, relaxActionSourceMeeting } from './migrate';
 import { backfillFollowupLedger } from './followups';
 import { backfillPersonColors } from './people';
+import { applyStudentCriteria } from './criteriaseed';
 
 let checkedThisIsolate = false;
 
@@ -53,6 +54,8 @@ export async function ensureBootstrap(env: Env): Promise<void> {
   }
 
   if (!seeded) await seed(env);
+  // بعد الزرع: يحتاج صف الإعدادات الذي يُنشئه الزرع في القاعدة الجديدة
+  await applyStudentCriteria(env);
   checkedThisIsolate = true;
 }
 
@@ -150,12 +153,9 @@ async function seed(env: Env): Promise<void> {
   }
   await env.DB.batch(fixedStmts);
 
-  // 5) قوالب معايير مرجعية (cycle_id = NULL) لكل فئة
+  // 5) قوالب معايير مرجعية (cycle_id = NULL) لكل فئة.
+  //    معايير الطلاب المعتمدة تُحمَّل بعد الزرع (applyStudentCriteria) لا هنا.
   const criteria: Array<[string, string, number]> = [
-    ['students', 'الالتزام والانضباط', 25],
-    ['students', 'التفاعل مع الأنشطة', 25],
-    ['students', 'التحصيل والمثابرة', 25],
-    ['students', 'السلوك والتعاون', 25],
     ['team_members', 'الأداء المهني', 34],
     ['team_members', 'الالتزام والحضور', 33],
     ['team_members', 'التعاون وروح الفريق', 33],

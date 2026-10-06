@@ -26,6 +26,8 @@ const COLUMN_ADDS = [
   "ALTER TABLE action_items ADD COLUMN created_by INTEGER",
   // أصل الموقع — يحتاجه رمز VAPID في مسار الكرون حيث لا طلبَ يُعرف منه
   "ALTER TABLE settings ADD COLUMN site_origin TEXT",
+  // علامة تحميل معايير الطلاب المعتمدة مرةً واحدة (انظر src/lib/criteriaseed.ts)
+  "ALTER TABLE settings ADD COLUMN criteria_seed TEXT",
 ];
 
 /**
