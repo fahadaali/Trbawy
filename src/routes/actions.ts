@@ -80,6 +80,24 @@ const isStandalone = (a: { source_meeting_id: number | null }) => a.source_meeti
  */
 const ownsStandalone = (u: { id: number }, a: any) => isStandalone(a) && a.created_by === u.id;
 
+// «اليوم» بتوقيت الرياض لا UTC — وإلا رُفض يومُ المستخدم نفسه في ساعاته الثلاث الأولى.
+const localToday = () => new Date(Date.now() + 3 * 3600e3).toISOString().slice(0, 10);
+
+/**
+ * يومُ الإنجاز كما يختاره المستخدم: «YYYY-MM-DD» صحيح لا يتجاوز اليوم.
+ * يُرجع ما يُخزَّن في completed_at: اليومُ نفسه يُختم بلحظته الفعلية (null ⇐ datetime('now'))،
+ * واليومُ السابق يُخزَّن تاريخًا مجرّدًا بلا ساعة مختلَقة.
+ */
+function completionDay(v: unknown): { value: string | null } | { error: string } {
+  const day = String(v ?? '').trim().slice(0, 10);
+  const t = Date.parse(day + 'T00:00:00Z');   // NaN لشهرٍ أو يومٍ خارج مداه
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || Number.isNaN(t) || new Date(t).toISOString().slice(0, 10) !== day)
+    return { error: 'تاريخ الإنجاز غير صالح' };
+  const today = localToday();
+  if (day > today) return { error: 'لا يكون تاريخ الإنجاز بعد اليوم' };
+  return { value: day === today ? null : day };
+}
+
 /**
  * إدارة البند (نصُّه وإسنادُه واستحقاقُه): كاتبُ محضره أو رئيسه أو منشئُ المستقلة —
  * والاستثناء على «تعديل البنود» يقرّر الأصل، والنطاق يبقى مجلسه.
@@ -87,6 +105,15 @@ const ownsStandalone = (u: { id: number }, a: any) => isStandalone(a) && a.creat
 function managesAction(u: any, a: any, council: CouncilRow, meetingWriterId: number | null): boolean {
   const base = canEditDraft(u, council, meetingWriterId) || isPresident(u) || ownsStandalone(u, a);
   return decide(u, 'actions.edit', base, hasFullCouncilAccess(u, council));
+}
+
+/**
+ * تصحيح تاريخ الإنجاز: يملكه من يملك الإنجاز نفسه — المسؤول عن البند وكاتبُ محضره
+ * ورئيسه ومنشئُ المستقلة — فمن سجّل الإنجاز يصحّح يومه.
+ */
+async function canSetCompletionDate(env: Env, u: any, a: any, council: CouncilRow): Promise<boolean> {
+  return canEditDraft(u, council, await meetingWriterOf(env, a.source_meeting_id))
+    || isPresident(u) || ownsStandalone(u, a) || await isAssignee(env, a.id, u.id);
 }
 
 // ---- إنشاء قرار/توصية/مهمة ضمن محضر ----
@@ -327,6 +354,7 @@ app.get('/:id', async (c) => {
     },
     assignees, attachments: attachments.results, meeting,
     can_manage: managesAction(u, a, council!, await meetingWriterOf(c.env, a.source_meeting_id)),
+    can_fix_date: a.status === 'done' && await canSetCompletionDate(c.env, u, a, council!),
   });
 });
 
@@ -410,14 +438,25 @@ app.post('/:id/complete', async (c) => {
     return c.json({ error: 'الإنجاز متاح للمسؤول عن البند' }, 403);
   if (a.status === 'done') return c.json({ error: 'البند منجز مسبقاً' }, 409);
 
-  const { note } = await c.req.json().catch(() => ({}));
+  // يُنجَز اليوم، أو بتاريخ سابق إن تأخّر تسجيله عن تنفيذه — والتأخير يُحسب على اليوم المختار.
+  // ويبقى original_completed_at لحظةَ التسجيل الفعلية، فيُعرف الفرق في التدقيق.
+  const { note, completed_at } = await c.req.json().catch(() => ({}));
+  let day: string | null = null;
+  if (completed_at) {
+    const r = completionDay(completed_at);
+    if ('error' in r) return c.json({ error: r.error }, 400);
+    day = r.value;
+  }
   await c.env.DB.prepare(
-    `UPDATE action_items SET status='done', progress=100, completed_at=datetime('now'),
+    `UPDATE action_items SET status='done', progress=100, completed_at=COALESCE(?, datetime('now')),
        completed_by=?, completion_note=?, original_completed_at=COALESCE(original_completed_at, datetime('now')),
        updated_at=datetime('now') WHERE id=?`,
-  ).bind(u.id, note || null, id).run();
+  ).bind(day, u.id, note || null, id).run();
   await recomputeDelay(c.env, id);
-  await audit(c.env, { userId: u.id, action: 'complete_action', entityType: 'action_item', entityId: id });
+  await audit(c.env, {
+    userId: u.id, action: 'complete_action', entityType: 'action_item', entityId: id,
+    newValue: day ? { completed_at: day, backdated: true } : undefined,
+  });
   return c.json({ ok: true });
 });
 
@@ -503,24 +542,28 @@ app.post('/:id/reopen', async (c) => {
   return c.json({ ok: true });
 });
 
-// ---- تعديل تاريخ الإنجاز يدوياً (يبقى الأصلي في التدقيق) ----
+// ---- تعديل تاريخ الإنجاز بعد تعليمه منجزًا (يبقى الأصلي في التدقيق) ----
 app.patch('/:id/completion-date', async (c) => {
   const id = Number(c.req.param('id'));
   const a = await loadAction(c.env, id);
   if (!a) return c.json({ error: 'البند غير موجود' }, 404);
   const u = c.get('user');
   const council = await getCouncil(c.env, a.council_id);
-  if (!canEditDraft(u, council!, await meetingWriterOf(c.env, a.source_meeting_id))
-      && !isPresident(u) && !ownsStandalone(u, a))
+  if (!(await canSetCompletionDate(c.env, u, a, council!)))
     return c.json({ error: 'لا تملك صلاحية' }, 403);
   if (a.status !== 'done') return c.json({ error: 'البند غير منجز' }, 400);
   const { completed_at } = await c.req.json().catch(() => ({}));
   if (!completed_at) return c.json({ error: 'التاريخ مطلوب' }, 400);
-  await c.env.DB.prepare("UPDATE action_items SET completed_at=? WHERE id=?").bind(completed_at, id).run();
+  const r = completionDay(completed_at);
+  if ('error' in r) return c.json({ error: r.error }, 400);
+  await c.env.DB.prepare(
+    "UPDATE action_items SET completed_at=COALESCE(?, datetime('now')), updated_at=datetime('now') WHERE id=?",
+  ).bind(r.value, id).run();
   await recomputeDelay(c.env, id);
   await audit(c.env, {
     userId: u.id, action: 'adjust_completion_date', entityType: 'action_item', entityId: id,
-    oldValue: { completed_at: a.completed_at, original: a.original_completed_at }, newValue: { completed_at },
+    oldValue: { completed_at: a.completed_at, original: a.original_completed_at },
+    newValue: { completed_at: r.value ?? localToday() },
   });
   return c.json({ ok: true });
 });

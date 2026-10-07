@@ -1041,15 +1041,22 @@ function actionForm(meetingId, members, existing, prefill) {
   }
 }
 
-function adjustCompletionDate(actionId, onDone) {
+// current: تاريخ الإنجاز المسجَّل حاليًا (اختياري) — يُعبَّأ به الحقل
+function adjustCompletionDate(actionId, onDone, current) {
+  // المخزَّن بلحظته يُحوَّل إلى يوم الجهاز، والمجرّد يُؤخذ كما هو
+  const local = (x) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`;
+  const cur = !current ? '' : String(current).length <= 10 ? String(current)
+    : local(new Date(String(current).replace(' ', 'T') + (String(current).includes('Z') ? '' : 'Z')));
+  const today = local(new Date());
   openModal({
     title: 'تعديل تاريخ الإنجاز',
-    body: `<p class="muted">يبقى التاريخ الأصلي محفوظاً في سجل التدقيق.</p>
-      <div class="field"><label>تاريخ الإنجاز الفعلي</label><input type="date" id="cd_date" /></div>`,
+    body: `<p class="muted">يبقى التاريخ الأصلي محفوظاً في سجل التدقيق، ويُعاد حساب التأخير على التاريخ الجديد.</p>
+      <div class="field"><label>تاريخ الإنجاز الفعلي</label><input type="date" id="cd_date" value="${cur}" max="${today}" /></div>`,
     buttons: [
       { label: 'حفظ', onClick: async (cl, ov) => {
         const v = ov.querySelector('#cd_date').value;
         if (!v) return toast('التاريخ مطلوب', 'err');
+        if (v > today) return toast('لا يكون تاريخ الإنجاز بعد اليوم', 'err');
         try { await API.patch(`/actions/${actionId}/completion-date`, { completed_at: v }); cl(); toast('تم', 'ok'); if (onDone) onDone(); } catch (err) { toast(err.message, 'err'); }
       }},
       { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
