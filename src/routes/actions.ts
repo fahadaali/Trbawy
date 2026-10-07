@@ -355,6 +355,9 @@ app.get('/:id', async (c) => {
     assignees, attachments: attachments.results, meeting,
     can_manage: managesAction(u, a, council!, await meetingWriterOf(c.env, a.source_meeting_id)),
     can_fix_date: a.status === 'done' && await canSetCompletionDate(c.env, u, a, council!),
+    // الإنجاز للمسؤول عن البند، والرئيس يعلّم بنود غيره منجزةً نيابةً عنهم
+    can_complete: a.status !== 'done' && a.status !== 'cancelled'
+      && (isPresident(u) || assignees.some((x) => x.user_id === u.id)),
   });
 });
 

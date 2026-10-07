@@ -211,7 +211,7 @@ function tableView(actions) {
       <td>${delayTag(a)}</td>
       <td class="row">
         <button class="btn-ghost btn-sm" data-open="${a.id}">تفاصيل</button>
-        ${a.is_mine && a.status !== 'done' && a.status !== 'cancelled' ? `<button class="btn btn-sm" data-done="${a.id}">${icon('check', 15)} إنجاز</button>` : ''}
+        ${(a.is_mine || State.user.role === 'president') && a.status !== 'done' && a.status !== 'cancelled' ? `<button class="btn btn-sm" data-done="${a.id}">${icon('check', 15)} إنجاز</button>` : ''}
       </td></tr>`).join('')}</tbody></table>`;
 }
 
@@ -633,7 +633,7 @@ async function taskDetail(id, onBack) {
     buttons: [
       ...(standalone && d.can_manage && a.status !== 'done' && a.status !== 'cancelled'
         ? [{ label: 'تعديل المهمة', class: 'btn-ghost', onClick: (cl) => { cl(); editStandaloneTask(a, d.assignees.map((x) => x.user_id)); } }] : []),
-      ...(iAmAssignee && a.status !== 'done' ? [{ label: 'تعليم منجزاً', onClick: (cl) => { cl(); completeTask(id, () => { if (onBack) onBack(); }); } }] : []),
+      ...(d.can_complete ? [{ label: 'تعليم منجزاً', onClick: (cl) => { cl(); completeTask(id, () => { if (onBack) onBack(); }); } }] : []),
       ...(d.can_fix_date ? [{ label: 'تعديل تاريخ الإنجاز', class: 'btn-ghost', onClick: (cl) => { cl(); adjustCompletionDate(id, () => taskDetail(id, onBack), a.completed_at); } }] : []),
       ...(canManage && a.status === 'done' ? [{ label: 'إعادة فتح', class: 'btn-ghost', onClick: async (cl) => { try { await API.post(`/actions/${id}/reopen`); cl(); toast('تمت إعادة الفتح', 'ok'); if (onBack) onBack(); } catch (err) { toast(err.message, 'err'); } } }] : []),
       ...(canManage && a.status !== 'done' && a.status !== 'cancelled' ? [{ label: 'تفويض', class: 'btn-ghost', onClick: (cl) => { cl(); delegateTask(id, onBack); } }] : []),
