@@ -211,7 +211,7 @@ function tableView(actions) {
       <td>${delayTag(a)}</td>
       <td class="row">
         <button class="btn-ghost btn-sm" data-open="${a.id}">تفاصيل</button>
-        ${a.is_mine && a.status !== 'done' && a.status !== 'cancelled' ? `<button class="btn btn-sm" data-done="${a.id}">${icon('check', 15)} إنجاز</button>` : ''}
+        ${(a.is_mine || State.user.role === 'president') && a.status !== 'done' && a.status !== 'cancelled' ? `<button class="btn btn-sm" data-done="${a.id}">${icon('check', 15)} إنجاز</button>` : ''}
       </td></tr>`).join('')}</tbody></table>`;
 }
 
@@ -523,13 +523,37 @@ async function loadPerformance() {
     ${d.scope === 'self' ? '<p class="muted">تُعرض بياناتك وحدها — لوحة المجلس الكاملة لمن يملك اطلاعًا كاملًا عليه.</p>' : ''}`;
 }
 
+// تاريخ اليوم بتوقيت الجهاز (لا UTC) بصيغة حقل التاريخ
+function localDay(d = new Date()) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+// تاريخ الإنجاز للعرض: اليوم المختار سابقًا يُخزَّن تاريخًا مجرّدًا بلا ساعة
+function fmtCompletedAt(v) {
+  if (!v) return '—';
+  return String(v).length <= 10 ? fmtDate(v) : fmtDateTime(v);
+}
+
 function completeTask(id, onDone) {
+  const today = localDay();
   openModal({
     title: 'تعليم البند منجزاً',
-    body: `<div class="field"><label>ملاحظة الإنجاز (اختياري)</label><textarea id="cn" rows="2"></textarea></div>`,
+    body: `<div class="field"><label>تاريخ الإنجاز</label>
+        <input type="date" id="cd_day" value="${today}" max="${today}" />
+        <small class="muted">إن نُفّذ البند قبل اليوم فاختر يوم تنفيذه — ويُحسب التأخير عليه.</small></div>
+      <div class="field"><label>ملاحظة الإنجاز (اختياري)</label><textarea id="cn" rows="2"></textarea></div>`,
     buttons: [
       { label: 'تأكيد الإنجاز', onClick: async (cl, ov) => {
-        try { await API.post(`/actions/${id}/complete`, { note: ov.querySelector('#cn').value.trim() || null }); cl(); toast('تم تسجيل الإنجاز', 'ok'); if (onDone) onDone(); } catch (err) { toast(err.message, 'err'); }
+        const day = ov.querySelector('#cd_day').value;
+        if (!day) return toast('تاريخ الإنجاز مطلوب', 'err');
+        if (day > today) return toast('لا يكون تاريخ الإنجاز بعد اليوم', 'err');
+        try {
+          await API.post(`/actions/${id}/complete`, {
+            note: ov.querySelector('#cn').value.trim() || null,
+            ...(day !== today ? { completed_at: day } : {}),
+          });
+          cl(); toast('تم تسجيل الإنجاز', 'ok'); if (onDone) onDone();
+        } catch (err) { toast(err.message, 'err'); }
       }},
       { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
     ],
@@ -591,7 +615,7 @@ async function taskDetail(id, onBack) {
         <div><span class="muted">الحالة:</span> ${statusTag(a.effective_status || a.status, ACTION_STATUS_AR, ACTION_STATUS_COLOR)}</div>
         <div><span class="muted">نسبة الإنجاز:</span> ${arNum(a.progress)}٪</div>
         <div><span class="muted">المصدر:</span> ${d.meeting ? `محضر <span dir="ltr">${esc(d.meeting.display_number)}</span>` : 'مهمة مستقلة (بلا محضر)'}</div>
-        <div><span class="muted">تاريخ الإنجاز:</span> ${a.completed_at ? fmtDateTime(a.completed_at) : '—'}</div>
+        <div><span class="muted">تاريخ الإنجاز:</span> ${fmtCompletedAt(a.completed_at)}</div>
       </div>
       <p class="mt"><span class="muted">المسؤولون:</span> ${personChips(d.assignees.map((x) => ({ n: x.name, c: x.color })))}</p>
       ${a.completion_note ? `<p class="muted">ملاحظة الإنجاز: ${esc(a.completion_note)}</p>` : ''}
@@ -609,7 +633,8 @@ async function taskDetail(id, onBack) {
     buttons: [
       ...(standalone && d.can_manage && a.status !== 'done' && a.status !== 'cancelled'
         ? [{ label: 'تعديل المهمة', class: 'btn-ghost', onClick: (cl) => { cl(); editStandaloneTask(a, d.assignees.map((x) => x.user_id)); } }] : []),
-      ...(iAmAssignee && a.status !== 'done' ? [{ label: 'تعليم منجزاً', onClick: (cl) => { cl(); completeTask(id, () => { if (onBack) onBack(); }); } }] : []),
+      ...(d.can_complete ? [{ label: 'تعليم منجزاً', onClick: (cl) => { cl(); completeTask(id, () => { if (onBack) onBack(); }); } }] : []),
+      ...(d.can_fix_date ? [{ label: 'تعديل تاريخ الإنجاز', class: 'btn-ghost', onClick: (cl) => { cl(); adjustCompletionDate(id, () => taskDetail(id, onBack), a.completed_at); } }] : []),
       ...(canManage && a.status === 'done' ? [{ label: 'إعادة فتح', class: 'btn-ghost', onClick: async (cl) => { try { await API.post(`/actions/${id}/reopen`); cl(); toast('تمت إعادة الفتح', 'ok'); if (onBack) onBack(); } catch (err) { toast(err.message, 'err'); } } }] : []),
       ...(canManage && a.status !== 'done' && a.status !== 'cancelled' ? [{ label: 'تفويض', class: 'btn-ghost', onClick: (cl) => { cl(); delegateTask(id, onBack); } }] : []),
       { label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() },
