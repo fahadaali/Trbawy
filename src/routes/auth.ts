@@ -1,10 +1,10 @@
 // مسارات المصادقة: دخول، خروج، الحساب الحالي، تغيير كلمة المرور.
 import { Hono } from 'hono';
-import { setCookie, deleteCookie } from 'hono/cookie';
+import { deleteCookie } from 'hono/cookie';
 import type { Env, Variables } from '../types';
 import { hashPassword, verifyPassword, randomToken } from '../lib/crypto';
 import { audit } from '../lib/audit';
-import { requireAuth, SESSION_COOKIE } from '../middleware/auth';
+import { requireAuth, setSessionCookie, SESSION_COOKIE } from '../middleware/auth';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -35,13 +35,7 @@ app.post('/login', async (c) => {
     .bind(sid, user.id, clientIp(c), c.req.header('user-agent') || null)
     .run();
 
-  setCookie(c, SESSION_COOKIE, sid, {
-    httpOnly: true,
-    secure: true,
-    sameSite: 'Lax',
-    path: '/',
-    maxAge: 8 * 3600,
-  });
+  setSessionCookie(c, sid);
 
   await audit(c.env, { userId: user.id, action: 'login', entityType: 'user', entityId: user.id, ip: clientIp(c) });
 

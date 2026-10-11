@@ -75,7 +75,7 @@ async function meetingList() {
           const cid = ov.querySelector('#bn_council').value;
           const from = ov.querySelector('#bn_from').value, to = ov.querySelector('#bn_to').value;
           if (!cid || !from || !to) return toast('حدد المجلس والفترة', 'err');
-          window.open(`/print/bundle?council_id=${cid}&from=${from}&to=${to}&print=1`, '_blank'); cl();
+          cl(); PdfExport.open(`/print/bundle?council_id=${cid}&from=${from}&to=${to}`);
         }},
         { label: 'إلغاء', class: 'btn-ghost', onClick: (cl) => cl() },
       ],
@@ -399,7 +399,7 @@ async function meetingDetail(id) {
   bind('btnSign', () => confirmModal('توقيع المحضر', 'بالتوقيع تقرّ بمحتوى المحضر. سيُسجَّل وقت التوقيع ورمز تحقق فريد. متابعة؟', async () => {
     try { await API.post(`/meetings/${id}/sign`); toast('تم التوقيع', 'ok'); reload(); } catch (err) { toast(err.message, 'err'); }
   }));
-  bind('btnPrint', () => window.open(`/print/meeting/${id}?print=1`, '_blank'));
+  bind('btnPrint', () => PdfExport.open(`/print/meeting/${id}`));
   bind('btnIcs', () => Calendar.open(m, COUNCIL_TYPE_AR[d.council.type] || d.council.name));
   bind('btnWhen', () => rescheduleDialog(id, m, d));
   bind('btnDup', () => confirmModal('نسخ كمحضر جديد',
