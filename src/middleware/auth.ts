@@ -1,10 +1,14 @@
-// وسيط المصادقة: يتحقق من كوكي الجلسة، ينتهي بعد ٨ ساعات خمول، ويحمّل المستخدم.
+// وسيط المصادقة: يتحقق من كوكي الجلسة ويحمّل المستخدم.
+// الجلسة تبقى كما في التطبيقات المعروفة: لا تنتهي ما دام الجهاز يُستعمل، وتسقط بعد
+// ٩٠ يومًا بلا أي استخدام، أو بتسجيل الخروج، أو بإنهائها من «الجلسات النشطة».
 import type { Context, Next } from 'hono';
-import { getCookie } from 'hono/cookie';
+import { getCookie, setCookie } from 'hono/cookie';
 import type { Env, User, Variables } from '../types';
 
-const IDLE_HOURS = 8;
+export const SESSION_IDLE_DAYS = 90;
 export const SESSION_COOKIE = 'tarbawi_session';
+// تحديث «آخر نشاط» وتمديد الكوكي مرةً كل ساعة على الأكثر — لا كتابة في القاعدة مع كل طلب
+const TOUCH_EVERY_MS = 3600 * 1000;
 
 type Ctx = Context<{ Bindings: Env; Variables: Variables }>;
 
@@ -29,17 +33,20 @@ export async function loadSession(c: Ctx): Promise<{ user: User; sessionId: stri
     return null;
   }
 
-  // خمول ٨ ساعات
+  // خمول طويل (٩٠ يومًا بلا استخدام)
   const last = new Date((row.last_active as string).replace(' ', 'T') + 'Z').getTime();
-  if (Date.now() - last > IDLE_HOURS * 3600 * 1000) {
+  if (Date.now() - last > SESSION_IDLE_DAYS * 86400 * 1000) {
     await c.env.DB.prepare('DELETE FROM sessions WHERE id = ?').bind(sid).run();
     return null;
   }
 
-  // تحديث آخر نشاط
-  await c.env.DB.prepare("UPDATE sessions SET last_active = datetime('now') WHERE id = ?")
-    .bind(sid)
-    .run();
+  // تحديث آخر نشاط وتمديد عمر الكوكي (انزلاقي): كل استخدام يبدأ العدّ من جديد
+  if (Date.now() - last > TOUCH_EVERY_MS) {
+    await c.env.DB.prepare("UPDATE sessions SET last_active = datetime('now') WHERE id = ?")
+      .bind(sid)
+      .run();
+    setSessionCookie(c, sid);
+  }
 
   // استثناءات الصلاحيات: قراءةٌ واحدة صغيرة مع كل طلب، فالقرار يبقى متزامنًا في
   // كل دوال الصلاحيات بلا تمرير قاعدة البيانات إليها.
@@ -66,6 +73,17 @@ export async function loadSession(c: Ctx): Promise<{ user: User; sessionId: stri
     perms,
   };
   return { user, sessionId: row.sid };
+}
+
+// كوكي الجلسة: دائمٌ على الجهاز (لا يُمحى بإغلاق التطبيق أو المتصفح)
+export function setSessionCookie(c: Ctx, sid: string) {
+  setCookie(c, SESSION_COOKIE, sid, {
+    httpOnly: true,
+    secure: true,
+    sameSite: 'Lax',
+    path: '/',
+    maxAge: SESSION_IDLE_DAYS * 86400,
+  });
 }
 
 // يتطلب مصادقة صالحة

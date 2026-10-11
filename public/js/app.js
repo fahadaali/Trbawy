@@ -6,11 +6,18 @@ const app = () => document.getElementById('app');
 
 // ============ نقطة البدء ============
 async function boot() {
-  try {
-    const { user } = await API.get('/auth/me');
-    State.user = user;
-  } catch {
-    State.user = null;
+  // شاشة الدخول لا تظهر إلا إن قال الخادم صراحةً «غير مسجَّل» (٤٠١). أما انقطاع الشبكة
+  // أو ضعفها عند فتح التطبيق على الجوال فليس خروجًا: نعيد المحاولة ثم نعرض «تعذّر الاتصال».
+  for (let attempt = 0; ; attempt++) {
+    try {
+      const { user } = await API.get('/auth/me');
+      State.user = user;
+      break;
+    } catch (err) {
+      if (err && err.status === 401) { State.user = null; break; }
+      if (attempt < 2) { await new Promise((r) => setTimeout(r, 1500 * (attempt + 1))); continue; }
+      return renderOffline();
+    }
   }
   if (State.user) { await applyBranding(); await loadAiStatus(); Push.syncSilently(); }
   window.addEventListener('hashchange', route);
@@ -76,6 +83,23 @@ function route() {
 }
 
 function nav(path) { location.hash = '#/' + path; }
+
+// تعذّر الوصول إلى الخادم عند الفتح — الجلسة باقية، فلا نطلب الدخول من جديد
+function renderOffline() {
+  app().innerHTML = `
+    <div class="auth-wrap">
+      <div class="auth-card">
+        <img class="auth-logo" src="/icons/icon.svg" alt="" />
+        <h1>تعذّر الاتصال</h1>
+        <p class="sub">تحقّق من اتصالك بالإنترنت ثم أعد المحاولة — دخولك ما زال محفوظًا.</p>
+        <button type="button" class="btn btn-block" id="retryBoot">إعادة المحاولة</button>
+      </div>
+    </div>`;
+  document.getElementById('retryBoot').onclick = () => {
+    app().innerHTML = '<div class="spinner"></div>';
+    boot();
+  };
+}
 
 // ============ تسجيل الدخول ============
 function renderLogin() {
@@ -1381,7 +1405,7 @@ async function loadSessions() {
   let data;
   try { data = await API.get('/admin/sessions'); }
   catch (err) { box.innerHTML = `<div class="form-error">${esc(err.message)}</div>`; return; }
-  box.innerHTML = `<p class="muted">تنتهي الجلسة تلقائياً بعد ٨ ساعات خمول. يمكنك إنهاء أي جلسة فوراً.</p>
+  box.innerHTML = `<p class="muted">يبقى الدخول محفوظًا على الجهاز، وتنتهي الجلسة تلقائياً بعد ٩٠ يومًا بلا استخدام. يمكنك إنهاء أي جلسة فوراً.</p>
     <table class="tbl mt"><thead><tr><th>المستخدم</th><th>آخر نشاط</th><th>البداية</th><th>العنوان</th><th>الجهاز</th><th></th></tr></thead>
       <tbody>${data.sessions.map((x) => `<tr>
         <td><b>${esc(x.user_name)}</b>${x.is_current ? ' <span class="tag tag-green">جلستك</span>' : ''}</td>
@@ -1441,7 +1465,7 @@ function restoreBackupDialog(key) {
 function myDevicesDialog() {
   const { overlay } = openModal({
     title: 'أجهزتي — الجلسات النشطة',
-    body: `<p class="muted">هذه الأجهزة مسجَّلة الدخول بحسابك الآن. تنتهي أي جلسة تلقائياً بعد ٨ ساعات خمول.</p>
+    body: `<p class="muted">هذه الأجهزة مسجَّلة الدخول بحسابك الآن. تنتهي أي جلسة تلقائياً بعد ٩٠ يومًا بلا استخدام.</p>
       <div id="mdErr"></div><div id="mdBox"><div class="spinner"></div></div>
       <button class="btn-ghost btn-sm mt" id="md_all">إنهاء كل الجلسات الأخرى</button>`,
     buttons: [{ label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() }],
