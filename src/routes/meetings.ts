@@ -8,8 +8,8 @@ import {
   canEditDraft, canCancelMeeting, canAssignWriter, isPresident,
   type CouncilScope,
 } from '../permissions';
-import { getCouncil, nextMeetingNumber, formatDisplayNumber, currentAcademicYear } from '../lib/meetings';
-import { hijriYear } from '../lib/hijri';
+import { getCouncil, nextMeetingNumber, formatDisplayNumber, currentAcademicYear, nextActionNumber, formatActionNumber } from '../lib/meetings';
+import { hijriYear, parseLooseDate } from '../lib/hijri';
 import { shortCode } from '../lib/crypto';
 import { arNum } from '../lib/charts';
 import { notifyMany } from '../lib/notify';
@@ -236,13 +236,15 @@ app.get('/:id', async (c) => {
       (canEditDraft(u, council, m.writer_id) || canApproveMeeting(u, council)),
   };
 
-  // روابط محاضر التصويب/الملحق
+  // روابط محاضر التصويب/الملحق، والمحاضر التابعة المستوردة (parent_link = 'annex')
   const parent = m.parent_meeting_id
-    ? await c.env.DB.prepare('SELECT id, display_number FROM meetings WHERE id = ?').bind(m.parent_meeting_id).first()
+    ? await c.env.DB.prepare('SELECT id, display_number, title FROM meetings WHERE id = ?').bind(m.parent_meeting_id).first()
     : null;
-  const amendments = (await c.env.DB.prepare(
-    'SELECT id, display_number, status FROM meetings WHERE parent_meeting_id = ? ORDER BY id',
-  ).bind(id).all()).results;
+  const children = (await c.env.DB.prepare(
+    'SELECT id, display_number, title, status, parent_link FROM meetings WHERE parent_meeting_id = ? ORDER BY id',
+  ).bind(id).all<any>()).results;
+  const amendments = children.filter((x) => x.parent_link !== 'annex');
+  const annexes = children.filter((x) => x.parent_link === 'annex');
 
   // أعضاء المجلس غير المُدرجين في الحضور (أُضيفوا للمجلس بعد إنشاء المحضر)
   const missingMembers = (await c.env.DB.prepare(
@@ -253,7 +255,7 @@ app.get('/:id', async (c) => {
 
   return c.json({
     meeting: m, council, attendees: attendees.results, agenda: agenda.results,
-    actions: actions.results, followups, perms, parent, amendments,
+    actions: actions.results, followups, perms, parent, amendments, annexes,
     missing_members: missingMembers,
     // اطلاع تاريخي أو شخصي: قراءة فقط، ويُبيَّن سببه في الواجهة
     read_only: scope.level !== 'full',
@@ -355,6 +357,138 @@ app.post('/', async (c) => {
   });
 
   await audit(c.env, { userId: u.id, action: 'create_meeting', entityType: 'meeting', entityId: meetingId, newValue: { display, council: council.id } });
+  return c.json({ id: meetingId, display_number: display }, 201);
+});
+
+// ---- حفظ محضرٍ مستورد (PDF أُعدّ خارج المنصة) محضرًا تابعًا لمحضرٍ رئيس ----
+// المسودة تأتي من /ai/import-minutes بعد أن راجعها صاحبها وصحّحها. والمحضر يُنشأ
+// «مسودة» مباشرة (اجتماعٌ انعقد فعلًا، فلا دعوة تُرسل ولا بنود ثابتة تُضاف)، ثم يمرّ
+// بمسار التوقيع والاعتماد المعتاد. ويُرفق ملف الـPDF الأصلي بعده بمسار المرفقات.
+const plainToHtml = (t: string): string => String(t || '').trim().split(/\n{2,}/)
+  .map((p) => '<p>' + p.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\n/g, '<br>') + '</p>')
+  .join('');
+
+app.post('/import', async (c) => {
+  const u = c.get('user');
+  const b = await c.req.json().catch(() => ({}));
+
+  // المحضر الرئيس: قائمٌ وغير ملغى، ويطّلع عليه المستورِد
+  const parentM = await c.env.DB.prepare('SELECT * FROM meetings WHERE id = ?').bind(Number(b.parent_meeting_id)).first<any>();
+  if (!parentM) return c.json({ error: 'اختر المحضر الرئيس الذي يتبعه هذا المحضر' }, 400);
+  if (parentM.status === 'cancelled') return c.json({ error: 'المحضر الرئيس ملغى' }, 409);
+  const parentCouncil = await getCouncil(c.env, parentM.council_id);
+  if (!parentCouncil || !(await canViewMeeting(c.env, u, parentM, parentCouncil)))
+    return c.json({ error: 'لا تملك صلاحية الاطلاع على المحضر الرئيس' }, 403);
+
+  const council = await getCouncil(c.env, Number(b.council_id) || parentM.council_id);
+  if (!council) return c.json({ error: 'المجلس غير موجود' }, 404);
+  if (!canCreateMeeting(u, council)) return c.json({ error: 'لا تملك صلاحية إنشاء محضر لهذا المجلس' }, 403);
+
+  const greg = parseLooseDate(b.greg_date);
+  if (!greg) return c.json({ error: 'تاريخ الاجتماع مطلوب — أدخله إن لم يُستخرج من المحضر' }, 400);
+  const start = parseTime(b.start_time), end = parseTime(b.end_time);
+  const hy = hijriYear(new Date(greg));
+  const number = await nextMeetingNumber(c.env, council.id, hy);
+  const display = formatDisplayNumber(council.number_prefix, hy, number);
+  const place = String(b.location || '').trim().slice(0, 300) || 'وفق المحضر المرفق';
+  const title = String(b.title || '').trim().slice(0, 300) || null;
+
+  // الأعضاء النشطون — الحضور والمسؤولون منهم وحدهم
+  const members = (await c.env.DB.prepare(
+    `SELECT cm.user_id FROM council_members cm JOIN users us ON us.id = cm.user_id
+      WHERE cm.council_id = ? AND us.is_active = 1 AND us.deleted_at IS NULL`,
+  ).bind(council.id).all<{ user_id: number }>()).results.map((r) => r.user_id);
+  const memberSet = new Set(members);
+  const writerId = council.default_writer_id && memberSet.has(council.default_writer_id)
+    ? council.default_writer_id : (memberSet.has(u.id) ? u.id : null);
+
+  const academicYear = await currentAcademicYear(c.env);
+  const res = await c.env.DB.prepare(
+    `INSERT INTO meetings
+       (council_id, number, hijri_year, display_number, hijri_date, greg_date, start_time, end_time,
+        location_type, location, title, status, created_by, writer_id, parent_meeting_id, parent_link, academic_year)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?, ?, 'annex', ?)`,
+  ).bind(
+    council.id, number, hy, display, String(b.hijri_date || '').slice(0, 60), greg,
+    start ?? null, end ?? null, b.location_type === 'remote' ? 'remote' : 'in_person', place, title,
+    u.id, writerId, parentM.id, academicYear,
+  ).run();
+  const meetingId = res.meta.last_row_id as number;
+
+  // الحضور: كل عضو نشط بحالته المختارة في المراجعة (ومن لم يُذكر في المحضر غائب)، ثم الضيوف
+  const status: Record<number, string> = {};
+  for (const a of Array.isArray(b.attendees) ? b.attendees : []) {
+    const s = ['present', 'apology', 'absent'].includes(a?.status) ? a.status : 'present';
+    if (memberSet.has(Number(a?.user_id))) status[Number(a.user_id)] = s;
+  }
+  const stmts: D1PreparedStatement[] = members.map((uid) => c.env.DB.prepare(
+    'INSERT INTO meeting_attendees (meeting_id, user_id, attendance_status) VALUES (?, ?, ?)',
+  ).bind(meetingId, uid, status[uid] || 'absent'));
+  for (const g of (Array.isArray(b.guests) ? b.guests : []).slice(0, 100)) {
+    const name = String(g?.name || '').trim().slice(0, 120);
+    if (!name) continue;
+    stmts.push(c.env.DB.prepare(
+      'INSERT INTO meeting_attendees (meeting_id, is_guest, guest_name, guest_title, attendance_status) VALUES (?, 1, ?, ?, ?)',
+    ).bind(meetingId, name, String(g?.title || '').trim().slice(0, 120) || null,
+      ['present', 'apology', 'absent'].includes(g?.status) ? g.status : 'present'));
+  }
+
+  // البنود بترتيبها، ثم متابعة القرارات السابقة الواردة في المحضر بندًا واحدًا
+  let order = 0;
+  for (const a of (Array.isArray(b.agenda) ? b.agenda : []).slice(0, 200)) {
+    const t = String(a?.title || '').trim().slice(0, 300);
+    if (!t) continue;
+    stmts.push(c.env.DB.prepare(
+      'INSERT INTO agenda_items (meeting_id, sort_order, title, body, item_type) VALUES (?, ?, ?, ?, ?)',
+    ).bind(meetingId, order++, t, a?.body ? sanitizeHtml(plainToHtml(String(a.body).slice(0, 20000))) : null, 'new'));
+  }
+  const fups = (Array.isArray(b.followups) ? b.followups : [])
+    .map((f: any) => ({ text: String(f?.text || '').trim().slice(0, 1000), note: String(f?.status_note || '').trim().slice(0, 200) }))
+    .filter((f: any) => f.text);
+  if (fups.length) {
+    const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    stmts.push(c.env.DB.prepare(
+      'INSERT INTO agenda_items (meeting_id, sort_order, title, body, item_type) VALUES (?, ?, ?, ?, ?)',
+    ).bind(meetingId, order++, 'متابعة القرارات السابقة',
+      sanitizeHtml('<ul>' + fups.map((f: any) => `<li>${esc(f.text)}${f.note ? ` — <b>${esc(f.note)}</b>` : ''}</li>`).join('') + '</ul>'),
+      'followup'));
+  }
+  for (let i = 0; i < stmts.length; i += 50) await c.env.DB.batch(stmts.slice(i, i + 50));
+
+  // القرارات والتوصيات والمهام — بترقيم المجلس، والمهمة بلا موعد تُستحق بعد أسبوع من الاجتماع
+  const weekAfter = new Date(new Date(greg + 'T00:00:00Z').getTime() + 7 * 86400000).toISOString().slice(0, 10);
+  let actionsCount = 0;
+  for (const a of (Array.isArray(b.actions) ? b.actions : []).slice(0, 200)) {
+    const text = String(a?.text || '').trim().slice(0, 4000);
+    if (!text) continue;
+    const type = ['decision', 'recommendation', 'task'].includes(a?.type) ? a.type : 'decision';
+    const priority = ['high', 'medium', 'low'].includes(a?.priority) ? a.priority : 'medium';
+    const due = parseLooseDate(a?.due_date) || (type === 'task' ? weekAfter : null);
+    const num = await nextActionNumber(c.env, council.id, type);
+    const ar = await c.env.DB.prepare(
+      `INSERT INTO action_items (type, council_id, source_meeting_id, number, display_number, text,
+         priority, due_date, first_due_date, status, progress, created_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'not_started', 0, ?)`,
+    ).bind(type, council.id, meetingId, num, formatActionNumber(council.number_prefix, type, num), text,
+      priority, due, due, u.id).run();
+    const actionId = ar.meta.last_row_id as number;
+    actionsCount++;
+    const assignees: number[] = [...new Set<number>((Array.isArray(a?.assignees) ? a.assignees : []).map(Number))]
+      .filter((uid) => memberSet.has(uid));
+    if (!assignees.length) continue;
+    await c.env.DB.batch(assignees.map((uid) => c.env.DB.prepare(
+      'INSERT OR IGNORE INTO action_assignees (action_item_id, user_id) VALUES (?, ?)').bind(actionId, uid)));
+    await notifyMany(c.env, assignees, {
+      type: 'action_assigned',
+      title: 'إسناد ' + (type === 'task' ? 'مهمة' : type === 'decision' ? 'قرار' : 'توصية'),
+      body: text, link: `#/tasks/${actionId}`,
+    });
+  }
+
+  await audit(c.env, {
+    userId: u.id, action: 'import_meeting_pdf', entityType: 'meeting', entityId: meetingId,
+    newValue: { display, parent: parentM.id, source: String(b.source_name || '').slice(0, 200) || null, actions: actionsCount },
+  });
   return c.json({ id: meetingId, display_number: display }, 201);
 });
 

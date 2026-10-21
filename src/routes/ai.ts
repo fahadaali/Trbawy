@@ -9,7 +9,11 @@ import { getCouncil } from '../lib/meetings';
 import { resultTargets } from '../lib/evaltargets';
 import { sanitizeHtml } from '../lib/sanitize';
 import { audit } from '../lib/audit';
-import { aiEnabled, aiText, aiTranscribe, extractJson, AiUnavailable } from '../lib/ai';
+import { aiEnabled, aiText, aiTranscribe, aiPdfText, extractJson, AiUnavailable } from '../lib/ai';
+import { canCreateMeeting } from '../permissions';
+import {
+  MINUTES_SYSTEM, MINUTES_CHUNK, MINUTES_MAX_CHUNKS, minutesPrompt, splitMinutes, buildDraft,
+} from '../lib/minutesimport';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -205,6 +209,70 @@ app.post('/transcribe', async (c) => {
     });
     return c.json({ text });
   } catch (e) { return aiError(c, e); }
+});
+
+// ------------------------------------------------------------
+// ٣ب) تفريغ محضرٍ أُعدّ خارج المنصة (PDF أو نصّ ملصوق) إلى مسودة محضر
+// ------------------------------------------------------------
+// يُقرأ النص ويُقسَّم أجزاءً يحلّلها النموذج، ثم تُدمج وتُطابَق أسماؤها بأعضاء المجلس.
+// لا يُحفظ شيء: المسودة تُعرض للمراجعة وتُحفظ بعدها عبر POST /meetings/import.
+const MAX_PDF = 20 * 1024 * 1024;
+
+app.post('/import-minutes', async (c) => {
+  const form = await c.req.formData().catch(() => null);
+  if (!form) return c.json({ error: 'لم يُرسل ملف المحضر' }, 400);
+  const council = await getCouncil(c.env, Number(form.get('council_id')));
+  if (!council) return c.json({ error: 'المجلس غير موجود' }, 404);
+  const u = c.get('user');
+  if (!canCreateMeeting(u, council)) return c.json({ error: 'لا تملك صلاحية إنشاء محضر لهذا المجلس' }, 403);
+
+  const file: unknown = form.get('pdf');
+  const pasted = String(form.get('text') ?? '').trim();
+  let source = '';
+  try {
+    if (file instanceof File && file.size) {
+      if (file.size > MAX_PDF) return c.json({ error: 'حجم الملف يتجاوز ٢٠ ميجابايت' }, 413);
+      source = await aiPdfText(c.env, file.name, await file.arrayBuffer());
+    } else if (pasted) {
+      source = pasted.normalize('NFKC');
+    } else {
+      return c.json({ error: 'أرفق ملف PDF أو الصق نص المحضر' }, 400);
+    }
+  } catch (e) { return aiError(c, e); }
+
+  const chunks = splitMinutes(source, MINUTES_CHUNK);
+  if (chunks.length > MINUTES_MAX_CHUNKS)
+    return c.json({ error: `المحضر أطول من ${MINUTES_MAX_CHUNKS * MINUTES_CHUNK} حرف — قسّمه إلى ملفات أصغر` }, 413);
+
+  const members = (await c.env.DB.prepare(
+    `SELECT cm.user_id, us.name, us.role FROM council_members cm JOIN users us ON us.id = cm.user_id
+      WHERE cm.council_id = ? AND us.is_active = 1 AND us.deleted_at IS NULL ORDER BY cm.position DESC, us.name`,
+  ).bind(council.id).all<{ user_id: number; name: string; role: string }>()).results;
+
+  const parts: any[] = [];
+  const warnings: string[] = [];
+  try {
+    for (let i = 0; i < chunks.length; i++) {
+      let parsed: any = null;
+      // محاولتان: النموذج يُخرج أحيانًا JSON مبتورًا أو محاطًا بشرح
+      for (let attempt = 0; attempt < 2 && !parsed; attempt++) {
+        const out = await aiText(c.env, MINUTES_SYSTEM, minutesPrompt(chunks[i], i + 1, chunks.length), 3500);
+        const j = extractJson<any>(out);
+        if (j && typeof j === 'object' && !Array.isArray(j)) parsed = j;
+      }
+      if (parsed) parts.push(parsed);
+      else warnings.push(`تعذّر تحليل الجزء ${i + 1} من ${chunks.length} — راجع ما نقص يدويًا`);
+    }
+  } catch (e) { return aiError(c, e); }
+  if (!parts.length) return c.json({ error: 'تعذّر تحليل المحضر — حاول مرة أخرى أو الصق نصّه' }, 502);
+
+  const draft = buildDraft(parts, members);
+  await audit(c.env, {
+    userId: u.id, action: 'ai_import_minutes', entityType: 'council', entityId: council.id,
+    newValue: { chars: source.length, chunks: chunks.length, file: file instanceof File ? file.name : null },
+    ip: c.req.header('cf-connecting-ip') || null,
+  });
+  return c.json({ draft, members, warnings, chars: source.length, excerpt: source.slice(0, 1500) });
 });
 
 // ------------------------------------------------------------

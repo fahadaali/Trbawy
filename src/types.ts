@@ -12,7 +12,13 @@ export interface Env {
   VAPID_PRIVATE_KEY?: string;
   VAPID_SUBJECT?: string;
   // Workers AI — قد يكون غير مُهيّأ (تُعطَّل مزايا الذكاء الاصطناعي عندها بلطف)
-  AI?: { run: (model: string, input: any) => Promise<any> };
+  AI?: {
+    run: (model: string, input: any) => Promise<any>;
+    // تحويل مستند (PDF وغيره) إلى نصّ Markdown — متاح في ربط Workers AI الحديث
+    toMarkdown?: (files: { name: string; blob: Blob }[]) => Promise<
+      { name: string; mimeType?: string; format?: string; tokens?: number; data?: string; error?: string }[]
+    >;
+  };
   // معرّف نسخة الـWorker — يتغيّر مع كل نشرة، وتُختم به بصمةُ عامل الخدمة
   CF_VERSION_METADATA?: { id: string; tag?: string; timestamp?: string };
 }

@@ -16,7 +16,7 @@ const FINGERPRINT_FILES = [
   '/index.html', '/js/app.js', '/js/ui.js', '/js/api.js', '/js/meetings.js',
   '/js/tasks.js', '/js/evaluations.js', '/js/students.js', '/js/files.js',
   '/js/viewer.js', '/js/ai.js', '/js/xlsx.js', '/js/finance.js', '/js/zipreader.js',
-  '/js/folderimport.js', '/css/styles.css',
+  '/js/folderimport.js', '/js/minutesimport.js', '/css/styles.css',
 ];
 
 let cached: string | null = null;

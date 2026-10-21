@@ -104,6 +104,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   verify_code    TEXT,                         -- رمز تحقق فريد للمحضر (QR)
   cancel_reason  TEXT,
   parent_meeting_id INTEGER REFERENCES meetings(id), -- لمحاضر التصويب/الملحق
+  parent_link     TEXT,   -- نوع الارتباط بالمحضر الأصل: فارغ = تصويب/ملحق، 'annex' = محضر تابع مستورد
   academic_year  TEXT,                         -- السنة الدراسية (سياق)
   followups_frozen_at TEXT,                    -- وقت تجميد جدول المتابعة (عند الاعتماد)
   created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
