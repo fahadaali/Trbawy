@@ -25,6 +25,8 @@ import {
   FINANCE_KINDS, MAX_FIN_ATTACH_BYTES, custodySpent, financeAttachmentCheck, financeKey,
   money, parseAmount, parseDate, summaryOf, summaryOfRows, type FinanceKind,
 } from '../lib/finance';
+import { analyzeFinanceImport, commitFinanceImport, TEMPLATE_HEADER } from '../lib/financeimport';
+import { csvCell } from '../lib/csv';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 app.use('*', requireAuth, requirePasswordChanged);
@@ -615,6 +617,65 @@ app.delete('/:id', async (c) => {
     oldValue: { kind: row.kind, statement: row.statement, amount: row.amount, entry_date: row.entry_date },
   });
   return c.json({ ok: true });
+});
+
+// ============================================================
+// الاستيراد من قالب (Excel/CSV) — معاينة صفًّا بصف ثم حفظ الصحيح منها
+// ============================================================
+
+// القالب: ترويسته بالعربية، وصفوفه تمثيلية تُري القيم المقبولة في كل عمود ثم تُحذف.
+// أسماء المجالس تُكتب كما هي في المنصة، فيُطابقها الاستيراد بلا تخمين.
+app.get('/template', async (c) => {
+  const u = c.get('user');
+  if (!can(u, 'finance.view')) return c.json({ error: 'لا تملك صلاحية الاطلاع على المتابعة المالية' }, 403);
+  const names = (await c.env.DB.prepare('SELECT name FROM councils ORDER BY id').all<{ name: string }>())
+    .results.map((r) => r.name);
+  const n = (i: number) => names[i] || names[0] || 'المجلس التربوي';
+  const sample = [
+    [n(0), 'إيراد', 'عهدة الفصل الدراسي الأول', '5000', '2025-09-01', '', ''],
+    [n(0), 'صرف', 'ضيافة اجتماع المجلس', '350.50', '2025-09-07', '', 'فاتورة رقم 1182'],
+    [n(1), 'صرف', 'جوائز المسابقة الثقافية', '1200', '1447/03/20', '', 'تاريخ هجري مقبول'],
+    [n(2), 'صرف', 'طباعة شهادات شكر', '275', '14/09/2025', '', ''],
+  ];
+  const body = [TEMPLATE_HEADER, ...sample].map((r) => r.map(csvCell).join(',')).join('\n');
+  return new Response('﻿' + body + '\n', {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="finance_template.csv"; filename*=UTF-8''${encodeURIComponent('قالب_الحركات_المالية.csv')}`,
+      'Cache-Control': 'no-store',
+    },
+  });
+});
+
+// بلا ?commit=1 معاينةٌ لا تكتب شيئًا؛ ومعه يُعاد التحليل نفسه ويُحفظ الصحيح وحده —
+// فلا يُحفظ إلا ما رآه صاحبه في المعاينة، ولا يُوثق بنتيجةٍ أرسلها المتصفح.
+app.post('/import', async (c) => {
+  const u = c.get('user');
+  if (!can(u, 'finance.add')) return c.json({ error: 'لا تملك صلاحية إضافة حركات مالية' }, 403);
+  const commit = c.req.query('commit') === '1';
+  const b = await c.req.json().catch(() => ({}));
+  const csv = String(b.csv || '');
+  if (!csv.trim()) return c.json({ error: 'لا توجد بيانات' }, 400);
+
+  const result = await analyzeFinanceImport(c.env, u, csv, {
+    defaultCouncilId: Number(b.default_council_id) || null,
+    defaultKind: FINANCE_KINDS.includes(b.default_kind) ? b.default_kind : null,
+  });
+  if ('error' in result) return c.json({ error: result.error }, 400);
+
+  const rows = result.rows;
+  const invalid = rows.filter((r) => r.errors.length).length;
+  const valid = rows.length - invalid;
+  if (!commit) return c.json({ preview: true, total: rows.length, valid, invalid, report: rows });
+
+  const inserted = await commitFinanceImport(c.env, u, rows);
+  const sum = (k: FinanceKind) => money(rows.filter((r) => !r.errors.length && r.kind === k)
+    .reduce((s, r) => s + (r.amount || 0), 0));
+  await audit(c.env, {
+    userId: u.id, action: 'import_finance_entries', entityType: 'finance_entry',
+    newValue: { inserted, skipped: invalid, income: sum('income'), expense: sum('expense') },
+  });
+  return c.json({ committed: true, inserted, skipped: invalid, report: rows });
 });
 
 // ---- رفع مرفق إثبات (صورة أو PDF) ----

@@ -158,6 +158,21 @@ async function fileToCsv(file) {
   return rowsToCsv(await readXlsxRows(file));
 }
 
+/**
+ * كـfileToCsv لكن خلايا التاريخ في إكسل تصل تاريخًا (2025-09-14) لا رقمًا تسلسليًا —
+ * ما تحتاجه جداولٌ عمودُ التاريخ فيها جوهري كالحركات المالية. أول ورقة فيها بيانات.
+ */
+async function fileToCsvRich(file) {
+  const isXlsx = /\.xlsx$/i.test(file.name) ||
+    file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  if (!isXlsx) return await csvText(file);
+  const sheets = await readXlsxWorkbook(file);
+  const clean = (rows) => rows.filter((r) => r.some((x) => String(x ?? '').trim() !== ''));
+  const sheet = sheets.find((s) => clean(s.rows).length) || sheets[0];
+  if (!sheet) throw new Error('لا توجد ورقة عمل في الملف');
+  return rowsToCsv(clean(sheet.rows).map((r) => Array.from(r, (x) => x ?? '')));
+}
+
 // ============================================================
 // قراءة المصنّف كاملًا للمعاينة (أوراق متعدّدة بأسمائها)
 // ============================================================
