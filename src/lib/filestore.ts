@@ -7,6 +7,14 @@ import { can, isAdmin } from '../permissions';
 /** أقصى حجم للملف الواحد — الرفع يمرّ عبر الـ Worker فيبقى ضمن حدّ الطلب. */
 export const MAX_FILE_BYTES = 50 * 1024 * 1024;
 
+/**
+ * أقصى حجم للملف الكبير — يُرفع مجزّأً (R2 multipart) قطعةً قطعة، فلا يمرّ كاملًا عبر
+ * الـWorker ولا يقيّده حدّ الطلب الواحد. ما فوق MAX_FILE_BYTES يسلك هذا الطريق وحده.
+ */
+export const MAX_LARGE_FILE_BYTES = 1024 * 1024 * 1024;
+/** حجم القطعة في الرفع المجزّأ: R2 يشترط ٥ م.ب فأكثر لكل قطعة عدا الأخيرة، وتساويها. */
+export const UPLOAD_PART_BYTES = 10 * 1024 * 1024;
+
 // ---- الامتدادات والأنواع ----
 const MIME_BY_EXT: Record<string, string> = {
   pdf: 'application/pdf',
@@ -88,7 +96,7 @@ export async function dropObject(env: Env, key: string | null | undefined): Prom
 // ---- سجل الأحداث (سجل التعديل والاستبدال) ----
 export type FileEventAction =
   | 'upload' | 'replace' | 'rename' | 'move' | 'tags' | 'year' | 'description'
-  | 'access' | 'color' | 'create' | 'trash' | 'restore' | 'purge' | 'download';
+  | 'access' | 'color' | 'create' | 'trash' | 'restore' | 'purge' | 'download' | 'import';
 
 export async function logFileEvent(env: Env, e: {
   entityType: 'file' | 'folder';
@@ -232,4 +240,18 @@ export async function setTags(env: Env, type: 'file' | 'folder', id: number, tag
   await env.DB.batch(clean.map((t) =>
     env.DB.prepare('INSERT OR IGNORE INTO file_tag_links (tag_id, entity_type, entity_id) VALUES (?, ?, ?)')
       .bind(t, type, id)));
+}
+
+/**
+ * رفوعٌ مجزّأة لم تكتمل (أُغلق المتصفح في منتصفها): تُلغى في التخزين ويُمحى صفّها.
+ * تُستدعى يوميًا — ويومان مهلةٌ تكفي أبطأ رفعٍ لملفٍّ من غيغابايت.
+ */
+export async function purgeStaleUploads(env: Env): Promise<void> {
+  const rows = (await env.DB.prepare(
+    "SELECT upload_id, r2_key FROM file_uploads WHERE created_at < datetime('now', '-2 days') LIMIT 200",
+  ).all<{ upload_id: string; r2_key: string }>()).results;
+  for (const r of rows) {
+    try { await env.FILES.resumeMultipartUpload(r.r2_key, r.upload_id).abort(); } catch { /* انتهت صلاحيتها في التخزين */ }
+    await env.DB.prepare('DELETE FROM file_uploads WHERE upload_id = ?').bind(r.upload_id).run();
+  }
 }

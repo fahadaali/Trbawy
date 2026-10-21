@@ -24,6 +24,7 @@ import calendarRoutes from './routes/calendar';
 import pageRoutes from './routes/pages';
 import { runDailyReminders } from './lib/reminders';
 import { createBackup } from './lib/backup';
+import { purgeStaleUploads } from './lib/filestore';
 
 const app = new Hono<{ Bindings: Env; Variables: Variables }>();
 
@@ -122,6 +123,7 @@ export default {
     ctx.waitUntil((async () => {
       await runDailyReminders(env);
       await createBackup(env); // نسخة احتياطية يومية إلى R2
+      await purgeStaleUploads(env); // رفوعٌ مجزّأة انقطعت ولم تكتمل
     })());
   },
 };
