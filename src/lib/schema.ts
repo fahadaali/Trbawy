@@ -104,6 +104,7 @@ export const SCHEMA_STATEMENTS: string[] = [
   verify_code    TEXT,                         -- رمز تحقق فريد للمحضر (QR)
   cancel_reason  TEXT,
   parent_meeting_id INTEGER REFERENCES meetings(id), -- لمحاضر التصويب/الملحق
+  parent_link     TEXT,   -- نوع الارتباط بالمحضر الأصل: فارغ = تصويب/ملحق، 'annex' = محضر تابع مستورد
   academic_year  TEXT,                         -- السنة الدراسية (سياق)
   followups_frozen_at TEXT,                    -- وقت تجميد جدول المتابعة (عند الاعتماد)
   created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -408,6 +409,21 @@ export const SCHEMA_STATEMENTS: string[] = [
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 )`,
   `CREATE INDEX IF NOT EXISTS idx_fevents_entity ON file_events(entity_type, entity_id)`,
+  // رفعٌ مجزّأ (R2 multipart) قيد التنفيذ للملفات الكبيرة: يُقيَّد بصاحبه ووجهته، فلا
+  // يُكمِل رفعًا غيرُ من بدأه، ولا تُغيَّر وجهته بين البدء والإتمام
+  `CREATE TABLE IF NOT EXISTS file_uploads (
+  upload_id   TEXT    PRIMARY KEY,
+  r2_key      TEXT    NOT NULL,
+  name        TEXT    NOT NULL,
+  size        INTEGER NOT NULL,
+  folder_id   INTEGER REFERENCES file_folders(id),
+  access      TEXT    NOT NULL,
+  council_id  INTEGER REFERENCES councils(id),
+  owner_id    INTEGER REFERENCES users(id),
+  academic_year TEXT,
+  user_id     INTEGER NOT NULL REFERENCES users(id),
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+)`,
   // ---- المتابعة المالية: الحركة (صرف · إيراد)، مرفقاتها، والعهدة ----
   // ترتيب الجدولين مقصود: العهدة أولًا بلا مفتاح أجنبي على حركتها، فالجدولان يشير
   // كلٌّ منهما إلى الآخر ولا تقبل SQLite دائرةً في الإنشاء.

@@ -47,6 +47,7 @@ async function meetingList() {
         <h3>المحاضر</h3>
         <div class="spacer"></div>
         <button class="btn-ghost btn-sm" id="bundleBtn">${icon('package', 16)} تصدير حزمة</button>
+        ${canCreate && State.aiEnabled ? `<button class="btn-ghost btn-sm" id="importPdf">${icon('filePdf', 16)} استيراد محضر PDF</button>` : ''}
         ${canCreate ? '<button class="btn btn-sm" id="newMeeting">+ دعوة/محضر جديد</button>' : ''}
       </div>
       <div class="card-body">
@@ -63,6 +64,7 @@ async function meetingList() {
     </div>`;
 
   if (canCreate) document.getElementById('newMeeting').onclick = () => nav('meetings/new');
+  if (canCreate && State.aiEnabled) document.getElementById('importPdf').onclick = () => minutesImportDialog(null);
   document.getElementById('bundleBtn').onclick = () => {
     openModal({
       title: 'تصدير حزمة محاضر',
@@ -263,9 +265,11 @@ async function meetingDetail(id) {
     <td>${a.signed_at ? '<span class="tag tag-green">وقّع</span>' : (a.is_guest || a.attendance_status !== 'present' ? '—' : '<span class="tag tag-gold">بانتظار التوقيع</span>')}</td>
   </tr>`).join('');
 
-  const linksHtml = (d.parent || (d.amendments && d.amendments.length)) ? `<div class="card mt"><div class="card-body">
-    ${d.parent ? `<div>محضر تصويب/ملحق للمحضر: <a href="#/meetings/${d.parent.id}"><b dir="ltr">${esc(d.parent.display_number)}</b></a></div>` : ''}
+  const annexes = d.annexes || [];
+  const linksHtml = (d.parent || (d.amendments && d.amendments.length) || annexes.length) ? `<div class="card mt"><div class="card-body">
+    ${d.parent ? `<div>${m.parent_link === 'annex' ? 'محضر تابع للمحضر الرئيس' : 'محضر تصويب/ملحق للمحضر'}: <a href="#/meetings/${d.parent.id}"><b dir="ltr">${esc(d.parent.display_number)}</b></a>${d.parent.title ? ` — ${esc(d.parent.title)}` : ''}</div>` : ''}
     ${(d.amendments && d.amendments.length) ? `<div>محاضر التصويب/الملحق: ${d.amendments.map((a) => `<a href="#/meetings/${a.id}" dir="ltr">${esc(a.display_number)}</a>`).join('، ')}</div>` : ''}
+    ${annexes.length ? `<div>المحاضر التابعة: ${annexes.map((a) => `<a href="#/meetings/${a.id}"><span dir="ltr">${esc(a.display_number)}</span>${a.title ? ` (${esc(a.title)})` : ''}</a> <span class="tag tag-gray">${esc(MEETING_STATUS_AR[a.status] || a.status)}</span>`).join('، ')}</div>` : ''}
   </div></div>` : '';
 
   // جدول المتابعة: بنود المحاضر السابقة المرحَّلة إلى هذا المحضر — يظهر أيضًا في المحضر
@@ -313,6 +317,8 @@ async function meetingDetail(id) {
   if (State.aiEnabled) btns.push(aiBtn('btnAiSummary', 'ملخّص تنفيذي'));
   if (canCreateForCouncil(d.council)) btns.push(`<button class="btn-ghost btn-sm" id="btnDup">${icon('copy', 16)} نسخ كمحضر جديد</button>`);
   if (p.can_amend) btns.push(`<button class="btn-ghost btn-sm" id="btnAmend">${icon('meetings', 16)} محضر تصويب/ملحق</button>`);
+  if (State.aiEnabled && m.status !== 'cancelled' && m.parent_link !== 'annex' && canCreateForCouncil(d.council))
+    btns.push(`<button class="btn-ghost btn-sm" id="btnAnnexPdf">${icon('filePdf', 16)} إضافة محضر تابع من PDF</button>`);
   if (p.can_cancel) btns.push(`<button class="btn-danger btn-sm" id="btnCancel">إلغاء المحضر</button>`);
 
   // لوحة التوقيعات في مرحلة الانتظار
@@ -464,6 +470,7 @@ async function meetingDetail(id) {
   };
   bind('mComAdd', addCom);
   onEnter('mComTxt', addCom);
+  bind('btnAnnexPdf', () => minutesImportDialog(m));
   bind('btnAmend', () => confirmModal('محضر تصويب/ملحق', 'سيُنشأ محضر جديد (مسودة) مرتبط بهذا المحضر لإجراء التصحيح. متابعة؟', async () => {
     try { const r = await API.post(`/meetings/${id}/amend`); toast('تم إنشاء محضر التصويب', 'ok'); nav('meetings/' + r.id); } catch (err) { toast(err.message, 'err'); }
   }));

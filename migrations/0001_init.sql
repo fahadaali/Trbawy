@@ -129,6 +129,7 @@ CREATE TABLE meetings (
   verify_code    TEXT,                         -- رمز تحقق فريد للمحضر (QR)
   cancel_reason  TEXT,
   parent_meeting_id INTEGER REFERENCES meetings(id), -- لمحاضر التصويب/الملحق
+  parent_link     TEXT,   -- نوع الارتباط بالمحضر الأصل: فارغ = تصويب/ملحق، 'annex' = محضر تابع مستورد
   academic_year  TEXT,                         -- السنة الدراسية (سياق)
   followups_frozen_at TEXT,                    -- وقت تجميد جدول المتابعة (عند الاعتماد)
   created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -521,6 +522,21 @@ CREATE TABLE file_events (
   created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_fevents_entity ON file_events(entity_type, entity_id);
+
+-- رفعٌ مجزّأ (R2 multipart) قيد التنفيذ للملفات الكبيرة — يُحذف صفّه عند الإتمام أو الإلغاء.
+CREATE TABLE file_uploads (
+  upload_id   TEXT    PRIMARY KEY,
+  r2_key      TEXT    NOT NULL,
+  name        TEXT    NOT NULL,
+  size        INTEGER NOT NULL,                      -- الحجم المُعلَن عند البدء
+  folder_id   INTEGER REFERENCES file_folders(id),
+  access      TEXT    NOT NULL,
+  council_id  INTEGER REFERENCES councils(id),
+  owner_id    INTEGER REFERENCES users(id),
+  academic_year TEXT,
+  user_id     INTEGER NOT NULL REFERENCES users(id),
+  created_at  TEXT    NOT NULL DEFAULT (datetime('now'))
+);
 
 -- ------------------------------------------------------------
 -- المتابعة المالية: الحركة المالية (صرف · إيراد)، ومرفقاتها، والعهدة المالية

@@ -70,6 +70,7 @@ VIEWS.files = async (rest) => {
         <div class="spacer"></div>
         ${FilesState.trash ? `<button class="btn-ghost btn-sm" id="fBack">${icon('folder', 16)} الأرشيف</button>` : `
           ${m.perms.add ? `<button class="btn btn-sm" id="fUpload">${icon('upload', 16)} رفع ملفات</button>` : ''}
+          ${m.perms.add ? `<button class="btn-ghost btn-sm" id="fImportDir">${icon('package', 16)} استيراد مجلد</button>` : ''}
           ${m.perms.add ? `<button class="btn-ghost btn-sm" id="fNewFolder">${icon('folderPlus', 16)} مجلد جديد</button>` : ''}
           ${m.perms.edit || m.perms.add ? `<button class="btn-ghost btn-sm" id="fTags">${icon('tag', 16)} التاقات</button>` : ''}
           <button class="btn-ghost btn-sm" id="fTrash">${icon('trash', 16)} السلة</button>`}
@@ -110,6 +111,7 @@ VIEWS.files = async (rest) => {
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.onclick = fn; };
   on('fUpload', () => pickAndUpload());
   on('fNewFolder', () => folderDialog(null));
+  on('fImportDir', () => folderImportDialog());
   on('fTags', () => tagsManagerDialog());
   on('fTrash', () => { location.hash = '#/files/trash'; });
   on('fBack', () => { location.hash = '#/files'; });
@@ -156,10 +158,19 @@ async function loadFiles() {
   if (f.type) p.set('type', f.type);
   try {
     const d = await API.get('/files?' + p.toString());
+    // مجلدٌ فيه أكثر من ألف ملف (كأرشيفٍ مستورد) يأتي صفحات — تُجمع حتى عشرة آلاف
+    const files = d.files || [];
+    let more = d.more_files;
+    for (let page = 1; more && page < 10; page++) {
+      p.set('offset', String(page * 1000));
+      const next = await API.get('/files?' + p.toString());
+      files.push(...(next.files || []));
+      more = next.more_files;
+    }
     FilesState.folder = d.folder || null;
     FilesState.path = d.path || [];
     FilesState.folders = d.folders || [];
-    FilesState.files = d.files || [];
+    FilesState.files = files;
     FilesState.canAdd = !!d.can_add;
     FilesState.searching = !!d.searching;
     drawBreadcrumb();
@@ -493,6 +504,7 @@ function uploadOne(file, query, onProgress) {
 
 async function uploadFiles(list) {
   const max = FilesState.meta.max_bytes;
+  const maxLarge = FilesState.meta.max_large_bytes || max;
   // في الجذر يُسأل عن النطاق قبل أي رفع؛ وداخل مجلد يُورَث بلا سؤال
   let scope = null;
   if (!FilesState.folderId) {
@@ -517,7 +529,7 @@ async function uploadFiles(list) {
     const row = document.getElementById('up' + i);
     const bar = row.querySelector('.bar i');
     const st = row.querySelector('.st');
-    if (file.size > max) {
+    if (file.size > maxLarge) {
       st.textContent = 'أكبر من الحد المسموح';
       row.classList.add('err');
       failed++;
@@ -533,7 +545,10 @@ async function uploadFiles(list) {
       if (scope.year) q.set('year', scope.year);
     }
     try {
-      await uploadOne(file, q, (p) => { bar.style.width = Math.round(p * 100) + '%'; });
+      const onP = (p) => { bar.style.width = Math.round(p * 100) + '%'; };
+      // ما فوق حدّ الطلب الواحد يُرفع مجزّأً — بالوجهة نفسها
+      if (file.size > max) await uploadLarge(file, file.name, Object.fromEntries(q), onP);
+      else await uploadOne(file, q, onP);
       bar.style.width = '100%';
       st.textContent = 'تم ✓';
       row.classList.add('ok');
@@ -872,11 +887,12 @@ const FILE_EVENT_AR = {
   rename: 'إعادة تسمية', move: 'نقل', tags: 'تعديل التاقات', year: 'تغيير العام',
   description: 'تعديل الوصف', access: 'تغيير نطاق الاطلاع', color: 'تغيير اللون',
   trash: 'حذف إلى السلة', restore: 'استعادة', purge: 'حذف نهائي', download: 'تنزيل',
+  import: 'استيراد',
 };
 const FILE_EVENT_ICON = {
   upload: 'upload', create: 'folderPlus', replace: 'replace', rename: 'pen', move: 'share',
   tags: 'tag', year: 'meetings', description: 'pen', access: 'lock', color: 'branding',
-  trash: 'trash', restore: 'restore', purge: 'trash', download: 'download',
+  trash: 'trash', restore: 'restore', purge: 'trash', download: 'download', import: 'package',
 };
 
 async function fileHistoryDialog(f) {
@@ -938,6 +954,11 @@ function eventDetail(e) {
   if (e.action === 'year' && (o.academic_year || n.academic_year)) return `${esc(o.academic_year || '—')} ← ${esc(n.academic_year || '—')}`;
   if (e.action === 'access' && (o.access || n.access)) return `${esc(FILE_ACCESS_AR[o.access] || '—')} ← ${esc(FILE_ACCESS_AR[n.access] || '—')}`;
   if (e.action === 'move') return 'تغيّر المجلد';
+  if (e.action === 'import' && n.files != null) {
+    return [`${arNum(n.files)} ملف`, n.bytes ? fileSize(n.bytes) : '', n.folders ? `${arNum(n.folders)} مجلد` : '',
+      n.skipped ? `تُخطّي ${arNum(n.skipped)}` : '', n.failed ? `تعذّر ${arNum(n.failed)}` : '',
+      n.source ? `من ${esc(n.source)}` : ''].filter(Boolean).join(' · ');
+  }
   return '';
 }
 

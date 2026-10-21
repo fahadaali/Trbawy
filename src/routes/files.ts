@@ -10,7 +10,7 @@ import {
   type CouncilScope, type FileAccess,
 } from '../permissions';
 import {
-  MAX_FILE_BYTES, extOf, categoryOf, mimeFor, inlineAllowed, newFileKey, dropObject,
+  MAX_FILE_BYTES, MAX_LARGE_FILE_BYTES, UPLOAD_PART_BYTES, extOf, categoryOf, mimeFor, inlineAllowed, newFileKey, dropObject,
   logFileEvent, visibilityClause, canOpenArchive, folderPath, folderTreeIds, isDescendant,
   getFolder, tagsFor, setTags, type FolderRow,
 } from '../lib/filestore';
@@ -21,6 +21,7 @@ app.use('*', requireAuth, requirePasswordChanged);
 
 const ACCESS_LEVELS: FileAccess[] = ['public', 'council', 'private'];
 const NAME_MAX = 160;
+const FILES_PAGE = 1000;
 const DENY = (c: any, msg = 'لا تملك صلاحية') => c.json({ error: msg }, 403);
 
 /** نصّ مقبول: بلا محارف تحكّم، بفراغ واحد، ومحدود الطول. */
@@ -80,6 +81,7 @@ app.get('/meta', async (c) => {
     tags, councils, years,
     current_year: settings.current_academic_year || null,
     max_bytes: MAX_FILE_BYTES,
+    max_large_bytes: MAX_LARGE_FILE_BYTES,
     stats: { files: stats?.n || 0, bytes: stats?.bytes || 0 },
     perms: {
       add: can(u, 'files.add'), edit: can(u, 'files.edit'),
@@ -143,6 +145,8 @@ app.get('/', async (c) => {
   const trash = c.req.query('trash') === '1';
   const folderId = Number(c.req.query('folder')) || null;
   const searching = !!(q || tag || year || type);
+  // الملفات صفحاتٌ من ألف — مجلدٌ استُورد من أرشيفٍ كبير قد يفوقها، فتُطلب التالية بإزاحتها
+  const offset = Math.max(0, Number(c.req.query('offset')) || 0);
 
   // المجلد الحالي: لا يُفتح إلا لمن يراه
   let folder: FolderRow | null = null;
@@ -178,7 +182,7 @@ app.get('/', async (c) => {
        LEFT JOIN councils cl ON cl.id = d.council_id
        LEFT JOIN users us ON us.id = d.created_by
       WHERE ${dWhere.join(' AND ')}
-      ORDER BY d.name LIMIT 500`,
+      ORDER BY d.name LIMIT 2000`,
   ).bind(...dBinds).all<any>();
 
   // ---- الملفات ----
@@ -202,8 +206,8 @@ app.get('/', async (c) => {
        LEFT JOIN users us ON us.id = f.uploaded_by
        LEFT JOIN file_folders d ON d.id = f.folder_id
       WHERE ${fWhere.join(' AND ')}
-      ORDER BY f.name LIMIT 1000`,
-  ).bind(...fBinds).all<any>();
+      ORDER BY f.name, f.id LIMIT ${FILES_PAGE} OFFSET ?`,
+  ).bind(...fBinds, offset).all<any>();
 
   const fileRows = files.results
     .map((r: any) => ({ ...r, category: categoryOf(r.ext || extOf(r.name)) }))
@@ -232,6 +236,7 @@ app.get('/', async (c) => {
       ? canWriteFileNode(u, folder, 'add', scopes, { kind: 'folder' })
       : can(u, 'files.add'),
     searching,
+    more_files: files.results.length === FILES_PAGE,
   });
 });
 
@@ -477,6 +482,242 @@ app.put('/upload', async (c) => {
   await logFileEvent(c.env, { entityType: 'file', entityId: id, action: 'upload', actorId: u.id, newValue: { name, size: body.byteLength } });
   await audit(c.env, { userId: u.id, action: 'upload_file', entityType: 'file', entityId: id, newValue: { name, size: body.byteLength, folder_id: folder?.id ?? null } });
   return c.json({ id, name, size: body.byteLength, category: categoryOf(ext) }, 201);
+});
+
+// ============================================================
+// استيراد مجلد كامل (أرشيف zip من قوقل درايف أو مجلد من الجهاز)
+// ============================================================
+// الأرشيف يُفكّ في المتصفح ملفًا ملفًا، فلا يمرّ كاملًا عبر الـWorker مهما كبر. والخادم
+// يبني له شجرة المجلدات دفعةً واحدة، ثم تُرفع الملفات بمسار الرفع المعتاد (والكبيرة
+// منها مجزّأة). وإعادة استيراد الأرشيف نفسه تدمج فيه ولا تكرّره: المجلد القائم بالاسم
+// نفسه تحت الأب نفسه يُعاد استخدامه، والملف القائم بالاسم نفسه يُتخطّى إن طُلب ذلك.
+
+const MAX_IMPORT_PATHS = 2000;
+const MAX_IMPORT_DEPTH = 20;
+
+/**
+ * يُنشئ ما نقص من مسارات المجلدات تحت مجلدٍ هدف (أو الجذر) ويُرجع معرّف كل مسار.
+ * المسار أسماءٌ مفصولة بـ«/» نسبةً إلى الهدف. والمجلدات الجديدة ترث نطاق الهدف.
+ */
+app.post('/folders/ensure-paths', async (c) => {
+  const { u, scopes } = await ctxOf(c);
+  const b = await c.req.json().catch(() => ({}));
+  const paths: string[] = Array.isArray(b.paths) ? b.paths.map((p: unknown) => String(p ?? '')) : [];
+  if (!paths.length) return c.json({ map: {} });
+  if (paths.length > MAX_IMPORT_PATHS) return c.json({ error: `أكثر من ${MAX_IMPORT_PATHS} مجلد في طلب واحد` }, 400);
+
+  const target = b.parent_id ? await getFolder(c.env, Number(b.parent_id)) : null;
+  if (b.parent_id && (!target || target.deleted_at)) return c.json({ error: 'المجلد الهدف غير موجود' }, 404);
+  const scope = resolveAccess(target, b, u);
+  if (scope.access === 'council' && !scope.council_id) return c.json({ error: 'اختر المجلس' }, 400);
+  if (!canWriteFileNode(u, scope as any, 'add', scopes, { kind: 'folder' })) return DENY(c, 'لا تملك صلاحية الإنشاء هنا');
+  const year = cleanText(b.academic_year, 20) || target?.academic_year || null;
+
+  // المسارات مقسّمة أسماءً نظيفة، ومرتّبة بالعمق فيُنشأ الأب قبل ابنه
+  const split = [...new Set(paths)]
+    .map((p) => ({ raw: p, parts: p.split('/').map(cleanName).filter(Boolean) }))
+    .filter((p) => p.parts.length);
+  if (split.some((p) => p.parts.length > MAX_IMPORT_DEPTH))
+    return c.json({ error: `عمق المجلدات يتجاوز ${MAX_IMPORT_DEPTH} مستوى` }, 400);
+  const maxDepth = Math.max(0, ...split.map((p) => p.parts.length));
+
+  // أبناء كل أب بأسمائهم — يُقرأ مرة لكل أب، والمحذوف في السلة لا يُعاد استخدامه
+  const children = new Map<string, Map<string, number>>();
+  const childrenOf = async (parentId: number | null) => {
+    const k = String(parentId ?? 'root');
+    let m = children.get(k);
+    if (m) return m;
+    m = new Map();
+    const rows = (await c.env.DB.prepare(
+      `SELECT id, name, access, council_id, owner_id FROM file_folders
+        WHERE ${parentId == null ? 'parent_id IS NULL' : 'parent_id = ?'} AND deleted_at IS NULL`,
+    ).bind(...(parentId == null ? [] : [parentId])).all<any>()).results;
+    // في الجذر لا يُدمج إلا في مجلدٍ بالنطاق نفسه — فلا يقع ملفٌ عام في مجلدٍ خاصٍّ بغيره
+    for (const r of rows) {
+      if (parentId == null && (r.access !== scope.access || r.council_id !== scope.council_id
+        || (r.access === 'private' && r.owner_id !== u.id))) continue;
+      if (!m.has(r.name)) m.set(r.name, r.id);
+    }
+    children.set(k, m);
+    return m;
+  };
+
+  const idOf = new Map<string, number>(); // المسار النظيف ← المعرّف
+  let created = 0;
+  for (let depth = 1; depth <= maxDepth; depth++) {
+    const level = new Map<string, { parentId: number | null; name: string }>();
+    for (const p of split) {
+      if (p.parts.length < depth) continue;
+      const key = p.parts.slice(0, depth).join('/');
+      if (idOf.has(key) || level.has(key)) continue;
+      const parentId = depth === 1 ? (target?.id ?? null) : idOf.get(p.parts.slice(0, depth - 1).join('/'))!;
+      const name = p.parts[depth - 1];
+      const existing = (await childrenOf(parentId)).get(name);
+      if (existing) idOf.set(key, existing);
+      else level.set(key, { parentId, name });
+    }
+    const pending = [...level.entries()];
+    for (let i = 0; i < pending.length; i += 50) {
+      const chunk = pending.slice(i, i + 50);
+      const res = await c.env.DB.batch(chunk.map(([, f]) => c.env.DB.prepare(
+        `INSERT INTO file_folders (name, parent_id, access, council_id, owner_id, academic_year, created_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(f.name, f.parentId, scope.access, scope.council_id, scope.owner_id, year, u.id)));
+      const events: D1PreparedStatement[] = [];
+      chunk.forEach(([key, f], j) => {
+        const id = Number(res[j].meta.last_row_id);
+        idOf.set(key, id);
+        (children.get(String(f.parentId ?? 'root')) || new Map()).set(f.name, id);
+        events.push(c.env.DB.prepare(
+          `INSERT INTO file_events (entity_type, entity_id, action, actor_id, new_value)
+           VALUES ('folder', ?, 'import', ?, ?)`,
+        ).bind(id, u.id, JSON.stringify({ name: f.name, access: scope.access })));
+      });
+      await c.env.DB.batch(events);
+      created += chunk.length;
+    }
+  }
+
+  const map: Record<string, number> = {};
+  for (const p of split) map[p.raw] = idOf.get(p.parts.join('/'))!;
+  return c.json({ map, created });
+});
+
+/** أسماء الملفات القائمة في مجلدات — لتخطّي الموجود عند استئناف استيرادٍ انقطع. */
+app.post('/existing-names', async (c) => {
+  const { u, scopes } = await ctxOf(c);
+  const b = await c.req.json().catch(() => ({}));
+  const ids: (number | null)[] = (Array.isArray(b.folder_ids) ? b.folder_ids : [])
+    .slice(0, MAX_IMPORT_PATHS + 1).map((x: unknown) => (x == null || x === 0 ? null : Number(x)));
+  const out: Record<string, string[]> = {};
+  const vis = visibilityClause(u, scopes, 'f');
+  for (const id of [...new Set(ids)]) {
+    const rows = (await c.env.DB.prepare(
+      `SELECT f.name FROM files f
+        WHERE ${id == null ? 'f.folder_id IS NULL' : 'f.folder_id = ?'} AND f.deleted_at IS NULL AND ${vis.sql}`,
+    ).bind(...(id == null ? [] : [id]), ...vis.binds).all<{ name: string }>()).results;
+    out[String(id ?? 0)] = rows.map((r) => r.name);
+  }
+  return c.json({ names: out });
+});
+
+/** سطرٌ واحد في سجل التدقيق يلخّص الاستيراد كله — بدل سطرٍ لكل ملفٍ من آلاف. */
+app.post('/import-log', async (c) => {
+  const u = c.get('user');
+  if (!can(u, 'files.add')) return DENY(c);
+  const b = await c.req.json().catch(() => ({}));
+  const n = (v: unknown) => Math.max(0, Math.floor(Number(v) || 0));
+  const summary = {
+    source: cleanText(b.source, 300), folders: n(b.folders), files: n(b.files),
+    bytes: n(b.bytes), skipped: n(b.skipped), failed: n(b.failed),
+  };
+  const folderId = Number(b.folder_id) || null;
+  if (folderId) await logFileEvent(c.env, { entityType: 'folder', entityId: folderId, action: 'import', actorId: u.id, newValue: summary });
+  await audit(c.env, { userId: u.id, action: 'import_zip_archive', entityType: 'file_folder', entityId: folderId ?? undefined, newValue: summary });
+  return c.json({ ok: true });
+});
+
+// ============================================================
+// الرفع المجزّأ للملفات الكبيرة (R2 multipart)
+// ============================================================
+// بدءٌ يقرّر الصلاحية والوجهة ويحفظهما، ثم قطعٌ تُرفع كلٌّ في طلب، ثم إتمامٌ يسجّل الملف.
+// فلا يمرّ الملف كاملًا عبر الـWorker، ولا يُكمل رفعًا إلا من بدأه.
+
+app.post('/upload/multipart', async (c) => {
+  const { u, scopes } = await ctxOf(c);
+  const b = await c.req.json().catch(() => ({}));
+  const name = cleanName(b.name) || 'ملف';
+  const size = Number(b.size) || 0;
+  if (size <= 0) return c.json({ error: 'الملف فارغ' }, 400);
+  if (size > MAX_LARGE_FILE_BYTES)
+    return c.json({ error: `حجم الملف يتجاوز الحد (${MAX_LARGE_FILE_BYTES / 1073741824} ج.ب)` }, 413);
+
+  const folderId = Number(b.folder) || null;
+  const folder = folderId ? await getFolder(c.env, folderId) : null;
+  if (folderId && (!folder || folder.deleted_at)) return c.json({ error: 'المجلد غير موجود' }, 404);
+  const scope = resolveAccess(folder, b, u);
+  if (scope.access === 'council' && !scope.council_id) return c.json({ error: 'اختر المجلس' }, 400);
+  if (!canWriteFileNode(u, scope as any, 'add', scopes, { kind: folder ? 'folder' : 'file' })) return DENY(c, 'لا تملك صلاحية الرفع هنا');
+
+  const key = newFileKey(name);
+  const mime = mimeFor(extOf(name), b.type);
+  const mp = await c.env.FILES.createMultipartUpload(key, { httpMetadata: { contentType: mime } });
+  await c.env.DB.prepare(
+    `INSERT INTO file_uploads (upload_id, r2_key, name, size, folder_id, access, council_id, owner_id, academic_year, user_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(mp.uploadId, key, name, size, folder?.id ?? null, scope.access, scope.council_id, scope.owner_id,
+    cleanText(b.year, 20) || folder?.academic_year || null, u.id).run();
+  return c.json({ upload_id: mp.uploadId, part_bytes: UPLOAD_PART_BYTES }, 201);
+});
+
+async function ownUpload(c: any, uploadId: string) {
+  const row = await c.env.DB.prepare('SELECT * FROM file_uploads WHERE upload_id = ?').bind(uploadId).first();
+  return row && row.user_id === c.get('user').id ? row : null;
+}
+
+app.put('/upload/multipart/:uploadId/:part', async (c) => {
+  const row: any = await ownUpload(c, c.req.param('uploadId'));
+  if (!row) return c.json({ error: 'عملية الرفع غير موجودة' }, 404);
+  const part = Number(c.req.param('part'));
+  if (!Number.isInteger(part) || part < 1 || part > 10000) return c.json({ error: 'رقم القطعة غير صالح' }, 400);
+  const declared = Number(c.req.header('content-length') || 0);
+  if (declared > UPLOAD_PART_BYTES * 2) return c.json({ error: 'القطعة أكبر من المسموح' }, 413);
+  const body = await c.req.arrayBuffer();
+  if (!body.byteLength || body.byteLength > UPLOAD_PART_BYTES * 2) return c.json({ error: 'القطعة فارغة أو أكبر من المسموح' }, 400);
+  const mp = c.env.FILES.resumeMultipartUpload(row.r2_key, row.upload_id);
+  const up = await mp.uploadPart(part, body);
+  return c.json({ part: up.partNumber, etag: up.etag });
+});
+
+app.post('/upload/multipart/:uploadId/complete', async (c) => {
+  const u = c.get('user');
+  const row: any = await ownUpload(c, c.req.param('uploadId'));
+  if (!row) return c.json({ error: 'عملية الرفع غير موجودة' }, 404);
+  const b = await c.req.json().catch(() => ({}));
+  const parts = (Array.isArray(b.parts) ? b.parts : [])
+    .map((p: any) => ({ partNumber: Number(p.part), etag: String(p.etag || '') }))
+    .filter((p: any) => p.partNumber > 0 && p.etag)
+    .sort((x: any, y: any) => x.partNumber - y.partNumber);
+  if (!parts.length) return c.json({ error: 'لا قطع مرفوعة' }, 400);
+
+  const mp = c.env.FILES.resumeMultipartUpload(row.r2_key, row.upload_id);
+  const obj = await mp.complete(parts);
+  // الحجم الفعلي من التخزين لا مما أعلنه المتصفح — وما جاوز الحد يُمحى
+  if (obj.size > MAX_LARGE_FILE_BYTES || obj.size !== row.size) {
+    await dropObject(c.env, row.r2_key);
+    await c.env.DB.prepare('DELETE FROM file_uploads WHERE upload_id = ?').bind(row.upload_id).run();
+    return c.json({ error: 'حجم الملف المرفوع لا يطابق المُعلَن — أعد المحاولة' }, 400);
+  }
+
+  const ext = extOf(row.name);
+  let res;
+  try {
+    res = await c.env.DB.prepare(
+      `INSERT INTO files (folder_id, name, r2_key, mime, ext, size, access, council_id, owner_id,
+                          academic_year, description, uploaded_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(row.folder_id, row.name, row.r2_key, mimeFor(ext, obj.httpMetadata?.contentType), ext, obj.size,
+      row.access, row.council_id, row.owner_id, row.academic_year, cleanText(b.description, 500) || null, u.id).run();
+  } catch (e) {
+    await dropObject(c.env, row.r2_key);
+    throw e;
+  }
+  await c.env.DB.prepare('DELETE FROM file_uploads WHERE upload_id = ?').bind(row.upload_id).run();
+
+  const id = Number(res.meta.last_row_id);
+  const tags = (Array.isArray(b.tags) ? b.tags : []).map(Number).filter(Boolean);
+  if (tags.length) await setTags(c.env, 'file', id, tags);
+  await logFileEvent(c.env, { entityType: 'file', entityId: id, action: 'upload', actorId: u.id, newValue: { name: row.name, size: obj.size } });
+  await audit(c.env, { userId: u.id, action: 'upload_file', entityType: 'file', entityId: id, newValue: { name: row.name, size: obj.size, folder_id: row.folder_id } });
+  return c.json({ id, name: row.name, size: obj.size, category: categoryOf(ext) }, 201);
+});
+
+app.delete('/upload/multipart/:uploadId', async (c) => {
+  const row: any = await ownUpload(c, c.req.param('uploadId'));
+  if (!row) return c.json({ ok: true });
+  try { await c.env.FILES.resumeMultipartUpload(row.r2_key, row.upload_id).abort(); } catch { /* انتهت أو أُلغيت */ }
+  await c.env.DB.prepare('DELETE FROM file_uploads WHERE upload_id = ?').bind(row.upload_id).run();
+  return c.json({ ok: true });
 });
 
 /** استبدال محتوى ملف قائم — الإصدار يعلو، ويُسجَّل الحدث، وتُمحى النسخة السابقة. */

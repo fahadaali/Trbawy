@@ -114,7 +114,8 @@ function renderFinBar() {
     <label class="fin-dt">إلى <input type="date" id="fTo" value="${esc(f.to)}" /></label>
     <input id="fQ" placeholder="بحث في البيان…" value="${esc(f.q)}" />
     <div class="spacer"></div>
-    ${canAdd ? `<button class="btn btn-sm" id="fNew">${icon('addbox', 16)} حركة جديدة</button>` : ''}`;
+    ${canAdd ? `<button class="btn btn-ghost btn-sm" id="fImport">${icon('upload', 16)} استيراد من قالب</button>
+      <button class="btn btn-sm" id="fNew">${icon('addbox', 16)} حركة جديدة</button>` : ''}`;
 
   const pull = () => {
     f.council_id = document.getElementById('fCouncil').value;
@@ -127,7 +128,10 @@ function renderFinBar() {
   ['fCouncil', 'fKind', 'fFrom', 'fTo'].forEach((id) => { document.getElementById(id).onchange = pull; });
   onEnter('fQ', pull);
   document.getElementById('fQ').onblur = pull;
-  if (canAdd) document.getElementById('fNew').onclick = () => openEntryForm(null);
+  if (canAdd) {
+    document.getElementById('fNew').onclick = () => openEntryForm(null);
+    document.getElementById('fImport').onclick = () => importFinanceEntries();
+  }
 }
 
 async function loadEntries() {
@@ -631,4 +635,99 @@ async function custodySpendDialog(c) {
         : '<p class="muted mt">لم يُصرف من هذه العهدة شيء بعد.</p>'}`,
     buttons: [{ label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() }],
   });
+}
+
+// ============================================================
+// الاستيراد من قالب (Excel/CSV)
+// ============================================================
+// القالب يُنزَّل ويُعبَّأ ثم يُرفع للمعاينة: كل صفٍّ يظهر بما فُهم منه وبسبب رفضه إن
+// رُفض، ولا يُحفظ إلا الصحيح. والمجلس والنوع الافتراضيان يكمّلان ملفًا خلا من عمودهما.
+function importFinanceEntries() {
+  const councils = writableCouncils();
+  const { overlay } = openModal({
+    title: 'استيراد حركات مالية من قالب',
+    body: `<p class="muted">حمّل القالب وعبّئه — أو ارفع جدولك المالي الجاهز إن كانت ترويسته قريبة منه —
+        ثم عايِن الصفوف قبل الحفظ. صفوف القالب تمثيلية تُحذف ويُكتب مكانها حركاتك.</p>
+      <div class="row"><a class="btn btn-ghost btn-sm" href="/api/finance/template">${icon('download', 16)} تنزيل القالب</a></div>
+      <div class="row-2 mt">
+        <div class="field"><label>المجلس إن خلا الملف من عموده</label><select id="fiCouncil">
+          <option value="">— من عمود «المجلس» في الملف —</option>
+          ${councils.map((c) => `<option value="${c.id}" ${councils.length === 1 ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
+        </select></div>
+        <div class="field"><label>النوع إن خلا الملف من عموده</label><select id="fiKind">
+          <option value="">— من عمود «النوع» في الملف —</option>
+          ${Object.entries(FIN_KIND_AR).map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}
+        </select></div>
+      </div>
+      <input type="file" id="fiFile" accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+      <p class="hint">الإلزامي: <b>البيان</b> · <b>التاريخ</b> · <b>المبلغ</b> (أو عمودا <b>الوارد</b> و<b>المنصرف</b>).
+        والاختياري: المجلس · النوع (صرف/إيراد) · المسؤول · ملاحظة.<br>
+        التاريخ ميلادي أو هجري: <span dir="ltr">2025-09-14</span> · <span dir="ltr">14/09/2025</span> · <span dir="ltr">1447/03/22</span>.
+        والمبلغ يُقبل بالأرقام العربية وبعملته «ر.س»، والسالب يُعدّ صرفًا.<br>
+        المسؤول يُكتب باسمه كما هو في المنصة، ويجب أن يكون من أعضاء مجلس الحركة.<br>
+        <b>تنبيه:</b> الحركة المسجّلة مسبقًا (المجلس والتاريخ والمبلغ والبيان نفسها) تُتخطّى، والربط بالعُهد يكون بعد الاستيراد من الحركة نفسها.</p>
+      <div id="fiPreview" class="mt"></div>`,
+    buttons: [
+      { label: 'حفظ الصفوف الصحيحة', class: '', onClick: async (cl, ov) => {
+        if (!ov._csv) return toast('اختر ملفًا وعايِنه أولًا', 'err');
+        if (!ov._valid) return toast('لا توجد صفوف صحيحة للحفظ', 'err');
+        try {
+          const r = await API.post('/finance/import?commit=1', { csv: ov._csv, ...defaults() });
+          cl();
+          toast(`تم استيراد ${arNum(r.inserted)} حركة${r.skipped ? ` — وتُخطّي ${arNum(r.skipped)}` : ''}`, 'ok');
+          loadEntries();
+        } catch (err) { toast(err.message, 'err'); }
+      }},
+      { label: 'إغلاق', class: 'btn-ghost', onClick: (cl) => cl() },
+    ],
+  });
+
+  const box = overlay.querySelector('#fiPreview');
+  const defaults = () => ({
+    default_council_id: overlay.querySelector('#fiCouncil').value || null,
+    default_kind: overlay.querySelector('#fiKind').value || null,
+  });
+  const fail = (msg) => { box.innerHTML = `<div class="form-error">${esc(msg)}</div>`; overlay._valid = 0; };
+
+  const preview = async () => {
+    if (!overlay._csv) return;
+    box.innerHTML = '<div class="spinner"></div>';
+    try {
+      const p = await API.post('/finance/import', { csv: overlay._csv, ...defaults() });
+      overlay._valid = p.valid;
+      const ok = p.report.filter((r) => !r.errors.length);
+      const tot = (k) => ok.filter((r) => r.kind === k).reduce((s, r) => s + (r.amount || 0), 0);
+      box.innerHTML = `
+        <div class="row">
+          <span class="tag tag-green">صحيح: ${arNum(p.valid)}</span>
+          <span class="tag tag-red">مرفوض: ${arNum(p.invalid)}</span>
+          <span class="tag tag-gray">الإجمالي: ${arNum(p.total)}</span>
+          <span class="tag tag-green">إيراد ${riyal(tot('income'))}</span>
+          <span class="tag tag-red">صرف ${riyal(tot('expense'))}</span>
+        </div>
+        <div class="t-scroll mt"><table class="tbl">
+          <thead><tr><th>الصف</th><th>المجلس</th><th>النوع</th><th>البيان</th><th>المبلغ</th><th>التاريخ</th><th>المسؤول</th><th>الحالة</th></tr></thead>
+          <tbody>${p.report.map((r) => `<tr style="${r.errors.length ? 'background:#fdecea' : ''}">
+            <td>${arNum(r.row)}</td>
+            <td>${esc(r.council_name || '—')}</td>
+            <td>${r.kind ? `<span class="tag ${FIN_KIND_COLOR[r.kind]}">${FIN_KIND_AR[r.kind]}</span>` : '—'}</td>
+            <td>${esc(r.statement || '—')}</td>
+            <td>${r.amount != null ? riyal(r.amount) : '—'}</td>
+            <td>${r.entry_date ? fmtDate(r.entry_date) : '—'}</td>
+            <td>${esc(r.owner_name || '—')}</td>
+            <td class="${r.errors.length ? 'tag-red' : 'ok-cell'}">${r.errors.map(esc).join('، ') || '✓'}</td>
+          </tr>`).join('')}</tbody>
+        </table></div>`;
+    } catch (err) { fail(err.message); }
+  };
+
+  overlay.querySelector('#fiFile').onchange = async (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    try { overlay._csv = await fileToCsvRich(f); }
+    catch (err) { overlay._csv = null; return fail(err.message); }
+    preview();
+  };
+  overlay.querySelector('#fiCouncil').onchange = preview;
+  overlay.querySelector('#fiKind').onchange = preview;
 }

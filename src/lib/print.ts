@@ -496,7 +496,7 @@ async function meetingContentBlock(env: Env, m: any, origin: string, brk: boolea
     <h1>محضر اجتماع ${finalized ? '' : '(مسودة)'}</h1>
     <div class="center"><span class="subnum">${esc(m.display_number)}</span></div>
     ${m.title ? `<p class="center" style="font-weight:700;margin:6px 0 0">${esc(m.title)}</p>` : ''}
-    ${m.parent_meeting_id ? `<p class="center muted">محضر تصويب/ملحق</p>` : ''}
+    ${m.parent_meeting_id ? `<p class="center muted">${m.parent_link === 'annex' ? 'محضر تابع — أُعدّ خارج المنصة واستُورد منها، وأصله مرفق' : 'محضر تصويب/ملحق'}</p>` : ''}
     ${finalized
       ? `<div class="banner banner-ok">✔ محضر معتمد ومقفل — حرّره: ${writer ? esc(writer.name) : '—'} · اعتمده: ${approver ? esc(approver.name) : '—'}</div>`
       : `<div class="banner banner-warn">مسودة غير معتمدة — للاطلاع فقط</div>`}

@@ -59,3 +59,28 @@ export async function aiTranscribe(env: Env, audio: ArrayBuffer): Promise<string
   if (!text) throw new Error('تعذّر تفريغ التسجيل');
   return text;
 }
+
+/**
+ * نصّ ملف PDF عبر محوّل المستندات في Workers AI (toMarkdown).
+ * يُطبَّع النص بـNFKC: ملفات PDF العربية كثيرًا ما تحفظ الحروف بأشكال العرض (ﺍﻟﻤﺠﻠﺲ)
+ * فتبدو للنموذج رموزًا غريبة، والتطبيع يعيدها حروفًا عادية. وملفٌّ ممسوحٌ ضوئيًا (صورٌ
+ * بلا طبقة نص) يعود فارغًا — فيُبلَّغ صاحبه بذلك صراحةً بدل تحليلٍ لا شيء فيه.
+ */
+export async function aiPdfText(env: Env, name: string, bytes: ArrayBuffer): Promise<string> {
+  if (!aiEnabled(env)) throw new AiUnavailable();
+  if (typeof env.AI!.toMarkdown !== 'function')
+    throw new Error('تحويل ملفات PDF غير متاح على هذا النشر — حدّث ربط Workers AI');
+  const [res] = await env.AI!.toMarkdown([{ name: name || 'minutes.pdf', blob: new Blob([bytes], { type: 'application/pdf' }) }]);
+  if (!res || res.format === 'error') throw new Error('تعذّر قراءة ملف PDF' + (res?.error ? ` (${res.error})` : ''));
+  const text = String(res.data || '')
+    .normalize('NFKC')
+    .replace(/ـ+/g, '')                 // التطويل
+    .replace(/[​-‏‪-‮]/g, '') // محارف الاتجاه الخفية
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  // ما بقي بعد حذف علامات Markdown والترقيم: إن خلا من الحروف فالملف صورٌ لا نصّ
+  if (text.replace(/[#*|\-_\s\d.:()[\]]/g, '').length < 20)
+    throw new Error('الملف صورٌ ممسوحة ضوئيًا لا تحوي نصًّا قابلًا للاستخراج — الصق نص المحضر بدلًا منه');
+  return text;
+}

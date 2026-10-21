@@ -1270,3 +1270,11 @@ table.doc-table td { border: 1px solid var(--border); padding: 7px 10px; vertica
   .fin-cards .stat .v { font-size: 20px; }
   .fin-prev-stage iframe { height: 56vh; }
 }
+
+/* مراجعة المحضر المستورد — عناصر التحكّم داخل الصفوف والبطاقات (خارج .field) */
+.mi-review .row select, .mi-review .row input:not([type=checkbox]), .mi-review .card textarea {
+  padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--surface); color: inherit; font: inherit;
+}
+.mi-review .card textarea { width: 100%; resize: vertical; }
+.mi-review h4 { margin-bottom: 8px; }
